@@ -1,6 +1,6 @@
-from tools import fetch_flights
+from tools.tools import fetch_flights
 
 if __name__ == "__main__":
-    flights = fetch_flights("London","Paris")
+    flights = fetch_flights.invoke({"origin": "London", "destination": "Paris"})
     for flight in flights:
         print(flight)
