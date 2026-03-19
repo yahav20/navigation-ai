@@ -1,4 +1,4 @@
-# Agentic Travel Planner
+# Agentic Travel Planner - Atlas AI
 
 A smart autonomous travel planning agent built with **Gemini 2.5 Flash** and **LangChain/LangGraph**, developed as part of the Software Engineering Project Workshop (83538-01) at Bar-Ilan University.
 
