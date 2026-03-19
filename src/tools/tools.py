@@ -2,7 +2,7 @@ from langchain_core.tools import tool
 import json
 import os
 
-TRAVEL_DB = 'travel_db.json'
+TRAVEL_DB = './data/travel_db.json'
 
 def load_travel_db():
     """
@@ -78,11 +78,11 @@ def calculate_trip_cost(flight_price: float, hotel_price_per_night: float, night
     
     return f"The total trip cost, including a 10% service fee, is ${total_cost:.2f}."
 
-if __name__ == "__main__":
+# if __name__ == "__main__":
     # Example usage
     
     # origin_city = "New York"
-    # destination_city = "Tel Aviv"
+    # destination_city = "London"
     # available_flights = fetch_flights.invoke({"origin": origin_city, "destination": destination_city})
     # # print(f"Available flights from {origin_city} to {destination_city}:")
     # for flight in available_flights:
