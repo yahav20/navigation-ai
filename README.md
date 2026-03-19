@@ -111,25 +111,6 @@ The agent uses three core tools defined in `tools.py` with the `@tool` decorator
 - **Empty results**: Return a clear plain-text message (e.g., `"No available hotels found in Paris for the given criteria"`) rather than an empty list, so the agent can reason about it.
 - **Docstrings**: Must be in English and accurately describe the tool's behavior.
 
-## Course Structure
-
-The project is developed across 14 sessions in 4 parts:
-
-1. **Part A (Sessions 1–4)**: Introduction to Agentic AI, environment setup, LangGraph basics, tool orchestration, memory management
-2. **Part B (Sessions 5–7)**: Agentic Design Patterns — Plan & Execute, Reflection, Human-in-the-Loop
-3. **Part C (Sessions 8–10)**: Multi-Agent systems — expert agent collaboration, real-world data integration
-4. **Part D (Sessions 10–14)**: Security, Red Teaming, final polish and project presentation
-
-## Grading
-
-| Component | Weight |
-|---|---|
-| Attendance | 15% |
-| Teamwork | 10% |
-| Weekly demos & presentations | 45% |
-| Final project version | 35% |
-
 ## Resources
-
 - [LangChain Documentation](https://docs.langchain.com/)
 - Antonio Gullí, *Agentic Design Pattern - A Hands-On Guide to Building Intelligent Systems*, Springer 2025
