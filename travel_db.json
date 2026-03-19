@@ -1,0 +1,51 @@
+{
+  "flights": [
+    {
+      "origin": "London",
+      "destination": "Paris",
+      "airline": "AirFrance",
+      "price": 120,
+      "flight_number": "AF123",
+      "availability": "Available"
+    },
+    {
+      "origin": "New York",
+      "destination": "London",
+      "airline": "Virgin Atlantic",
+      "price": 550,
+      "flight_number": "VS001",
+      "availability": "Limited"
+    },
+    {
+      "origin": "London",
+      "destination": "Tokyo",
+      "airline": "JAL",
+      "price": 950,
+      "flight_number": "JL402",
+      "availability": "Available"
+    }
+  ],
+  "hotels": [
+    {
+      "city": "Paris",
+      "name": "Hotel Ritz",
+      "price_per_night": 450,
+      "stars": 5,
+      "amenities": ["Spa", "Fine Dining"]
+    },
+    {
+      "city": "Paris",
+      "name": "EcoStay Paris",
+      "price_per_night": 85,
+      "stars": 2,
+      "amenities": ["Free WiFi"]
+    },
+    {
+      "city": "London",
+      "name": "The Savoy",
+      "price_per_night": 600,
+      "stars": 5,
+      "amenities": ["Butler Service", "River View"]
+    }
+  ]
+}
