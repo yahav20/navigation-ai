@@ -1,18 +1,7 @@
 from langchain_core.tools import tool
+from utils.dataManagement import load_travel_db
 import json
-import os
 
-TRAVEL_DB = './data/travel_db.json'
-
-def load_travel_db():
-    """
-    Load the travel database from a JSON file.
-    """
-    if not os.path.exists(TRAVEL_DB):
-        return None
-    with open(TRAVEL_DB, 'r') as file:
-        return json.load(file)
-    
 @tool
 def fetch_flights(origin: str, destination: str):
     """
