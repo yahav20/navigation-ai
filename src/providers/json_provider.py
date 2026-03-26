@@ -84,3 +84,47 @@ class JSONDataProvider(BaseDataProvider):
             return [{"message": f"No available hotels in {city}."}]
         
         return hotels
+
+    def fetch_activities(self, city: str) -> list:
+        """
+        Fetch available activities in a city.
+        """
+        if not self.data or "activities" not in self.data:
+            return [{"message": "No available activities in the database."}]
+        
+        activities = []
+        for activity in self.data.get('activities', []):
+            if activity['city'].lower() == city.lower():
+                activities.append(activity)
+                
+        if not activities:
+            return [{"message": f"No available activities found in {city}."}]
+            
+        return activities
+
+    def get_best_time_to_visit(self, city: str) -> dict:
+        """
+        Find the recommended months to visit a specific city.
+        """
+        best_time_data = self.data.get("best_time_to_visit", {})
+        
+        for key, value in best_time_data.items():
+            if key.lower() == city.lower():
+                return value
+                
+        return {"message": f"No recommendations found for {city}."}
+
+    def get_average_weather(self, city: str, season: str) -> dict:
+        """
+        Get the average temperature for a specific city during a specific season.
+        """
+        weather_data = self.data.get("average_weather", {})
+        
+        for key, city_weather in weather_data.items():
+            if key.lower() == city.lower():
+                for s_key, temp in city_weather.items():
+                    if s_key.lower() == season.lower():
+                        return {"season": s_key, "temperature": temp}
+                return {"message": f"No weather data found for season '{season}' in {city}."}
+                
+        return {"message": f"No average weather data found for {city}."}

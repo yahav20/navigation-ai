@@ -48,3 +48,28 @@ def calculate_trip_cost(flight_price: float, hotel_price_per_night: float, night
     total_cost = total_cost * 1.10
     
     return f"The total trip cost, including a 10% service fee, is ${total_cost:.2f}."
+
+@tool
+def fetch_activities(city: str):
+    """
+    Fetch available activities, museums, tours, and attractions for a specific city from the local database.
+    Returns a list of activities including their category, price, duration, operational days, and closed dates.
+    Crucial for building itineraries or checking if a specific venue is open on a given day.
+    """
+    return data_provider.fetch_activities(city)
+
+@tool
+def get_best_time_to_visit(city: str):
+    """
+    Find the recommended months to visit a specific city and the underlying reasons (e.g., weather, festivals).
+    Use this when a user is unsure about when to travel to a destination.
+    """
+    return data_provider.get_best_time_to_visit(city)
+
+@tool
+def get_average_weather(city: str, season: str):
+    """
+    Get the average temperature for a specific city during a specific season.
+    Valid seasons are: 'Spring', 'Summer', 'Autumn', 'Winter'.
+    """
+    return data_provider.get_average_weather(city, season)

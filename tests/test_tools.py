@@ -32,7 +32,7 @@ def test_fetch_hotels_valid_city():
     assert "amenities" in result[0]
     
 def test_fetch_hotels_no_hotels():
-    # Assuming travel_db.json has no hotels in Tokyo
+    # Assuming travel_db.json has no hotels in Hawaii
     result = fetch_hotels.invoke({"city" : "Hawaii"})
     assert isinstance(result, list) 
     assert len(result) == 1
