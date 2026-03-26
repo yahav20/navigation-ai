@@ -3,6 +3,7 @@
 
 # Virtual Environments
 taenv/
+tavenv/
 venv/
 
 # Python Cache
