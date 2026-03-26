@@ -17,11 +17,35 @@
       "availability": "Limited"
     },
     {
+      "origin": "TLV",
+      "destination": "Paris",
+      "airline": "El Al",
+      "price": 350,
+      "flight_number": "LY321",
+      "availability": "Available"
+    },
+    {
+      "origin": "TLV",
+      "destination": "London",
+      "airline": "British Airways",
+      "price": 420,
+      "flight_number": "BA164",
+      "availability": "Limited"
+    },
+    {
       "origin": "London",
       "destination": "Tokyo",
       "airline": "JAL",
-      "price": 950,
+      "price": 890,
       "flight_number": "JL402",
+      "availability": "Available"
+    },
+    {
+      "origin": "TLV",
+      "destination": "Amsterdam",
+      "airline": "KLM",
+      "price": 410,
+      "flight_number": "KL456",
       "availability": "Available"
     }
   ],
@@ -46,6 +70,118 @@
       "price_per_night": 600,
       "stars": 5,
       "amenities": ["Butler Service", "River View"]
+    },
+    {
+      "city": "Tokyo",
+      "name": "Shibuya Capsule",
+      "price_per_night": 45,
+      "stars": 2,
+      "amenities": ["WiFi", "Shared Lounge"]
+    },
+    {
+      "city": "Amsterdam",
+      "name": "Canal Boutique Hotel",
+      "price_per_night": 180,
+      "stars": 4,
+      "amenities": ["Bicycle Rental", "City View"]
     }
-  ]
+  ],
+  "activities": [
+    {
+      "city": "Paris",
+      "name": "Louvre Museum",
+      "category": "Culture",
+      "price": 20,
+      "duration_hours": 3,
+      "operational_days": ["Monday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"],
+      "closed_dates": ["2025-12-25", "2026-01-01", "2026-05-01"]
+    },
+    {
+      "city": "Paris",
+      "name": "Eiffel Tower Tour",
+      "category": "Sightseeing",
+      "price": 35,
+      "duration_hours": 2,
+      "operational_days": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"],
+      "closed_dates": []
+    },
+    {
+      "city": "London",
+      "name": "London Eye",
+      "category": "Sightseeing",
+      "price": 30,
+      "duration_hours": 1.5,
+      "operational_days": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"],
+      "closed_dates": ["2025-12-25"]
+    },
+    {
+      "city": "Tokyo",
+      "name": "Akihabara Gaming Tour",
+      "category": "Entertainment",
+      "price": 50,
+      "duration_hours": 4,
+      "operational_days": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"],
+      "closed_dates": []
+    },
+    {
+      "city": "Amsterdam",
+      "name": "Rijksmuseum",
+      "category": "Culture",
+      "price": 22.5,
+      "duration_hours": 3,
+      "operational_days": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"],
+      "closed_dates": []
+    },
+    {
+      "city": "Amsterdam",
+      "name": "Pure Markt",
+      "category": "Shopping",
+      "price": 0,
+      "duration_hours": 2,
+      "operational_days": ["Sunday"],
+      "closed_dates": ["2025-12-28", "2026-01-04"]
+    }
+  ],
+  "transit_options": [
+    {
+      "city": "Paris",
+      "route": "CDG Airport to City Center",
+      "options": [
+        {"type": "Train (RER B)", "price_eur": 11.45, "duration_mins": 35},
+        {"type": "Taxi", "price_eur": 55, "duration_mins": 45}
+      ]
+    },
+    {
+      "city": "Amsterdam",
+      "route": "AMS Airport to City Center",
+      "options": [
+        {"type": "Direct Train", "price_eur": 5.90, "duration_mins": 15},
+        {"type": "Taxi", "price_eur": 45, "duration_mins": 25}
+      ]
+    }
+  ],
+  "best_time_to_visit": {
+    "Paris": {"months": ["April", "May", "September"], "reason": "Pleasant weather and fewer crowds."},
+    "London": {"months": ["May", "June", "July"], "reason": "Best chance for sunshine and outdoor events."},
+    "Tokyo": {"months": ["March", "April", "November"], "reason": "Cherry blossoms in spring, beautiful autumn foliage."},
+    "Amsterdam": {"months": ["April", "May", "September"], "reason": "Tulip season in spring and mild cycling weather."}
+  },
+  "average_weather": {
+    "Paris": {"Spring": "15°C", "Summer": "25°C", "Autumn": "16°C", "Winter": "5°C"},
+    "London": {"Spring": "12°C", "Summer": "22°C", "Autumn": "14°C", "Winter": "6°C"},
+    "Tokyo": {"Spring": "18°C", "Summer": "30°C", "Autumn": "21°C", "Winter": "8°C"},
+    "Amsterdam": {"Spring": "13°C", "Summer": "22°C", "Autumn": "14°C", "Winter": "4°C"}
+  },
+  "visa_requirements": {
+    "Israel_to_France": "No visa required for tourism up to 90 days",
+    "Israel_to_Japan": "No visa required for tourism up to 90 days",
+    "India_to_France": "Schengen Visa required",
+    "Israel_to_Netherlands": "No visa required for tourism up to 90 days"
+  },
+  "exchange_rates": {
+    "USD_to_ILS": 3.65,
+    "EUR_to_USD": 1.08,
+    "GBP_to_USD": 1.27,
+    "EUR_to_ILS": 3.95
+  }
 }
