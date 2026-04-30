@@ -1,4 +1,4 @@
-from typing import Annotated, Any, Dict, List, TypedDict
+from typing import Annotated, TypedDict
 from langgraph.graph.message import add_messages
 
 class AgentState(TypedDict):
@@ -10,8 +10,4 @@ class AgentState(TypedDict):
     current_city: str
     destination_city: str
     total_budget: float
-    
-    # additional fields
-    # season: str                   
-    # user_preferences: List[str]   
-    # booked_items: Dict[str, Any]  
+    step_count: int  

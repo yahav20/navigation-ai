@@ -2,7 +2,6 @@ from langchain_core.tools import tool
 from providers.json_provider import JSONDataProvider
 from providers.base import BaseDataProvider
 
-
 def create_data_provider(provider_type: str = "json") -> BaseDataProvider:
     """
     Factory method to create a data provider instance.
@@ -73,3 +72,6 @@ def get_average_weather(city: str, season: str):
     Valid seasons are: 'Spring', 'Summer', 'Autumn', 'Winter'.
     """
     return data_provider.get_average_weather(city, season)
+
+
+tools = [fetch_flights, fetch_hotels, calculate_trip_cost, fetch_activities, get_best_time_to_visit, get_average_weather]
