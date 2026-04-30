@@ -33,7 +33,7 @@ def build_graph(provider: str = "google"):
 def run_agent():
     # --- Choose which model provider to run here ---
     # Change to "groq" if Google quota is exceeded, or "google" if you have a valid key
-    CHOSEN_PROVIDER = "groq" 
+    CHOSEN_PROVIDER = "google"  # or "groq"
     
     graph = build_graph(provider=CHOSEN_PROVIDER)
     config = {"configurable": {"thread_id": "student_session_01"}}
