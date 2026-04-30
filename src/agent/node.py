@@ -74,12 +74,16 @@ Extract: current_city, destination_city, budget.
         current_step = state.get("step_count", 0) + 1
         
         system_prompt = f"""You are a helpful travel assistant.
-Current State Information:
-- User is currently in: {state.get('current_city', 'Unknown')}
-- User wants to travel to: {state.get('destination_city', 'Unknown')}
-- User's budget: {state.get('total_budget', 'Unknown')}
+        Current State Information:
+        - User is currently in: {state.get('current_city', 'Unknown')}
+        - User wants to travel to: {state.get('destination_city', 'Unknown')}
+        - User's budget: {state.get('total_budget', 'Unknown')}
 
-If you have this information, you can use it to search for flights or hotels."""
+        CRITICAL INSTRUCTIONS:
+        1. Address the user's specific prompt. 
+        2. Use tools ONLY if you need missing information.
+        3. If you have all the information needed to answer the user, provide a final conversational answer and DO NOT call any more tools.
+        """
 
         messages_to_pass = [{"role": "system", "content": system_prompt}] + state["messages"]
         

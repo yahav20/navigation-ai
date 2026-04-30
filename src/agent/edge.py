@@ -10,7 +10,7 @@ def should_continue(state: AgentState):
     step_count = state.get("step_count", 0)
     
     # Safety Check: Stop after 5 tool invocations in a single turn
-    MAX_STEPS = 5
+    MAX_STEPS = 10
     if step_count >= MAX_STEPS:
         print("--- Agent stopped due to maximum step count. Possible infinite loop. ---")
         return END
