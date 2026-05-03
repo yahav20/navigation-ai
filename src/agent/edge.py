@@ -1,6 +1,11 @@
 from agent.state import AgentState
 from langgraph.graph import END
 
+def after_enrichment(state: AgentState) -> str:
+    if state.get("enrichment_complete", False):
+        return "agent"
+    return END
+
 def should_continue(state: AgentState):
     """
     Determines the next path in the graph based on the model's output.

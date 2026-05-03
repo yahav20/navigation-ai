@@ -108,6 +108,36 @@ Extract: current_city, destination_city, budget.
 
         return updates
 
+    def check_enrichment(state: AgentState):
+        """Check if all required travel info is present; ask follow-up questions if not."""
+        missing = []
+        if not state.get("current_city"):
+            missing.append("origin city")
+        if not state.get("destination_city"):
+            missing.append("destination city")
+        if not state.get("total_budget"):
+            missing.append("travel budget")
+
+        if not missing:
+            return {"enrichment_complete": True}
+
+        missing_list = ", ".join(missing)
+        response = extraction_model.invoke([
+            {
+                "role": "system",
+                "content": (
+                    "You are a friendly travel assistant. "
+                    "The user wants travel help but their request is missing some details. "
+                    "Ask for the missing information in a warm, conversational way. Keep it to 1-2 sentences."
+                ),
+            },
+            {
+                "role": "user",
+                "content": f"Missing information: {missing_list}. Please ask the user for it.",
+            },
+        ])
+        return {"messages": [response], "enrichment_complete": False}
+
     def call_model(state: AgentState):
         """Examines current state and decides whether to trigger a tool or provide answer."""
         current_step = state.get("step_count", 0) + 1
@@ -217,5 +247,4 @@ Extract: current_city, destination_city, budget.
 
         return {"messages": [response]}
         
-    # Return both functions ready for graph execution
-    return extract_metadata, call_model, formatter
+    return extract_metadata, check_enrichment, call_model, formatter

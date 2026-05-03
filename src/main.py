@@ -1,13 +1,13 @@
 import sys
 from langgraph.graph import StateGraph, START, END
 from langgraph.prebuilt import ToolNode
+from langgraph.checkpoint.memory import MemorySaver
 
 from agent.state import AgentState
-from agent.edge import should_continue
+from agent.edge import should_continue, after_enrichment
 from tools.tools import tools
 
-# Note: We are now importing the function that creates the nodes, not the nodes themselves
-from agent.node import create_nodes 
+from agent.node import create_nodes
 
 # --- Choose which model provider to run here ---
 # Change to "groq" if Google quota is exceeded, or "google" if you have a valid key
@@ -18,23 +18,25 @@ def build_graph(provider: str = "google"):
     Builds the graph using the specified model provider ('google' or 'groq').
     """
     # 1. Create the nodes with the chosen model provider
-    extract_metadata_node, call_model_node, formatter = create_nodes(provider)
-    
-    # 2. Build the standard graph
+    extract_metadata_node, enrichment_node, call_model_node, formatter = create_nodes(provider)
+
+    # 2. Build the graph
     builder = StateGraph(AgentState)
 
     builder.add_node("extract_metadata", extract_metadata_node)
+    builder.add_node("enrichment", enrichment_node)
     builder.add_node("agent", call_model_node)
     builder.add_node("tools", ToolNode(tools))
     builder.add_node("formatter", formatter)
 
     builder.add_edge(START, "extract_metadata")
-    builder.add_edge("extract_metadata", "agent")
+    builder.add_edge("extract_metadata", "enrichment")
+    builder.add_conditional_edges("enrichment", after_enrichment, {"agent": "agent", END: END})
     builder.add_conditional_edges("agent", should_continue, {"tools": "tools", "formatter": "formatter"})
     builder.add_edge("tools", "agent")
     builder.add_edge("formatter", END)
-    
-    return builder.compile()
+
+    return builder.compile(checkpointer=MemorySaver())
 
 def run_agent():    
     graph = build_graph(provider=CHOSEN_PROVIDER)
