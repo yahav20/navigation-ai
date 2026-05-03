@@ -13,9 +13,9 @@ def should_continue(state: AgentState):
     MAX_STEPS = 10
     if step_count >= MAX_STEPS:
         print("--- Agent stopped due to maximum step count. Possible infinite loop. ---")
-        return END
+        return "formatter"
         
     if last_message.tool_calls:
         return "tools"
         
-    return END
+    return "formatter"
