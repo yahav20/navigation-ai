@@ -138,4 +138,12 @@ def create_travel_db():
 
 
 if __name__ == "__main__":
+    if os.path.exists(DB_PATH):
+        answer = input(
+            f"WARNING: '{DB_PATH}' already exists and will be wiped.\n"
+            "Are you sure you want to continue? (yes/no): "
+        ).strip().lower()
+        if answer != "yes":
+            print("Aborted. Database was not modified.")
+            raise SystemExit(0)
     create_travel_db()
