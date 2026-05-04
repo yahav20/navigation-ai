@@ -1,16 +1,16 @@
 import pytest
 from unittest.mock import patch
 
-# 1. תיקון נתיב הייבוא - מתאים למבנה הפרויקט שלך
+# 1. Fix import path - matches your project structure
 from tools.tools import search_best_flight_route
 
-# --- טסטים ל-Smart Tool (search_best_flight_route) ---
+# --- Tests for Smart Tool (search_best_flight_route) ---
 
-# 2. תיקון נתיב ה-Patch לכל הטסטים!
+# 2. Fix patch path for all tests!
 @patch("tools.tools.data_provider")
 def test_direct_flights_within_budget(mock_data_provider):
     """
-    תרחיש 1: יש טיסות ישירות שעומדות בתקציב.
+   senario 1: straightforward case where direct flights are available and within the user's budget.
     """
     mock_data_provider.fetch_flights.return_value = [
         {"flight_number": "LY1", "price": 300, "destination_city": "Paris"},
@@ -28,7 +28,8 @@ def test_direct_flights_within_budget(mock_data_provider):
 @patch("tools.tools.data_provider")
 def test_direct_flights_exceed_budget_fallback_to_connecting(mock_data_provider):
     """
-    תרחיש 2: טיסות ישירות יקרות מדי, המערכת מפעילה קונקשיינים אוטומטית.
+   senario 2: direct flights are available but exceed the user's budget, so the tool should automatically search for connecting flights and return those instead.
+   
     """
     mock_data_provider.fetch_flights.return_value = [
         {"flight_number": "LY1", "price": 800, "destination_city": "Paris"}
@@ -48,7 +49,7 @@ def test_direct_flights_exceed_budget_fallback_to_connecting(mock_data_provider)
 @patch("tools.tools.data_provider")
 def test_fallback_to_alternative_cities_direct(mock_data_provider):
     """
-    תרחיש 3: פולבק לעיר אחרת באותה מדינה (טיסות ישירות).
+    scenario 3: fallback to an alternative city in the same country (direct flights).
     """
     mock_data_provider.fetch_flights.return_value = [{
         "message": "No direct flights to Lyon...",
@@ -68,7 +69,7 @@ def test_fallback_to_alternative_cities_direct(mock_data_provider):
 @patch("tools.tools.data_provider")
 def test_no_flights_found_at_all(mock_data_provider):
     """
-    תרחיש 4: כלום לא נמצא.
+    scenario 4: no flights found at all.
     """
     mock_data_provider.fetch_flights.return_value = [{"message": "No flights found"}]
     mock_data_provider.fetch_connecting_flights.return_value = [{"message": "No connecting flights found"}]
@@ -80,20 +81,20 @@ def test_no_flights_found_at_all(mock_data_provider):
 @patch("tools.tools.data_provider")
 def test_no_budget_provided_the_blank_check(mock_data_provider):
     """
-    מקרה קצה 1: המשתמש לא הכניס תקציב (max_budget=None).
-    הכלי אמור להביא לו את כל הטיסות שיש למסד הנתונים להציע, גם אם הן עולות מיליון דולר.
+   _scenario 1: the user did not provide a budget (max_budget=None).
+    the tool should return all flights available in the database, even if they are very expensive.
     """
     mock_data_provider.fetch_flights.return_value = [
         {"flight_number": "VIP1", "price": 10000, "destination_city": "Dubai"},
         {"flight_number": "REG1", "price": 500, "destination_city": "Dubai"}
     ]
     
-    # הפעלה ללא מפתח max_budget (או עם None)
+    # Run without max_budget key (or with None)
     result = search_best_flight_route.invoke({"origin": "TLV", "destination": "Dubai"})
     
     assert result["route_type"] == "Direct Flights (Exact or Alternatives)"
-    assert len(result["options"]) == 2 # שתיהן עברו כי אין מגבלת תקציב
-    # נוודא שהמיון עדיין עובד (הזול קודם)
+    assert len(result["options"]) == 2 # both passed because there is no budget limit
+    # Ensure sorting still works (cheapest first)
     assert result["options"][0]["price"] == 500
     assert result["options"][1]["price"] == 10000
 
@@ -101,17 +102,17 @@ def test_no_budget_provided_the_blank_check(mock_data_provider):
 @patch("tools.tools.data_provider")
 def test_negative_budget_insane_input(mock_data_provider):
     """
-    מקרה קצה 2: ה-LLM השתגע והכניס תקציב שלילי או 0.
-    המערכת לא אמורה לקרוס, אלא פשוט להחזיר שאין טיסות שעומדות בתקציב ההזוי הזה.
+    scenario 2: the LLM got confused and entered a negative budget or 0.
+    the system should not crash, but simply return that no flights match the provided budget.
     """
     mock_data_provider.fetch_flights.return_value = [
         {"flight_number": "LY1", "price": 100, "destination_city": "Eilat"}
     ]
     mock_data_provider.fetch_connecting_flights.return_value = [
-        {"message": "No connecting flights found"} # ה-DB לא ימצא כלום לתקציב שלילי
+        {"message": "No connecting flights found"} # the DB should find nothing for a negative budget
     ]
     
-    # הפעלה עם תקציב שלילי
+    # Run with a negative budget
     result = search_best_flight_route.invoke({"origin": "TLV", "destination": "Eilat", "max_budget": -50.0})
     
     assert "message" in result
@@ -121,14 +122,14 @@ def test_negative_budget_insane_input(mock_data_provider):
 @patch("tools.tools.data_provider")
 def test_missing_origin_or_destination_empty_strings(mock_data_provider):
     """
-    מקרה קצה 3: חסרה עיר מקור או עיר יעד (נשלחו כמחרוזות ריקות).
-    במצב כזה שאילתת ה-SQL תחזיר ריק, ואנחנו רוצים לוודא שהכלי מטפל בזה באלגנטיות 
-    ומחזיר הודעת שגיאה מסודרת ולא קורס (Exception).
+    scenario 3: missing origin or destination city (sent as empty strings).
+    in this case, the SQL query will return an empty result, and we want to ensure the tool handles this gracefully
+    and returns a well-formatted error message instead of crashing (Exception).
     """
     mock_data_provider.fetch_flights.return_value = [{"message": "No flights found"}]
     mock_data_provider.fetch_connecting_flights.return_value = [{"message": "No connecting flights found"}]
     
-    # נשלח עיר מקור ריקה
+    # Send an empty origin city
     result = search_best_flight_route.invoke({"origin": "", "destination": "Paris", "max_budget": 500.0})
     
     assert "message" in result
@@ -138,16 +139,16 @@ def test_missing_origin_or_destination_empty_strings(mock_data_provider):
 @patch("tools.tools.data_provider")
 def test_exact_budget_match_penny_pincher(mock_data_provider):
     """
-    מקרה קצה 4: הטיסה עולה *בדיוק* כמו התקציב.
-    בגלל שהשתמשנו ב- `<=` בקוד שלנו, הטיסה חייבת להיות מאושרת ולהיכלל בתוצאות.
+    scenario 4: the flight costs *exactly* the same as the budget.
+    due to our use of `<=` in the code, the flight must be approved and included in the results.
     """
     mock_data_provider.fetch_flights.return_value = [
-        {"flight_number": "LY1", "price": 400.0, "destination_city": "Rome"}, # מחיר זהה לתקציב
-        {"flight_number": "LY2", "price": 400.01, "destination_city": "Rome"} # חורג בסנט אחד!
+        {"flight_number": "LY1", "price": 400.0, "destination_city": "Rome"}, # price exactly equals the budget
+        {"flight_number": "LY2", "price": 400.01, "destination_city": "Rome"} # exceeds by one cent!
     ]
     
     result = search_best_flight_route.invoke({"origin": "TLV", "destination": "Rome", "max_budget": 400.0})
     
     assert result["route_type"] == "Direct Flights (Exact or Alternatives)"
-    assert len(result["options"]) == 1 # רק הטיסה שעולה בדיוק 400 אמורה לעבור
+    assert len(result["options"]) == 1 # only the flight costing exactly 400 should pass
     assert result["options"][0]["price"] == 400.0
