@@ -374,7 +374,7 @@
     <div class="why-card">
       <div class="why-icon">⚡</div>
       <h4>Indexed Lookups</h4>
-      <p>Case-insensitive indexes on <code>destination_city</code> and <code>destination_country</code> make every tool call fast regardless of how many rows are in the DB.</p>
+      <p>Indexes on <code>origin_city_id</code>, <code>destination_city_id</code>, and <code>country_id</code> make every JOIN query fast. The DB contains 249 countries and 165,376 cities from public ISO CSVs.</p>
     </div>
     <div class="why-card">
       <div class="why-icon">🔌</div>
@@ -412,7 +412,7 @@
         </tr>
         <tr>
           <td><code>flights</code> table (<code>origin</code>, <code>destination</code>, <code>airline</code>, <code>price</code>, <code>flight_number</code>)</td>
-          <td>All required columns + <code>origin_country</code>, <code>destination_country</code>, <code>availability</code></td>
+          <td>Normalized — <code>origin_city_id</code> and <code>destination_city_id</code> FK to <code>cities</code>, country resolved via JOIN through <code>countries</code> table</td>
           <td class="status-bonus">✔ Extended</td>
         </tr>
         <tr>
@@ -464,17 +464,39 @@
   <div class="schema-grid">
 
     <div class="schema-card">
+      <div class="schema-header">🌐 countries</div>
+      <table><thead><tr><th>Column</th><th>Type</th></tr></thead><tbody>
+        <tr><td class="col-pk">id</td><td class="col-norm">INTEGER PK</td></tr>
+        <tr><td class="col-norm">alpha2</td><td class="col-norm">TEXT UNIQUE</td></tr>
+        <tr><td class="col-norm">alpha3</td><td class="col-norm">TEXT UNIQUE</td></tr>
+        <tr><td class="col-norm">numeric</td><td class="col-norm">TEXT UNIQUE</td></tr>
+        <tr><td class="col-norm">name</td><td class="col-norm">TEXT</td></tr>
+        <tr><td class="col-norm">region</td><td class="col-norm">TEXT</td></tr>
+        <tr><td class="col-norm">subregion</td><td class="col-norm">TEXT</td></tr>
+      </tbody></table>
+    </div>
+
+    <div class="schema-card">
+      <div class="schema-header">🏙 cities</div>
+      <table><thead><tr><th>Column</th><th>Type</th></tr></thead><tbody>
+        <tr><td class="col-pk">id</td><td class="col-norm">INTEGER PK</td></tr>
+        <tr><td class="col-fk">country_id</td><td class="col-norm">FK → countries</td></tr>
+        <tr><td class="col-norm">name</td><td class="col-norm">TEXT</td></tr>
+        <tr><td class="col-norm">lat</td><td class="col-norm">REAL</td></tr>
+        <tr><td class="col-norm">lng</td><td class="col-norm">REAL</td></tr>
+      </tbody></table>
+    </div>
+
+    <div class="schema-card">
       <div class="schema-header">✈ flights</div>
       <table><thead><tr><th>Column</th><th>Type</th></tr></thead><tbody>
         <tr><td class="col-pk">id</td><td class="col-norm">INTEGER PK</td></tr>
-        <tr><td class="col-norm">origin_city</td><td class="col-norm">TEXT</td></tr>
-        <tr><td class="col-new">origin_country</td><td class="col-norm">TEXT ★</td></tr>
-        <tr><td class="col-norm">destination_city</td><td class="col-norm">TEXT</td></tr>
-        <tr><td class="col-new">destination_country</td><td class="col-norm">TEXT ★</td></tr>
+        <tr><td class="col-fk">origin_city_id</td><td class="col-norm">FK → cities</td></tr>
+        <tr><td class="col-fk">destination_city_id</td><td class="col-norm">FK → cities</td></tr>
         <tr><td class="col-norm">airline</td><td class="col-norm">TEXT</td></tr>
         <tr><td class="col-norm">price</td><td class="col-norm">INTEGER</td></tr>
         <tr><td class="col-norm">flight_number</td><td class="col-norm">TEXT</td></tr>
-        <tr><td class="col-new">availability</td><td class="col-norm">TEXT ★</td></tr>
+        <tr><td class="col-norm">availability</td><td class="col-norm">TEXT</td></tr>
       </tbody></table>
     </div>
 
@@ -482,7 +504,7 @@
       <div class="schema-header">🏨 hotels</div>
       <table><thead><tr><th>Column</th><th>Type</th></tr></thead><tbody>
         <tr><td class="col-pk">id</td><td class="col-norm">INTEGER PK</td></tr>
-        <tr><td class="col-norm">city</td><td class="col-norm">TEXT</td></tr>
+        <tr><td class="col-fk">city_id</td><td class="col-norm">FK → cities</td></tr>
         <tr><td class="col-norm">name</td><td class="col-norm">TEXT</td></tr>
         <tr><td class="col-norm">price_per_night</td><td class="col-norm">INTEGER</td></tr>
         <tr><td class="col-norm">stars</td><td class="col-norm">INTEGER</td></tr>
@@ -493,7 +515,7 @@
       <div class="schema-header">🎯 activities</div>
       <table><thead><tr><th>Column</th><th>Type</th></tr></thead><tbody>
         <tr><td class="col-pk">id</td><td class="col-norm">INTEGER PK</td></tr>
-        <tr><td class="col-norm">city</td><td class="col-norm">TEXT</td></tr>
+        <tr><td class="col-fk">city_id</td><td class="col-norm">FK → cities</td></tr>
         <tr><td class="col-norm">name</td><td class="col-norm">TEXT</td></tr>
         <tr><td class="col-norm">category</td><td class="col-norm">TEXT</td></tr>
         <tr><td class="col-norm">price</td><td class="col-norm">INTEGER</td></tr>
@@ -504,7 +526,7 @@
       <div class="schema-header">🌤 best_time_to_visit <span style="color:var(--gold);font-size:0.75rem">★ bonus</span></div>
       <table><thead><tr><th>Column</th><th>Type</th></tr></thead><tbody>
         <tr><td class="col-pk">id</td><td class="col-norm">INTEGER PK</td></tr>
-        <tr><td class="col-new">city</td><td class="col-norm">TEXT UNIQUE</td></tr>
+        <tr><td class="col-fk">city_id</td><td class="col-norm">FK → cities UNIQUE</td></tr>
         <tr><td class="col-new">months</td><td class="col-norm">TEXT (CSV)</td></tr>
         <tr><td class="col-new">reason</td><td class="col-norm">TEXT</td></tr>
       </tbody></table>
@@ -514,14 +536,14 @@
       <div class="schema-header">🌡 average_weather <span style="color:var(--gold);font-size:0.75rem">★ bonus</span></div>
       <table><thead><tr><th>Column</th><th>Type</th></tr></thead><tbody>
         <tr><td class="col-pk">id</td><td class="col-norm">INTEGER PK</td></tr>
-        <tr><td class="col-new">city</td><td class="col-norm">TEXT</td></tr>
+        <tr><td class="col-fk">city_id</td><td class="col-norm">FK → cities</td></tr>
         <tr><td class="col-new">season</td><td class="col-norm">TEXT</td></tr>
         <tr><td class="col-new">temperature</td><td class="col-norm">TEXT</td></tr>
       </tbody></table>
     </div>
 
   </div>
-  <p style="color:var(--muted);font-size:0.82rem;margin-top:10px;">★ columns added beyond the handout spec &nbsp;|&nbsp; All text lookups use <code>LOWER()</code> indexes for case-insensitive matching.</p>
+  <p style="color:var(--muted);font-size:0.82rem;margin-top:10px;">★ tables added beyond the handout spec &nbsp;|&nbsp; <span style="color:var(--fk,#82aaff)">Blue</span> = FK column &nbsp;|&nbsp; Schema designed by teammate (ido), bonus tables added by Nimrod &nbsp;|&nbsp; 249 countries · 165,376 cities loaded from public ISO CSVs.</p>
 
   <!-- ── Country Fallback Logic ───────────────────────── -->
   <div class="section-title"><div class="icon">🔀</div>Country Fallback — Flight Search Logic</div>
@@ -577,7 +599,7 @@
   <div class="section-title"><div class="icon">🧪</div>Tests — data/test_travel_db.py</div>
   <p style="color:var(--muted);font-size:0.9rem;margin-bottom:18px;">
     Run with: <code style="background:#0a1520;padding:2px 8px;border-radius:5px;color:var(--bright);">python data/test_travel_db.py</code>
-    &nbsp;— no pytest or external packages required. Result: <strong style="color:var(--green);">24 / 24 PASS</strong>
+    &nbsp;— no pytest or external packages required. Result: <strong style="color:var(--green);">52 / 52 PASS</strong>
   </p>
   <div class="test-grid">
 
@@ -588,7 +610,7 @@
 
     <div class="test-item">
       <div class="tick">✓</div>
-      <div><h4>Schema — flights has country columns</h4><p>Checks every required column including the new <code>origin_country</code> and <code>destination_country</code>.</p></div>
+      <div><h4>Schema — FK columns exist</h4><p>Verifies <code>origin_city_id</code>, <code>destination_city_id</code> in flights and <code>city_id</code> in hotels, activities, best_time, weather.</p></div>
     </div>
 
     <div class="test-item">
@@ -598,7 +620,7 @@
 
     <div class="test-item">
       <div class="tick">✓</div>
-      <div><h4>Data integrity — no empty countries</h4><p>Guards against missing country values which would break the fallback logic.</p></div>
+      <div><h4>Data integrity — FK references valid</h4><p>Verifies all flight city IDs and all city country IDs point to existing rows — no orphaned FKs.</p></div>
     </div>
 
     <div class="test-item">
@@ -613,7 +635,7 @@
 
     <div class="test-item">
       <div class="tick">✓</div>
-      <div><h4>Country search — France returns flights</h4><p>Validates the fallback query by <code>destination_country</code>.</p></div>
+      <div><h4>Country search — France returns flights via JOIN</h4><p>Validates the fallback JOIN through <code>cities → countries</code> returns correct results.</p></div>
     </div>
 
     <div class="test-item">
@@ -646,10 +668,20 @@
   <!-- ── Seed Data Summary ─────────────────────────────── -->
   <div class="section-title"><div class="icon">📊</div>Seed Data Summary</div>
   <div class="why-grid">
+    <div class="why-card" style="border-top-color: #c792ea;">
+      <div class="why-icon">🌐</div>
+      <h4>249 Countries</h4>
+      <p>Full ISO 3166-1 list fetched from public CSV — alpha2, alpha3, region, subregion.</p>
+    </div>
+    <div class="why-card" style="border-top-color: #c792ea;">
+      <div class="why-icon">🏙</div>
+      <h4>165,376 Cities</h4>
+      <p>World cities with lat/lng, each linked to a country via FK. Enables any city → country lookup.</p>
+    </div>
     <div class="why-card" style="border-top-color: var(--accent);">
       <div class="why-icon">✈️</div>
       <h4>15 Flights</h4>
-      <p>From TLV, London, New York — covering France, UK, Japan, USA, Germany, Netherlands.</p>
+      <p>From Tel Aviv, London, New York — covering France, UK, Japan, USA, Germany, Netherlands.</p>
     </div>
     <div class="why-card" style="border-top-color: var(--gold);">
       <div class="why-icon">🏨</div>
@@ -666,7 +698,7 @@
       <h4>24 Weather Rows</h4>
       <p>4 seasons × 6 cities — Spring, Summer, Autumn, Winter temperatures in Celsius.</p>
     </div>
-    <div class="why-card" style="border-top-color: #c792ea;">
+    <div class="why-card" style="border-top-color: #f4a261;">
       <div class="why-icon">📅</div>
       <h4>6 Best-Time Rows</h4>
       <p>Recommended travel months + reason for each of the 6 destination cities.</p>
