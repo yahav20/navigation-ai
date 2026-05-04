@@ -2,11 +2,13 @@
 One-time script to create and seed data/travel_agency.db.
 
 Schema:
-    countries  — full ISO 3166-1 list, fetched from public CSV
-    cities     — world cities with lat/lng, FK to countries
-    flights    — origin/destination FK to cities
-    hotels     — FK to cities
-    activities — FK to cities
+    countries          — full ISO 3166-1 list, fetched from public CSV
+    cities             — world cities with lat/lng, FK to countries
+    flights            — origin/destination FK to cities
+    hotels             — FK to cities
+    activities         — FK to cities
+    best_time_to_visit — recommended travel months per city, FK to cities
+    average_weather    — seasonal temperatures per city, FK to cities
 
 Run from the project root:  python data/init_db.py
 """
@@ -71,6 +73,22 @@ CREATE TABLE activities (
     price    INTEGER NOT NULL
 );
 CREATE INDEX idx_activities_city ON activities(city_id);
+
+CREATE TABLE best_time_to_visit (
+    id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    city_id INTEGER NOT NULL UNIQUE REFERENCES cities(id),
+    months  TEXT    NOT NULL,
+    reason  TEXT    NOT NULL
+);
+
+CREATE TABLE average_weather (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    city_id     INTEGER NOT NULL REFERENCES cities(id),
+    season      TEXT    NOT NULL,
+    temperature TEXT    NOT NULL,
+    UNIQUE(city_id, season)
+);
+CREATE INDEX idx_weather_city ON average_weather(city_id);
 """
 
 
@@ -209,9 +227,45 @@ def seed_travel(conn: sqlite3.Connection) -> None:
         [(ids[c], n, cat, p) for c, n, cat, p in activities],
     )
 
-    print(f"  flights:    {len(flights)}")
-    print(f"  hotels:     {len(hotels)}")
-    print(f"  activities: {len(activities)}")
+    # best_time_to_visit  (city_key, months CSV, reason)
+    best_times = [
+        ("paris",     "April,May,September",  "Pleasant weather and fewer crowds."),
+        ("london",    "May,June,July",         "Best chance for sunshine and outdoor events."),
+        ("tokyo",     "March,April,November",  "Cherry blossoms in spring, beautiful autumn foliage."),
+        ("amsterdam", "April,May,September",   "Tulip season in spring and mild cycling weather."),
+        ("new york",  "April,May,September",   "Mild temperatures and fewer tourists than summer."),
+        ("berlin",    "May,June,July",         "Warm summers with long daylight hours and festivals."),
+    ]
+    conn.executemany(
+        "INSERT INTO best_time_to_visit (city_id, months, reason) VALUES (?, ?, ?)",
+        [(ids[c], m, r) for c, m, r in best_times],
+    )
+
+    # average_weather  (city_key, season, temperature)
+    weather = [
+        ("paris",     "Spring", "15C"), ("paris",     "Summer", "25C"),
+        ("paris",     "Autumn", "16C"), ("paris",     "Winter",  "5C"),
+        ("london",    "Spring", "12C"), ("london",    "Summer", "22C"),
+        ("london",    "Autumn", "14C"), ("london",    "Winter",  "6C"),
+        ("tokyo",     "Spring", "18C"), ("tokyo",     "Summer", "30C"),
+        ("tokyo",     "Autumn", "21C"), ("tokyo",     "Winter",  "8C"),
+        ("amsterdam", "Spring", "13C"), ("amsterdam", "Summer", "22C"),
+        ("amsterdam", "Autumn", "14C"), ("amsterdam", "Winter",  "4C"),
+        ("new york",  "Spring", "13C"), ("new york",  "Summer", "28C"),
+        ("new york",  "Autumn", "15C"), ("new york",  "Winter",  "2C"),
+        ("berlin",    "Spring", "12C"), ("berlin",    "Summer", "25C"),
+        ("berlin",    "Autumn", "13C"), ("berlin",    "Winter",  "1C"),
+    ]
+    conn.executemany(
+        "INSERT INTO average_weather (city_id, season, temperature) VALUES (?, ?, ?)",
+        [(ids[c], s, t) for c, s, t in weather],
+    )
+
+    print(f"  flights:           {len(flights)}")
+    print(f"  hotels:            {len(hotels)}")
+    print(f"  activities:        {len(activities)}")
+    print(f"  best_time_to_visit:{len(best_times)}")
+    print(f"  average_weather:   {len(weather)}")
 
 
 def create_travel_db() -> None:
