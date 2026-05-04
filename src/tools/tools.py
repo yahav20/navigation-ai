@@ -1,18 +1,21 @@
 from langchain_core.tools import tool
 from providers.json_provider import JSONDataProvider
+from providers.sqlite_provider import SQLiteDataProvider
 from providers.base import BaseDataProvider
 
-def create_data_provider(provider_type: str = "json") -> BaseDataProvider:
+def create_data_provider(provider_type: str = "sqlite") -> BaseDataProvider:
     """
     Factory method to create a data provider instance.
-    
+
     Args:
-        provider_type: Type of provider to create (default: "json")
-        
+        provider_type: Type of provider to create ("sqlite" or "json")
+
     Returns:
         An instance of the requested data provider
     """
-    if provider_type == "json":
+    if provider_type == "sqlite":
+        return SQLiteDataProvider()
+    elif provider_type == "json":
         return JSONDataProvider()
     else:
         raise ValueError(f"Unknown provider type: {provider_type}")
@@ -30,23 +33,34 @@ def fetch_flights(origin: str, destination: str):
     return data_provider.fetch_flights(origin, destination)
 
 @tool
-def fetch_hotels(city: str):
+def fetch_hotels(city: str, max_price: int = None):
     """
     Fetch available hotels in a city from the local database.
+    Optionally filter by maximum price per night.
     Returns a list of hotels with prices and availability status.
     """
-    return data_provider.fetch_hotels(city)
+    return data_provider.fetch_hotels(city, max_price)
 
 @tool
-def calculate_trip_cost(flight_price: float, hotel_price_per_night: float, nights: int):
+def calculate_trip_cost(flight_price: float, hotel_price_per_night: float, duration_days: int):
     """
-    Calculate the total cost of a trip based on flight price and hotel price per night.
+    Calculates the total cost for a trip including flight and hotel stay.
+    Input: flight_price (float), hotel_price_per_night (float), duration_days (int).
     """
-    total_cost = flight_price + (hotel_price_per_night * nights)
-    # Add 10% service fee
-    total_cost = total_cost * 1.10
-    
-    return f"The total trip cost, including a 10% service fee, is ${total_cost:.2f}."
+    try:
+        total_hotel = float(hotel_price_per_night) * int(duration_days)
+        total_grand = float(flight_price) + total_hotel
+        return {
+            "breakdown": {
+                "flight": flight_price,
+                "hotel_total": total_hotel,
+                "days": duration_days,
+            },
+            "total_estimate": total_grand,
+            "currency": "USD",
+        }
+    except (ValueError, TypeError):
+        return "Error: Please provide valid numbers for prices and duration."
 
 @tool
 def fetch_activities(city: str):
