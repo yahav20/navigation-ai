@@ -6,7 +6,7 @@ DB_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "data", "travel_ag
 
 
 class SQLiteDataProvider(BaseDataProvider):
-    """SQLite-backed data provider for travel data."""
+    """SQLite-backed data provider using the normalized FK schema."""
 
     def __init__(self, db_path: str = DB_PATH):
         self.db_path = os.path.abspath(db_path)
@@ -26,54 +26,73 @@ class SQLiteDataProvider(BaseDataProvider):
 
     def fetch_flights(self, origin: str, destination: str) -> list:
         """
-        Search by destination city first.
+        Search by destination city name first.
         If no results, fall back to destination country and suggest
         other cities in that same country.
         """
         rows = self._query(
-            """SELECT origin_city, destination_city, destination_country,
-                      airline, price, flight_number, availability
-               FROM flights
-               WHERE LOWER(origin_city) = ? AND LOWER(destination_city) = ?""",
+            """SELECT oc.name  AS origin_city,
+                      dc.name  AS destination_city,
+                      co.name  AS destination_country,
+                      f.airline, f.price, f.flight_number, f.availability
+               FROM flights f
+               JOIN cities oc  ON f.origin_city_id      = oc.id
+               JOIN cities dc  ON f.destination_city_id = dc.id
+               JOIN countries co ON dc.country_id        = co.id
+              WHERE LOWER(oc.name) = ? AND LOWER(dc.name) = ?""",
             (origin.strip().lower(), destination.strip().lower()),
         )
 
         if rows:
             return rows
 
-        # Fallback: find the country for the requested destination
+        # Fallback: find the country of the requested destination city
         country_rows = self._query(
-            "SELECT destination_country FROM flights WHERE LOWER(destination_city) = ? LIMIT 1",
+            """SELECT co.name AS country_name, co.id AS country_id
+               FROM cities c
+               JOIN countries co ON c.country_id = co.id
+              WHERE LOWER(c.name) = ?
+              LIMIT 1""",
             (destination.strip().lower(),),
         )
 
         if not country_rows:
             return [{"message": f"No flights found from {origin} to {destination}."}]
 
-        country = country_rows[0]["destination_country"]
+        country_name = country_rows[0]["country_name"]
+        country_id   = country_rows[0]["country_id"]
 
         alt_rows = self._query(
-            """SELECT origin_city, destination_city, destination_country,
-                      airline, price, flight_number, availability
-               FROM flights
-               WHERE LOWER(origin_city) = ? AND LOWER(destination_country) = ?
-                 AND LOWER(destination_city) != ?""",
-            (origin.strip().lower(), country.lower(), destination.strip().lower()),
+            """SELECT oc.name  AS origin_city,
+                      dc.name  AS destination_city,
+                      co.name  AS destination_country,
+                      f.airline, f.price, f.flight_number, f.availability
+               FROM flights f
+               JOIN cities oc  ON f.origin_city_id      = oc.id
+               JOIN cities dc  ON f.destination_city_id = dc.id
+               JOIN countries co ON dc.country_id        = co.id
+              WHERE LOWER(oc.name) = ?
+                AND dc.country_id  = ?
+                AND LOWER(dc.name) != ?""",
+            (origin.strip().lower(), country_id, destination.strip().lower()),
         )
 
         if not alt_rows:
-            return [{"message": f"No flights found from {origin} to {destination} or elsewhere in {country}."}]
+            return [{"message": f"No flights found from {origin} to {destination} or elsewhere in {country_name}."}]
 
         return [{
-            "message": f"No direct flights to {destination}, but here are flights to other cities in {country}:",
+            "message": f"No direct flights to {destination}, but here are flights to other cities in {country_name}:",
             "alternatives": alt_rows,
         }]
 
     def fetch_hotels(self, city: str, max_price: int = None) -> list:
-        sql = "SELECT name, price_per_night, stars FROM hotels WHERE LOWER(city) = ?"
+        sql = """SELECT h.name, h.price_per_night, h.stars
+                   FROM hotels h
+                   JOIN cities c ON h.city_id = c.id
+                  WHERE LOWER(c.name) = ?"""
         params = [city.strip().lower()]
         if max_price is not None:
-            sql += " AND price_per_night <= ?"
+            sql += " AND h.price_per_night <= ?"
             params.append(max_price)
         rows = self._query(sql, tuple(params))
         if not rows:
@@ -82,7 +101,10 @@ class SQLiteDataProvider(BaseDataProvider):
 
     def fetch_activities(self, city: str) -> list:
         rows = self._query(
-            "SELECT name, category, price FROM activities WHERE LOWER(city) = ?",
+            """SELECT a.name, a.category, a.price
+               FROM activities a
+               JOIN cities c ON a.city_id = c.id
+              WHERE LOWER(c.name) = ?""",
             (city.strip().lower(),),
         )
         if not rows:
@@ -91,20 +113,25 @@ class SQLiteDataProvider(BaseDataProvider):
 
     def get_best_time_to_visit(self, city: str) -> dict:
         rows = self._query(
-            "SELECT months, reason FROM best_time_to_visit WHERE LOWER(city) = ?",
+            """SELECT b.months, b.reason
+               FROM best_time_to_visit b
+               JOIN cities c ON b.city_id = c.id
+              WHERE LOWER(c.name) = ?""",
             (city.strip().lower(),),
         )
         if not rows:
             return {"message": f"No recommendations found for {city}."}
-        row = rows[0]
         return {
-            "months": [m.strip() for m in row["months"].split(",")],
-            "reason": row["reason"],
+            "months": [m.strip() for m in rows[0]["months"].split(",")],
+            "reason": rows[0]["reason"],
         }
 
     def get_average_weather(self, city: str, season: str) -> dict:
         rows = self._query(
-            "SELECT season, temperature FROM average_weather WHERE LOWER(city) = ? AND LOWER(season) = ?",
+            """SELECT w.season, w.temperature
+               FROM average_weather w
+               JOIN cities c ON w.city_id = c.id
+              WHERE LOWER(c.name) = ? AND LOWER(w.season) = ?""",
             (city.strip().lower(), season.strip().lower()),
         )
         if not rows:
