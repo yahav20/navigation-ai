@@ -86,6 +86,77 @@ def get_average_weather(city: str, season: str):
     Valid seasons are: 'Spring', 'Summer', 'Autumn', 'Winter'.
     """
     return data_provider.get_average_weather(city, season)
+@tool
+def fetch_connecting_flights(origin: str, destination: str, max_budget: float):
+    """
+    Search for connecting flights (1 or 2 stops) between two cities within a specific budget.
+    Returns the route breakdown, flight numbers, layover cities, and total combined price.
+    Use this when direct flights are unavailable or when the user wants to find cheaper alternatives within their budget.
+    """
+    return data_provider.fetch_connecting_flights(origin, destination, max_budget)
 
+@tool
+def search_best_flight_route(origin: str, destination: str, max_budget: float = None):
+    """
+    Search for the best flight route between two cities.
+    It checks for direct flights first. If none are found, or if they exceed the optional budget,
+    it automatically searches for connecting flights (up to 2 stops).
+    It also suggests alternative cities in the same country if the exact destination is unreachable.
+    """
+    # 1. Search direct flights
+    direct_results = data_provider.fetch_flights(origin, destination)
+    
+    valid_direct = []
+    is_direct_found = False
+    
+    # Check whether these are exact direct results or an alternative fallback
+    if direct_results and isinstance(direct_results[0], dict):
+        if "alternatives" in direct_results[0]:
+            # Returned direct-flight fallback to the country
+            valid_direct = direct_results[0]["alternatives"]
+            if max_budget is not None:
+                valid_direct = [f for f in valid_direct if f.get('price', float('inf')) <= max_budget]
+        elif "message" not in direct_results[0]:
+             # Returned normal direct flights
+             is_direct_found = True
+             for flight in direct_results:
+                 if max_budget is None or flight.get('price', float('inf')) <= max_budget:
+                     valid_direct.append(flight)
+    
+    if valid_direct:
+        valid_direct.sort(key=lambda x: x.get('price', 0))
+        return {
+            "route_type": "Direct Flights (Exact or Alternatives)", 
+            "options": valid_direct[:5]
+        }
+        
+    # 2. Search connecting flights (used if no direct flights or direct options are too expensive)
+    connections = data_provider.fetch_connecting_flights(origin, destination, max_budget)
+        
+    if connections and isinstance(connections[0], dict):
+         reason = "Direct flights exceeded budget." if (is_direct_found and max_budget) else "No direct flights available."
+         
+         # Check whether connecting flights are an alternative fallback
+         if "alternatives" in connections[0]:
+             return {
+                 "route_type": "Connecting Flights to Alternative Cities",
+                 "note": f"{reason} " + connections[0].get("message", ""),
+                 "options": connections[0]["alternatives"]
+             }
+         # Regular connecting flights to the exact city
+         elif "message" not in connections[0]:
+             return {
+                 "route_type": "Connecting Flights (1 or 2 stops)", 
+                 "note": reason,
+                 "options": connections
+             }
+             
+    # 3. If everything fails
+    if is_direct_found and max_budget:
+         return {"message": f"Found direct flights, but all exceed ${max_budget}. No connecting flights under budget either."}
+         
+    msg = f"No flights (direct or connecting) found from {origin} to {destination}"
+    msg += f" within ${max_budget}." if max_budget else "."
+    return {"message": msg}
 
-tools = [fetch_flights, fetch_hotels, calculate_trip_cost, fetch_activities, get_best_time_to_visit, get_average_weather]
+tools = [fetch_flights, fetch_hotels, calculate_trip_cost, fetch_activities, get_best_time_to_visit, get_average_weather,search_best_flight_route]
