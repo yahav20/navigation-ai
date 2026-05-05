@@ -114,6 +114,11 @@ class JSONDataProvider(BaseDataProvider):
                 
         return {"message": f"No recommendations found for {city}."}
 
+    def get_reachable_destinations_by_distance(
+        self, origin: str, destination: str, limit: int = 10
+    ) -> list:
+        return [{"message": "Reachable-destination lookup is not supported by the JSON provider."}]
+
     def get_average_weather(self, city: str, season: str) -> dict:
         """
         Get the average temperature for a specific city during a specific season.
