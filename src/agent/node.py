@@ -32,43 +32,43 @@ def get_models(provider: str = "google"):
     return model, extraction_model
 
 def extract_travel_data(state: AgentState):
-    """Helper function to aggregate flight and hotel data from tool outputs in the state."""
-    flights = []
-    hotels = []
+    # Use dictionaries to prevent duplicates (key is flight number or hotel name)
+    flights_dict = {}
+    hotels_dict = {}
 
-    # Iterate through message history to find tool outputs
     for msg in state.get("messages", []):
         if msg.type == "tool":
             tool_name = getattr(msg, "name", "")
             try:
-                # Parse the tool output content from JSON string
                 data = json.loads(msg.content)
                 if isinstance(data, dict):
                     data = [data]
                     
                 if tool_name == "fetch_flights":
-                    flights.extend(data)
+                    for f in data:
+                        # Use flight number as unique key
+                        flight_num = f.get("flight_number", "unknown")
+                        flights_dict[flight_num] = f
                 elif tool_name == "fetch_hotels":
-                    hotels.extend(data)
+                    for h in data:
+                        # Use hotel name as unique key
+                        hotel_name = h.get("name", "unknown")
+                        hotels_dict[hotel_name] = h
             except json.JSONDecodeError:
                 continue
             
-    # Keys to ignore when copying state variables
     exclude_keys = {"messages", "step_count"}
-    
-    # Build a dictionary of current state variables (origin, destination, budget)
     travel_data = {
         key: value 
         for key, value in state.items() 
         if key not in exclude_keys
     }
 
-    # Append the collected tool results
-    travel_data["flights"] = flights
-    travel_data["hotels"] = hotels
+    # Convert back to a list clean of duplicates
+    travel_data["flights"] = list(flights_dict.values())
+    travel_data["hotels"] = list(hotels_dict.values())
 
     return travel_data
-
 
 # --- Nodes now need to receive the model as a parameter, or we define them as dynamic ---
 # To avoid breaking langgraph (which expects functions receiving only state),
@@ -184,6 +184,9 @@ Extract: current_city, destination_city, budget.
         1. BOUNDARY ENFORCEMENT: You are a travel agent ONLY. If the user asks about math (e.g., 5+5), coding, politics, or ANY non-travel topic, you MUST politely decline to answer and immediately steer the conversation back to their travel plans. Do NOT provide the answer to off-topic questions.
         2. MISSING INFO: If ANY of the 'CURRENT TRIP STATUS' fields are 'NOT PROVIDED', ask the user politely for the missing information. Do not search until you have all three.
         3. AVOID DUPLICATION: Do not repeat questions if the user has already provided the answer in the context.
+        
+        DO NOT output the final itinerary or list the hotels/flights yourself. Just confirm you found them and ask the user if they want to proceed. 
+        The system will handle formatting the actual list.
         """
 
         messages_to_pass = [{"role": "system", "content": system_prompt}] + clean_history
@@ -201,6 +204,11 @@ Extract: current_city, destination_city, budget.
         if not state.get("messages"):
             return {}
 
+        last_agent_message = state["messages"][-1].content if state.get("messages") else ""
+        
+        if "?" in last_agent_message or "let me know" in last_agent_message.lower():
+            return {}
+        
         has_origin = bool(state.get('current_city'))
         has_dest = bool(state.get('destination_city'))
         has_budget = bool(state.get('total_budget'))
@@ -211,14 +219,16 @@ Extract: current_city, destination_city, budget.
         travel_data = extract_travel_data(state)
         
         system_prompt = """
-        You are a strict luxury travel concierge. Your ONLY task is to format the raw data into the beautiful Markdown template below.
-
+        You are a strict data formatter. Your ONLY job is to output the provided <data> into the EXACT Markdown template below.
+        
         CRITICAL RULES:
         1. DO NOT add conversational filler.
-        2. DO NOT ask the user any questions.
-        3. Use the exact currency provided in the budget.
-        4. If any section has no data, use the appropriate fallback text provided in the template.
-        5. YOU MUST USE THIS EXACT TEMPLATE:
+        2. FORCE CURRENCY: You MUST use the '$' symbol for ALL prices and budgets. DO NOT use '€' or '£'.
+        3. DO NOT ask the user any questions.
+        4. Use the exact currency provided in the budget.
+        5. If any section has no data, use the appropriate fallback text provided in the template.
+        6. Do not invent flights or hotels. Use ONLY what is in the <data>.
+        7. YOU MUST USE THIS EXACT TEMPLATE:
 
         [Greeting tailored to the destination]
         ---
