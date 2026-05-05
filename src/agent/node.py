@@ -162,7 +162,7 @@ Extract: current_city, destination_city, budget.
         dest = state.get('destination_city') or "NOT PROVIDED"
         budget = state.get('total_budget') or "NOT PROVIDED"
         
-        system_prompt = f"""You are a helpful travel assistant.
+        system_prompt = f"""You are AtlasAI, a strict and professional luxury travel assistant.       
         CONTEXT FROM PREVIOUS EXCHANGES:
         {summary if summary else "No previous context. This is a new conversation."}
         
@@ -175,6 +175,11 @@ Extract: current_city, destination_city, budget.
         1. Address the user's specific prompt. 
         2. Use tools ONLY if you need missing information.
         3. If you have all the information needed to answer the user, provide a final conversational answer and DO NOT call any more tools.
+        
+        CRITICAL INSTRUCTIONS & GUARDRAILS:
+        1. BOUNDARY ENFORCEMENT: You are a travel agent ONLY. If the user asks about math (e.g., 5+5), coding, politics, or ANY non-travel topic, you MUST politely decline to answer and immediately steer the conversation back to their travel plans. Do NOT provide the answer to off-topic questions.
+        2. MISSING INFO: If ANY of the 'CURRENT TRIP STATUS' fields are 'NOT PROVIDED', ask the user politely for the missing information. Do not search until you have all three.
+        3. AVOID DUPLICATION: Do not repeat questions if the user has already provided the answer in the context.
         """
 
         messages_to_pass = [{"role": "system", "content": system_prompt}] + clean_history
@@ -189,37 +194,32 @@ Extract: current_city, destination_city, budget.
         
     def formatter(state: AgentState):
         if not state.get("messages"):
-            return {
-                "messages": [{
-                    "role": "assistant",
-                    "content": "I'm here to help you plan your travel! How can I assist you today?"
-                }]
-            }
+            return {}
+
+        has_origin = bool(state.get('current_city'))
+        has_dest = bool(state.get('destination_city'))
+        has_budget = bool(state.get('total_budget'))
+
+        if not (has_origin and has_dest and has_budget):
+            return {}
 
         travel_data = extract_travel_data(state)
-        last_agent_message = state["messages"][-1].content if state.get("messages") else ""
         
-        system_prompt = f"""
-        You are a luxury travel concierge. Your task is to present the travel plan clearly.
+        system_prompt = """
+        You are a strict luxury travel concierge. Your ONLY task is to format the raw data into the beautiful Markdown template below.
 
-        CRITICAL RULE 1 - PRESERVE AGENT QUESTIONS:
-        The underlying AI agent just outputted this message: "{last_agent_message}"
-        If this message contains a question directed at the user (e.g., asking for dates, number of nights, or missing budget), YOUR ONLY JOB is to output that exact message/question. DO NOT use the Markdown template. DO NOT invent an itinerary.
+        CRITICAL RULES:
+        1. DO NOT add conversational filler.
+        2. DO NOT ask the user any questions.
+        3. Use the exact currency provided in the budget.
+        4. If any section has no data, use the appropriate fallback text provided in the template.
+        5. YOU MUST USE THIS EXACT TEMPLATE:
 
-        CRITICAL RULE 2 - MISSING CORE DATA:
-        Look at the <data>. If 'current_city', 'destination_city', or 'total_budget' are missing or null, DO NOT use the Markdown template. Ask the user for the missing details politely.
-
-        CRITICAL RULE 3 - STRICT CURRENCY:
-        Always use the exact currency symbol provided in the budget (e.g., $). DO NOT convert it to Euros (€) automatically.
-
-        FORMATTING TEMPLATE (Use ONLY if all data is present AND the agent didn't ask a question):
-        
         [Greeting tailored to the destination]
-        
         ---
         ### ✨ **Your [Destination City] Escape** ✨
         **Destination:** [City Name, Country]
-        **Total Budget:** [Budget with EXACT currency from user]
+        **Total Budget:** [Budget]
         ---
         ### ✈️ **Your Flight Details**
         [List flights if found, otherwise: "Based on our search, we unfortunately could not find any available flights..."]
@@ -234,9 +234,9 @@ Extract: current_city, destination_city, budget.
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": f"<data>\n{travel_data}\n</data>"}
         ]
-        
+
         response = extraction_model.invoke(messages_to_pass)
-        response.name = "formatted_response"
+        response.name = "formatter_output" # שומר על התיקון מהשלב הקודם כדי לא להקריס את ה-API
 
         return {"messages": [response]}
         
