@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Pydantic type definitions remain the same
+# Pydantic type definitions for structured output extraction
 class TravelMetadata(BaseModel):
     current_city: Optional[str] = Field(default=None, description="The city the user is currently in / starting from")
     destination_city: Optional[str] = Field(default=None, description="The city the user wants to travel to")
@@ -32,6 +32,7 @@ def get_models(provider: str = "google"):
     return model, extraction_model
 
 def extract_travel_data(state: AgentState):
+    """Helper function to aggregate flight and hotel data from tool outputs in the state."""
     flights = []
     hotels = []
 
@@ -74,6 +75,7 @@ def extract_travel_data(state: AgentState):
 # we create a function that "produces" the nodes with the injected models (Closure)
 
 def create_nodes(provider: str):
+    """Factory that initializes models and returns the node functions for the LangGraph."""
     model, extraction_model = get_models(provider)
     
     def extract_metadata(state: AgentState):
@@ -106,6 +108,7 @@ Extract: current_city, destination_city, budget.
         if metadata.budget is not None:
             updates["total_budget"] = metadata.budget
 
+        # Return updates to be merged into the global state
         return updates
     
     def summary_node(state: AgentState):
@@ -145,6 +148,7 @@ Extract: current_city, destination_city, budget.
             *messages
         ])
     
+        # Update the summary field in the state
         return {"summary": response.content}
         
 
@@ -193,6 +197,7 @@ Extract: current_city, destination_city, budget.
         }
         
     def formatter(state: AgentState):
+        """Final node to format the gathered travel data into a pretty Markdown response."""
         if not state.get("messages"):
             return {}
 
@@ -236,7 +241,7 @@ Extract: current_city, destination_city, budget.
         ]
 
         response = extraction_model.invoke(messages_to_pass)
-        response.name = "formatter_output" # שומר על התיקון מהשלב הקודם כדי לא להקריס את ה-API
+        response.name = "formatter_output" # Set name to avoid API validation errors for certain providers
 
         return {"messages": [response]}
         

@@ -13,7 +13,7 @@ from agent.node import create_nodes
 
 # --- Choose which model provider to run here ---
 # Change to "groq" if Google quota is exceeded, or "google" if you have a valid key
-CHOSEN_PROVIDER = "google"  # or "groq"
+CHOSEN_PROVIDER = "groq"  # or "groq"
 
 def build_graph(provider: str = "google"):
     """
@@ -31,11 +31,13 @@ def build_graph(provider: str = "google"):
     builder.add_node("formatter", formatter)
     builder.add_node("summary", summary_node)
 
+    # 3. Define the workflow edges
     builder.add_edge(START, "extract_metadata")
     builder.add_edge("extract_metadata", "agent")
     builder.add_conditional_edges("agent", should_continue, {"tools": "tools", "formatter": "formatter"})
     builder.add_edge("tools", "agent")
     builder.add_edge("formatter", "summary")
+    # The summary node marks the end of the processing cycle for the current turn
     builder.add_edge("summary", END)
     
     memory = MemorySaver()
@@ -48,7 +50,7 @@ def run_agent():
     print(f"--- Autonomous Travel Agent Started ({CHOSEN_PROVIDER.upper()}) ---")
     print("Type 'exit' or 'quit' to end the session.")
     print("-" * 50)
-    print("                 Atlas AI Travel Assistant             ")
+    print("             Atlas AI Travel Assistant             ")
     print("-" * 50)
     print("Agent: Hello! I'm your travel assistant. Where are you starting from and where would you like to go?")
     print("-" * 50)
