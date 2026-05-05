@@ -57,7 +57,7 @@ class JSONDataProvider(BaseDataProvider):
         
         return flights
     
-    def fetch_hotels(self, city: str) -> list:
+    def fetch_hotels(self, city: str, max_price: int = None) -> list:
         """
         Fetch available hotels in a city.
         
