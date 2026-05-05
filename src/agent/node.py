@@ -85,6 +85,9 @@ def create_nodes(provider: str):
         if not state.get("messages"):
             return updates
 
+        messages = state.get("messages", [])
+        recent_messages = messages[-6:] if messages else []
+        
         # Use the chosen extraction_model
         extractor = extraction_model.with_structured_output(TravelMetadata)
         
@@ -98,7 +101,7 @@ Do not guess. If a field is missing, return null.
 Extract: current_city, destination_city, budget.
 """
             },
-            *state["messages"],
+            *recent_messages,
         ])
 
         if metadata.current_city is not None:
@@ -120,17 +123,14 @@ Extract: current_city, destination_city, budget.
         if len(messages) < 3:
             return {}
         
+        recent_messages = messages[-5:]
+        
         summary_prompt = f"""
             You are a memory management module for a travel agent.
             Your task is to maintain a concise "World State" summary.
             
             EXISTING MEMORY:
             {existing_summary if existing_summary else "No previous memory."}
-            
-            CRITICAL INSTRUCTIONS:
-            1. Use the 'CONTEXT' above to avoid asking the user questions they have already answered.
-            2. If the user mentions a new preference that conflicts with the 'CONTEXT', prioritize the new information.
-            3. Only call tools if you have a clear Origin, Destination, and Budget.
             
             NEW CONVERSATION SEGMENT:
             Analyze the recent messages and update the memory. 
@@ -140,12 +140,12 @@ Extract: current_city, destination_city, budget.
             3. Total budget (and currency)
             4. Any specific preferences or constraints mentioned.
             
-            Return only the updated summary text.
+            Return ONLY the updated summary text.
             """
 
         response = extraction_model.invoke([
             {"role": "system", "content": summary_prompt},
-            *messages
+            *recent_messages
         ])
     
         # Update the summary field in the state
@@ -159,14 +159,15 @@ Extract: current_city, destination_city, budget.
         
         clean_history = [
             msg for msg in state.get("messages", [])
-            if getattr(msg, "type", "") != "formatted_response"
+            if getattr(msg, "type", "") != "formatter_output"
         ]
         
         origin = state.get('current_city') or "NOT PROVIDED"
         dest = state.get('destination_city') or "NOT PROVIDED"
         budget = state.get('total_budget') or "NOT PROVIDED"
         
-        system_prompt = f"""You are AtlasAI, a strict and professional luxury travel assistant.       
+        # TODO: Refine Tool Restriction Logic
+        system_prompt = f"""You are Atlas, a strict and professional luxury travel assistant.       
         CONTEXT FROM PREVIOUS EXCHANGES:
         {summary if summary else "No previous context. This is a new conversation."}
         
@@ -175,21 +176,19 @@ Extract: current_city, destination_city, budget.
         - User wants to travel to: {dest}
         - User's budget: {budget}
 
-        CRITICAL INSTRUCTIONS:
-        1. Address the user's specific prompt. 
-        2. Use tools ONLY if you need missing information.
-        3. If you have all the information needed to answer the user, provide a final conversational answer and DO NOT call any more tools.
-        
         CRITICAL INSTRUCTIONS & GUARDRAILS:
-        1. BOUNDARY ENFORCEMENT: You are a travel agent ONLY. If the user asks about math (e.g., 5+5), coding, politics, or ANY non-travel topic, you MUST politely decline to answer and immediately steer the conversation back to their travel plans. Do NOT provide the answer to off-topic questions.
-        2. MISSING INFO: If ANY of the 'CURRENT TRIP STATUS' fields are 'NOT PROVIDED', ask the user politely for the missing information. Do not search until you have all three.
-        3. AVOID DUPLICATION: Do not repeat questions if the user has already provided the answer in the context.
+        1. MISSING INFO: If ANY of the 'CURRENT TRIP STATUS' fields are 'NOT PROVIDED', ask the user politely for the missing information. Do not search until you have all three.
+        2. EXPLICIT TOOL EXECUTION: You MUST gather real data. If you have the Origin, Destination, and Budget, you MUST call BOTH the `fetch_flights` AND `fetch_hotels` tools. 
+        3. TOOL RESTRICTION: DO NOT call weather, attractions, or cost calculator tools unless the user explicitly asks for them. Focus ONLY on flights and hotels.
+        4. NO HALLUCINATIONS: Check your conversation history. Have you received the JSON response from `fetch_flights` and `fetch_hotels`? If NO, you must call them right now. 
+        5. BOUNDARY ENFORCEMENT: Decline any non-travel questions and steer back to the trip.
         
-        DO NOT output the final itinerary or list the hotels/flights yourself. Just confirm you found them and ask the user if they want to proceed. 
+        DO NOT output the final itinerary or list the hotels/flights yourself. Just confirm you found them. DO NOT ask the user any questions. 
         The system will handle formatting the actual list.
         """
-
-        messages_to_pass = [{"role": "system", "content": system_prompt}] + clean_history
+        
+        recent_history = clean_history[-6:]
+        messages_to_pass = [{"role": "system", "content": system_prompt}] + recent_history
         
         # Use the model with tools
         response = model.invoke(messages_to_pass)
@@ -217,7 +216,7 @@ Extract: current_city, destination_city, budget.
             return {}
 
         travel_data = extract_travel_data(state)
-        
+        # TODO: Adding Number of Nights based on the budget.
         system_prompt = """
         You are a strict data formatter. Your ONLY job is to output the provided <data> into the EXACT Markdown template below.
         

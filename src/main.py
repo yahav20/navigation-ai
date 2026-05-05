@@ -13,7 +13,7 @@ from agent.node import create_nodes
 
 # --- Choose which model provider to run here ---
 # Change to "groq" if Google quota is exceeded, or "google" if you have a valid key
-CHOSEN_PROVIDER = "groq"  # or "groq"
+CHOSEN_PROVIDER = "google"  # or "groq"
 
 def build_graph(provider: str = "google"):
     """
@@ -39,7 +39,7 @@ def build_graph(provider: str = "google"):
     builder.add_edge("formatter", "summary")
     # The summary node marks the end of the processing cycle for the current turn
     builder.add_edge("summary", END)
-    
+    # Adding a checkpointer to save the agent's state across turns
     memory = MemorySaver()
     return builder.compile(checkpointer=memory)
 
@@ -67,23 +67,30 @@ def run_agent():
             "step_count": 0
         }
         
-        last_printed = ""
+        last_printed_content = ""
+        last_printed_state = ()
 
         for event in graph.stream(initial_state, config, stream_mode="values"):
             last_msg = event["messages"][-1]
             msg_type = last_msg.__class__.__name__
             
             content = str(last_msg.content) if hasattr(last_msg, 'content') else "No content"
-            if content == last_printed:
-                continue
-            last_printed = content
-            print(f"[{msg_type}] Content: {content}")
-
+            
             current = event.get('current_city', 'None')
             dest = event.get('destination_city', 'None')
             budget = event.get('total_budget', 'None')
-            print(f"State -> Origin: {current} | Dest: {dest} | Budget: {budget}")
-            print("-" * 20)
+            current_state_tuple = (current, dest, budget)
+            
+            if content != last_printed_content or current_state_tuple != last_printed_state:
+                
+                if content != last_printed_content:
+                    msg_type = last_msg.__class__.__name__
+                    print(f"[{msg_type}] Content: {content}")
+                    last_printed_content = content
+                
+                print(f"State -> Origin: {current} | Dest: {dest} | Budget: {budget}")
+                print("-" * 20)
+                last_printed_state = current_state_tuple
 
 if __name__ == "__main__":
     run_agent()
