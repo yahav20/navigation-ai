@@ -7,11 +7,12 @@ from agent.edge import should_continue
 from tools.tools import tools
 
 # Note: We are now importing the function that creates the nodes, not the nodes themselves
-from agent.node import create_nodes 
+from agent.node import create_nodes
+from agent.node_alternative import create_alternative_nodes
 
 # --- Choose which model provider to run here ---
 # Change to "groq" if Google quota is exceeded, or "google" if you have a valid key
-CHOSEN_PROVIDER = "google"  # or "groq"
+CHOSEN_PROVIDER = "groq"  # or "groq"
 
 def build_graph(provider: str = "google"):
     """
@@ -19,21 +20,34 @@ def build_graph(provider: str = "google"):
     """
     # 1. Create the nodes with the chosen model provider
     extract_metadata_node, call_model_node, formatter = create_nodes(provider)
-    
+    alternative_destination_node, formatter_alternative = create_alternative_nodes(provider)
+
     # 2. Build the standard graph
     builder = StateGraph(AgentState)
 
     builder.add_node("extract_metadata", extract_metadata_node)
     builder.add_node("agent", call_model_node)
     builder.add_node("tools", ToolNode(tools))
+    builder.add_node("alternative_destination", alternative_destination_node)
     builder.add_node("formatter", formatter)
+    builder.add_node("formatter_alternative", formatter_alternative)
 
     builder.add_edge(START, "extract_metadata")
     builder.add_edge("extract_metadata", "agent")
-    builder.add_conditional_edges("agent", should_continue, {"tools": "tools", "formatter": "formatter"})
+    builder.add_conditional_edges(
+        "agent",
+        should_continue,
+        {
+            "tools": "tools",
+            "formatter": "formatter",
+            "alternative_destination": "alternative_destination",
+        },
+    )
     builder.add_edge("tools", "agent")
+    builder.add_edge("alternative_destination", "formatter_alternative")
     builder.add_edge("formatter", END)
-    
+    builder.add_edge("formatter_alternative", END)
+
     return builder.compile()
 
 def run_agent():    
