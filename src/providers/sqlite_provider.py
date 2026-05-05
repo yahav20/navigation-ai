@@ -140,129 +140,98 @@ class SQLiteDataProvider(BaseDataProvider):
     
     def fetch_connecting_flights(self, origin: str, destination: str, max_budget: float = None) -> list:
         """
-        Find connecting flights (1 or 2 stops).
-        If no results to the exact destination city, fallback to searching for connecting flights
-        to other cities in the same country (just like fetch_flights).
+        Searches for all possible flight routes (direct or up to 2 stops) between origin and destination.
+        Handles time validation, budget constraints, and avoids infinite loops.
         """
         origin_clean = origin.strip().lower()
         dest_clean = destination.strip().lower()
 
-        # Dynamic budget conditions
-        budget_cond_1 = " AND (f1.price + f2.price) <= ?" if max_budget else ""
-        budget_cond_2 = " AND (f1.price + f2.price + f3.price) <= ?" if max_budget else ""
-
-        # Parameters for exact search
-        params_exact_1 = (origin_clean, dest_clean, max_budget) if max_budget else (origin_clean, dest_clean)
-        params_exact_2 = (origin_clean, dest_clean, max_budget) if max_budget else (origin_clean, dest_clean)
-
         # ---------------------------------------------------------
-        # Step 1: Search for connecting flights to the exact destination city
+        # Step 1: Resolve City IDs from City Names
         # ---------------------------------------------------------
-        query_1_stop_exact = f"""
-            SELECT oc.name AS origin_city, l1.name AS layover1, dc.name AS destination_city, co.name AS destination_country,
-                   f1.flight_number AS leg1_flight, f2.flight_number AS leg2_flight,
-                   (f1.price + f2.price) AS total_price, 1 AS stops
-            FROM flights f1
-            JOIN flights f2 ON f1.destination_city_id = f2.origin_city_id
-            JOIN cities oc  ON f1.origin_city_id      = oc.id
-            JOIN cities l1  ON f1.destination_city_id = l1.id
-            JOIN cities dc  ON f2.destination_city_id = dc.id
-            JOIN countries co ON dc.country_id        = co.id
-            WHERE LOWER(oc.name) = ? AND LOWER(dc.name) = ? {budget_cond_1}
-        """
-
-        query_2_stops_exact = f"""
-            SELECT oc.name AS origin_city, l1.name AS layover1, l2.name AS layover2, dc.name AS destination_city, co.name AS destination_country,
-                   f1.flight_number AS leg1_flight, f2.flight_number AS leg2_flight, f3.flight_number AS leg3_flight,
-                   (f1.price + f2.price + f3.price) AS total_price, 2 AS stops
-            FROM flights f1
-            JOIN flights f2 ON f1.destination_city_id = f2.origin_city_id
-            JOIN flights f3 ON f2.destination_city_id = f3.origin_city_id
-            JOIN cities oc  ON f1.origin_city_id      = oc.id
-            JOIN cities l1  ON f1.destination_city_id = l1.id
-            JOIN cities l2  ON f2.destination_city_id = l2.id
-            JOIN cities dc  ON f3.destination_city_id = dc.id
-            JOIN countries co ON dc.country_id        = co.id
-            WHERE LOWER(oc.name) = ? AND LOWER(dc.name) = ? {budget_cond_2}
-        """
-
-        exact_results = []
-        rows_1_stop = self._query(query_1_stop_exact, params_exact_1)
-        if rows_1_stop: exact_results.extend(rows_1_stop)
-
-        rows_2_stops = self._query(query_2_stops_exact, params_exact_2)
-        if rows_2_stops: exact_results.extend(rows_2_stops)
-
-        # If exact results were found, sort and return
-        if exact_results:
-            exact_results.sort(key=lambda x: x["total_price"])
-            return exact_results[:5]
-
-        # ---------------------------------------------------------
-        # Step 2: Fallback (search within the same country)
-        # ---------------------------------------------------------
-        # Find the country ID of the destination city
-        country_rows = self._query(
-            "SELECT co.name AS country_name, co.id AS country_id FROM cities c JOIN countries co ON c.country_id = co.id WHERE LOWER(c.name) = ? LIMIT 1",
-            (dest_clean,)
+        cities_info = self._query(
+            "SELECT id, LOWER(name) as name FROM cities WHERE LOWER(name) IN (?, ?)",
+            (origin_clean, dest_clean)
         )
-
-        if not country_rows:
-            msg = f"No connecting flights found from {origin} to {destination}"
-            msg += f" under ${max_budget}." if max_budget else "."
-            return [{"message": msg}]
-
-        country_name = country_rows[0]["country_name"]
-        country_id   = country_rows[0]["country_id"]
-
-        # Parameters for alternative search
-        params_alt_1 = (origin_clean, country_id, dest_clean, max_budget) if max_budget else (origin_clean, country_id, dest_clean)
-        params_alt_2 = (origin_clean, country_id, dest_clean, max_budget) if max_budget else (origin_clean, country_id, dest_clean)
-
-        query_1_stop_alt = f"""
-            SELECT oc.name AS origin_city, l1.name AS layover1, dc.name AS destination_city, co.name AS destination_country,
-                   f1.flight_number AS leg1_flight, f2.flight_number AS leg2_flight,
-                   (f1.price + f2.price) AS total_price, 1 AS stops
-            FROM flights f1
-            JOIN flights f2 ON f1.destination_city_id = f2.origin_city_id
-            JOIN cities oc  ON f1.origin_city_id      = oc.id
-            JOIN cities l1  ON f1.destination_city_id = l1.id
-            JOIN cities dc  ON f2.destination_city_id = dc.id
-            JOIN countries co ON dc.country_id        = co.id
-            WHERE LOWER(oc.name) = ? AND dc.country_id = ? AND LOWER(dc.name) != ? {budget_cond_1}
-        """
-
-        query_2_stops_alt = f"""
-            SELECT oc.name AS origin_city, l1.name AS layover1, l2.name AS layover2, dc.name AS destination_city, co.name AS destination_country,
-                   f1.flight_number AS leg1_flight, f2.flight_number AS leg2_flight, f3.flight_number AS leg3_flight,
-                   (f1.price + f2.price + f3.price) AS total_price, 2 AS stops
-            FROM flights f1
-            JOIN flights f2 ON f1.destination_city_id = f2.origin_city_id
-            JOIN flights f3 ON f2.destination_city_id = f3.origin_city_id
-            JOIN cities oc  ON f1.origin_city_id      = oc.id
-            JOIN cities l1  ON f1.destination_city_id = l1.id
-            JOIN cities l2  ON f2.destination_city_id = l2.id
-            JOIN cities dc  ON f3.destination_city_id = dc.id
-            JOIN countries co ON dc.country_id        = co.id
-            WHERE LOWER(oc.name) = ? AND dc.country_id = ? AND LOWER(dc.name) != ? {budget_cond_2}
-        """
-
-        alt_results = []
-        rows_1_stop_alt = self._query(query_1_stop_alt, params_alt_1)
-        if rows_1_stop_alt: alt_results.extend(rows_1_stop_alt)
-
-        rows_2_stops_alt = self._query(query_2_stops_alt, params_alt_2)
-        if rows_2_stops_alt: alt_results.extend(rows_2_stops_alt)
-
-        if not alt_results:
-            msg = f"No connecting flights found from {origin} to {destination} or elsewhere in {country_name}"
-            msg += f" under ${max_budget}." if max_budget else "."
-            return [{"message": msg}]
-
-        alt_results.sort(key=lambda x: x["total_price"])
         
-        # Wrap the results in the same format as the direct flights function
-        return [{
-            "message": f"No connecting flights to {destination}, but here are options to other cities in {country_name}:",
-            "alternatives": alt_results[:5]
-        }]
+        origin_id = None
+        dest_id = None
+        for row in cities_info:
+            if row['name'] == origin_clean:
+                origin_id = row['id']
+            elif row['name'] == dest_clean:
+                dest_id = row['id']
+                
+        if not origin_id or not dest_id:
+            return [{"message": f"Could not find geographic data for {origin} or {destination}."}]
+
+        # ---------------------------------------------------------
+        # Step 2: Execute the Recursive CTE
+        # ---------------------------------------------------------
+        # If no budget is provided, use an arbitrarily large number to bypass the constraint
+        budget_limit = max_budget if max_budget is not None else 9999999.0
+
+        sql = """
+        WITH RECURSIVE
+        route_builder(
+            current_dest_id, path_cities, path_flight_ids, first_departure, last_arrival, total_price, stops
+        ) AS (
+            -- Base Case: Flights departing directly from the origin city
+            SELECT 
+                destination_city_id,
+                ',' || CAST(origin_city_id AS TEXT) || ',' || CAST(destination_city_id AS TEXT) || ',',
+                CAST(id AS TEXT),
+                departure_time,
+                arrival_time,
+                price,
+                0
+            FROM flights
+            WHERE origin_city_id = ?
+              AND price <= ?
+
+            UNION ALL
+
+            -- Recursive Step: Connecting flights
+            SELECT 
+                f.destination_city_id,
+                rb.path_cities || CAST(f.destination_city_id AS TEXT) || ',',
+                rb.path_flight_ids || ' -> ' || CAST(f.id AS TEXT),
+                rb.first_departure,
+                f.arrival_time,
+                rb.total_price + f.price,
+                rb.stops + 1
+            FROM route_builder rb
+            JOIN flights f ON rb.current_dest_id = f.origin_city_id
+            WHERE 
+                rb.stops < 2
+                AND f.departure_time >= datetime(rb.last_arrival, '+1 hour')
+                AND rb.path_cities NOT LIKE '%,' || CAST(f.destination_city_id AS TEXT) || ',%'
+                AND (rb.total_price + f.price) <= ?
+        )
+        SELECT 
+            path_flight_ids AS flight_sequence,
+            stops,
+            total_price,
+            first_departure,
+            last_arrival,
+            ROUND((strftime('%s', last_arrival) - strftime('%s', first_departure)) / 3600.0, 2) AS total_duration_hours
+        FROM route_builder
+        WHERE current_dest_id = ?
+        ORDER BY 
+            total_price ASC,
+            stops ASC,
+            total_duration_hours ASC
+        LIMIT 10;
+        """
+        
+        # Parameters match the ? marks in the SQL: origin_id, budget, budget, dest_id
+        params = (origin_id, budget_limit, budget_limit, dest_id)
+        rows = self._query(sql, params)
+        
+        if not rows:
+            msg = f"No valid flight routes found from {origin} to {destination}."
+            if max_budget:
+                msg += f" under budget of ${max_budget}."
+            return [{"message": msg}]
+            
+        return rows
