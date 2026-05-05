@@ -18,7 +18,7 @@ def build_graph(provider: str = "google"):
     Builds the graph using the specified model provider ('google' or 'groq').
     """
     # 1. Create the nodes with the chosen model provider
-    extract_metadata_node, call_model_node, formatter = create_nodes(provider)
+    extract_metadata_node, call_model_node, formatter, summary_node = create_nodes(provider)
     
     # 2. Build the standard graph
     builder = StateGraph(AgentState)
@@ -27,13 +27,15 @@ def build_graph(provider: str = "google"):
     builder.add_node("agent", call_model_node)
     builder.add_node("tools", ToolNode(tools))
     builder.add_node("formatter", formatter)
+    builder.add_node("summary", summary_node)
 
     builder.add_edge(START, "extract_metadata")
     builder.add_edge("extract_metadata", "agent")
     builder.add_conditional_edges("agent", should_continue, {"tools": "tools", "formatter": "formatter"})
     builder.add_edge("tools", "agent")
-    builder.add_edge("formatter", END)
-    
+    builder.add_edge("formatter", "summary")
+    builder.add_edge("summary", END)
+
     return builder.compile()
 
 def run_agent():    

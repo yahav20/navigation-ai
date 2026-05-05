@@ -107,6 +107,29 @@ Extract: current_city, destination_city, budget.
             updates["total_budget"] = metadata.budget
 
         return updates
+    
+    def summary_node(state: AgentState):
+        """Summarizes the current state for debugging purposes."""
+        
+        messages = state.get("messages", [])
+       
+        if len(messages) < 4:
+            return {}
+        
+        messages_to_pass = messages[:-1]
+        summary_prompt = """
+        Summarize the travel planning conversation so far.
+        Include the user's origin, destination, budget, and any flights or hotels that were found and suggested.
+        Keep it concise and factual.
+        """
+        
+        summary = extraction_model.invoke([
+            {"role": "system", "content": summary_prompt},
+            *messages_to_pass
+        ])
+        
+        return {"messages": [summary]}
+        
 
     def call_model(state: AgentState):
         """Examines current state and decides whether to trigger a tool or provide answer."""
@@ -218,4 +241,4 @@ Extract: current_city, destination_city, budget.
         return {"messages": [response]}
         
     # Return both functions ready for graph execution
-    return extract_metadata, call_model, formatter
+    return extract_metadata, call_model, formatter,summary_node
