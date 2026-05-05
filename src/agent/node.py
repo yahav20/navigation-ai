@@ -112,30 +112,41 @@ Extract: current_city, destination_city, budget.
         """Summarizes the current state for debugging purposes."""
         
         messages = state.get("messages", [])
+        existing_summary = state.get("summary", "")
        
-        if len(messages) < 4:
+        if len(messages) < 6:
             return {}
-        
-        messages_to_pass = messages[:-1]
-        summary_prompt = """
-        Summarize the travel planning conversation so far.
-        Include the user's origin, destination, budget, and any flights or hotels that were found and suggested.
-        Keep it concise and factual.
-        """
-        
-        summary = extraction_model.invoke([
+
+        if existing_summary:
+            summary_prompt = f"""
+            This is a summary of the conversation so far: {existing_summary}.
+            Extend the summary by incorporating the new messages above.
+            Focus on: current user location, destination, budget, and specific flight/hotel options selected or rejected.
+            Keep it concise.
+            """
+        else:
+            summary_prompt = """
+            Summarize the travel planning conversation.
+            Extract and preserve: origin, destination, budget, and any found flights/hotels.
+            This summary will be used to continue the session later.
+            """
+
+        response = extraction_model.invoke([
             {"role": "system", "content": summary_prompt},
-            *messages_to_pass
+            *messages
         ])
-        
-        return {"messages": [summary]}
+    
+        return {"summary": response.content}
         
 
     def call_model(state: AgentState):
         """Examines current state and decides whether to trigger a tool or provide answer."""
         current_step = state.get("step_count", 0) + 1
+        summary = state.get("summary", "")
         
         system_prompt = f"""You are a helpful travel assistant.
+        Current Context Summary: {summary}
+        
         Current State Information:
         - User is currently in: {state.get('current_city', 'Unknown')}
         - User wants to travel to: {state.get('destination_city', 'Unknown')}
@@ -233,7 +244,7 @@ Extract: current_city, destination_city, budget.
 
         messages_to_pass = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"Travel data:\n{travel_data}"}
+            {"role": "user", "content": f"<data>\n{travel_data}\n</data>"}
         ]
 
         response = extraction_model.invoke(messages_to_pass)
