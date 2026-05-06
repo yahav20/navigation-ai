@@ -77,13 +77,16 @@ class JSONDataProvider(BaseDataProvider):
         
         hotels = []
         for hotel in self.data.get('hotels', []):
-            if hotel['city'].lower() == city.lower():
-                hotels.append({
-                    'name': hotel['name'],
-                    'price_per_night': hotel['price_per_night'],
-                    'stars': hotel['stars'],
-                    'amenities': hotel['amenities'],
-                })
+            if hotel['city'].lower() != city.lower():
+                continue
+            if max_price is not None and hotel['price_per_night'] > max_price:
+                continue
+            hotels.append({
+                'name': hotel['name'],
+                'price_per_night': hotel['price_per_night'],
+                'stars': hotel['stars'],
+                'amenities': hotel['amenities'],
+            })
         
         if not hotels:
             return [{"message": f"No available hotels in {city}."}]

@@ -80,6 +80,9 @@ Candidates:
             return {"alternative_destinations": []}
 
         budget = state.get("total_budget")
+        budget_optional = state.get("budget_optional", False)
+        apply_budget = bool(budget) and not budget_optional
+
         enriched = []
         seen_cities = set()
         for pick in shortlist:
@@ -92,14 +95,27 @@ Candidates:
             seen_cities.add(key)
 
             raw_flights = data_provider.fetch_flights(origin, city) or []
-            flights = [f for f in raw_flights if isinstance(f, dict) and "flight_number" in f]
+            flights = [
+                f for f in raw_flights
+                if isinstance(f, dict) and "flight_number" in f
+                and isinstance(f.get("price"), (int, float))
+            ]
 
-            if budget:
-                raw_hotels = data_provider.fetch_hotels(city, budget)
-            else:
-                raw_hotels = data_provider.fetch_hotels(city)
-            raw_hotels = raw_hotels or []
-            hotels = [h for h in raw_hotels if isinstance(h, dict) and "price_per_night" in h]
+            raw_hotels = data_provider.fetch_hotels(city) or []
+            hotels = [
+                h for h in raw_hotels
+                if isinstance(h, dict)
+                and isinstance(h.get("price_per_night"), (int, float))
+            ]
+
+            if apply_budget and flights and hotels:
+                cheapest_flight = min(f["price"] for f in flights)
+                cheapest_hotel = min(h["price_per_night"] for h in hotels)
+                flights = [f for f in flights if f["price"] + cheapest_hotel <= budget]
+                hotels = [h for h in hotels if cheapest_flight + h["price_per_night"] <= budget]
+
+            if not flights or not hotels:
+                continue
 
             enriched.append({**pick, "flights": flights, "hotels": hotels})
 
@@ -110,6 +126,21 @@ Candidates:
         original_destination = state.get("destination_city", "your destination")
         origin = state.get("current_city", "your origin")
         budget = state.get("total_budget")
+
+        if not alternatives:
+            from langchain_core.messages import AIMessage
+            budget_line = (
+                f" within your **${budget:g}** budget"
+                if isinstance(budget, (int, float)) and budget
+                else ""
+            )
+            text = (
+                f"Unfortunately, we could not find any flights from **{origin}** to "
+                f"**{original_destination}**, and no reachable alternative destinations "
+                f"from **{origin}**{budget_line} are available in our database.\n\n"
+                "Try a different origin or destination, or adjust your budget."
+            )
+            return {"messages": [AIMessage(content=text)]}
 
         payload = {
             "current_city": origin,
@@ -154,7 +185,7 @@ Candidates:
                 **Hotels in [Alternative City]:**
                 * **[Hotel Name]** — [Stars] stars, [price_per_night with currency]/night
 
-                [Repeat as Option 2, Option 3 for each remaining alternative. If a given alternative has no flights or no hotels in the data, write "No flights available." or "No hotels matching your budget." for that subsection — do NOT invent data.]
+                [Repeat as Option 2, Option 3 for each remaining alternative. If a given alternative has no flights or no hotels in the data, write "No flights available." or "No hotels within your budget for this city." for that subsection — do NOT invent data.]
 
                 ---
 
