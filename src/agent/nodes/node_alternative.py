@@ -45,6 +45,9 @@ def create_alternative_nodes(provider: str = "google"):
         )
 
         usable = [c for c in candidates if isinstance(c, dict) and c.get("city")]
+        print(f"--- alternative_destination_node: {len(usable)} reachable candidates from {origin} (sorted by distance to {destination}) ---")
+        for c in usable:
+            print(f"    {c.get('city')}, {c.get('country', 'Unknown')} — {round(c.get('distance_km', 0))} km")
         if not usable:
             return {"alternative_destinations": []}
 

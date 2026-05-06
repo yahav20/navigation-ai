@@ -94,6 +94,17 @@ class BaseDataProvider(ABC):
         pass
 
     @abstractmethod
+    def get_reachable_destinations_by_distance(
+        self, origin: str, destination: str, limit: int = 10
+    ) -> list:
+        """
+        Return cities reachable by flight from `origin`, ordered by distance to
+        `destination`. Used by the alternative_destination node when no flights
+        to the requested destination exist.
+        """
+        pass
+
+    @abstractmethod
     def get_average_weather(self, city: str, season: str) -> float:
         """
         Get the average temperature for a specific city during a specific season.

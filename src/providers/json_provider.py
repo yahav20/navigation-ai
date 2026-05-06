@@ -129,6 +129,11 @@ class JSONDataProvider(BaseDataProvider):
     def get_cities_in_country(self, country_name: str, origin: str = None) -> list:
         return _country_cities(self, country_name, origin)
 
+    def get_reachable_destinations_by_distance(
+        self, origin: str, destination: str, limit: int = 10
+    ) -> list:
+        return []
+
     def get_average_weather(self, city: str, season: str) -> dict:
         """
         Get the average temperature for a specific city during a specific season.

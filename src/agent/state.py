@@ -16,3 +16,4 @@ class AgentState(TypedDict):
     enrichment_asked_fields: list  # field keys already requested from the user
     budget_optional: bool          # True when user explicitly declined to provide a budget
     summary: str                   # rolling conversation summary maintained by summary_node
+    alternative_destinations: list # populated when fetch_flights returns no results for the route

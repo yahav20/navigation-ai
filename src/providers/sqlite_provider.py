@@ -6,6 +6,9 @@ from .sqlite_modules.sql_result_counter import (
     get_flight_dimensions as _flight_dims,
     get_cities_in_country as _country_cities,
 )
+from .sqlite_modules.reachable_destinations import (
+    get_reachable_destinations_by_distance as _reachable,
+)
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "data", "travel_agency.db")
 
@@ -139,6 +142,11 @@ class SQLiteDataProvider(BaseDataProvider):
 
     def get_cities_in_country(self, country_name: str, origin: str = None) -> list:
         return _country_cities(self, country_name, origin)
+
+    def get_reachable_destinations_by_distance(
+        self, origin: str, destination: str, limit: int = 10
+    ) -> list:
+        return _reachable(self, origin, destination, limit)
 
     def get_average_weather(self, city: str, season: str) -> dict:
         rows = self._query(
