@@ -1,7 +1,7 @@
 import json
 from agent.state import AgentState
 from agent.models import TravelMetadata
-from agent.enrichment import EnrichmentNode
+from agent.nodes.enrichment import EnrichmentNode
 from tools.enrichment_tools import enrichment_tools
 from tools.tools import tools
 from langchain_google_genai import ChatGoogleGenerativeAI

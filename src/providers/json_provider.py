@@ -1,6 +1,11 @@
 import os
 import json
 from .base import BaseDataProvider
+from .sqlite_modules.json_result_counter import (
+    get_hotel_dimensions as _hotel_dims,
+    get_flight_dimensions as _flight_dims,
+    get_cities_in_country as _country_cities,
+)
 
 TRAVEL_DB = './data/travel_db.json'
 
@@ -114,32 +119,15 @@ class JSONDataProvider(BaseDataProvider):
                 
         return {"message": f"No recommendations found for {city}."}
 
+
     def get_hotel_dimensions(self, city: str) -> dict:
-        hotels = [h for h in self.fetch_hotels(city) if "message" not in h]
-        if not hotels:
-            return {"available": False}
-        stars = sorted({h["stars"] for h in hotels if "stars" in h})
-        prices = [h["price_per_night"] for h in hotels if "price_per_night" in h]
-        return {
-            "stars_available": stars,
-            "price_min": min(prices) if prices else None,
-            "price_max": max(prices) if prices else None,
-        }
+        return _hotel_dims(self, city)
 
     def get_flight_dimensions(self, origin: str, destination: str) -> dict:
-        flights = [f for f in self.fetch_flights(origin, destination) if "message" not in f]
-        if not flights:
-            return {"available": False}
-        airlines = sorted({f["airline"] for f in flights if "airline" in f})
-        prices = [f["price"] for f in flights if "price" in f]
-        return {
-            "airlines_available": airlines,
-            "price_min": min(prices) if prices else None,
-            "price_max": max(prices) if prices else None,
-        }
+        return _flight_dims(self, origin, destination)
 
     def get_cities_in_country(self, country_name: str, origin: str = None) -> list:
-        return []
+        return _country_cities(self, country_name, origin)
 
     def get_average_weather(self, city: str, season: str) -> dict:
         """
