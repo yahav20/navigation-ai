@@ -87,13 +87,5 @@ def get_average_weather(city: str, season: str):
     """
     return data_provider.get_average_weather(city, season)
 
-# Tools bound to the planning agent. The reachable-alternatives lookup is
-# invoked directly by the alternative_destination_node, not exposed here.
-tools = [
-    fetch_flights,
-    fetch_hotels,
-    calculate_trip_cost,
-    fetch_activities,
-    get_best_time_to_visit,
-    get_average_weather,
-]
+
+tools = [fetch_flights, fetch_hotels, calculate_trip_cost, fetch_activities, get_best_time_to_visit, get_average_weather]

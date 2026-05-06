@@ -35,6 +35,7 @@ class SQLiteDataProvider(BaseDataProvider):
                       dc.name  AS destination_city,
                       co.name  AS destination_country,
                       f.airline, f.price, f.flight_number, f.availability
+               FROM flights f
                JOIN cities oc  ON f.origin_city_id      = oc.id
                JOIN cities dc  ON f.destination_city_id = dc.id
                JOIN countries co ON dc.country_id        = co.id
@@ -124,7 +125,6 @@ class SQLiteDataProvider(BaseDataProvider):
             "months": [m.strip() for m in rows[0]["months"].split(",")],
             "reason": rows[0]["reason"],
         }
-
 
     def get_average_weather(self, city: str, season: str) -> dict:
         rows = self._query(

@@ -72,23 +72,3 @@ class BaseDataProvider(ABC):
             Average temperature in Celsius for the specified city and season
         """
         pass
-
-    @abstractmethod
-    def get_reachable_destinations_by_distance(
-        self, origin: str, destination: str, limit: int = 10
-    ) -> list:
-        """
-        Return destinations that have at least one flight from `origin`,
-        ordered by great-circle distance to `destination` (closest first).
-        Used to suggest reachable alternatives when no flights to the
-        requested destination are available.
-
-        Args:
-            origin: Origin city the user is flying from
-            destination: City the user originally wanted to fly to
-            limit: Maximum number of candidates to return
-        Returns:
-            List of dicts with city, country, lat, lng, distance_km — or a
-            single message dict if the origin or destination cannot be located.
-        """
-        pass
