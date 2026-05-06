@@ -15,3 +15,4 @@ class AgentState(TypedDict):
     user_preferences: dict
     enrichment_asked_fields: list  # field keys already requested from the user
     budget_optional: bool          # True when user explicitly declined to provide a budget
+    summary: str                   # rolling conversation summary maintained by summary_node

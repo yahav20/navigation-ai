@@ -6,6 +6,7 @@ from langgraph.checkpoint.memory import MemorySaver
 
 from agent.state import AgentState
 from agent.edge import should_continue
+from agent.nodes.enrichment import after_enrichment
 from tools.tools import tools
 
 # Note: We are now importing the function that creates the nodes, not the nodes themselves
@@ -20,12 +21,13 @@ def build_graph(provider: str = "google"):
     Builds the graph using the specified model provider ('google' or 'groq').
     """
     # 1. Create the nodes with the chosen model provider
-    extract_metadata_node, call_model_node, formatter, summary_node = create_nodes(provider)
+    extract_metadata_node, enrichment_node, call_model_node, formatter, summary_node = create_nodes(provider)
     
     # 2. Build the standard graph
     builder = StateGraph(AgentState)
 
     builder.add_node("extract_metadata", extract_metadata_node)
+    builder.add_node("enrichment", enrichment_node)
     builder.add_node("agent", call_model_node)
     builder.add_node("tools", ToolNode(tools))
     builder.add_node("formatter", formatter)
@@ -33,7 +35,8 @@ def build_graph(provider: str = "google"):
 
     # 3. Define the workflow edges
     builder.add_edge(START, "extract_metadata")
-    builder.add_edge("extract_metadata", "agent")
+    builder.add_edge("extract_metadata", "enrichment")
+    builder.add_conditional_edges("enrichment", after_enrichment, {"agent": "agent", END: END})
     builder.add_conditional_edges("agent", should_continue, {"tools": "tools", "formatter": "formatter"})
     builder.add_edge("tools", "agent")
     builder.add_edge("formatter", "summary")
