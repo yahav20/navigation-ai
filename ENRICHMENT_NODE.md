@@ -18,7 +18,11 @@ The enrichment node runs through up to five sequential phases on every user mess
 ### Phase 1 — Required fields check
 Reads `current_city`, `destination_city`, and `total_budget` from the state (populated by the preceding `extract_metadata` node). If any field is missing, the node uses the LLM to ask the user for the missing information in a friendly, conversational way.
 
-This check is pure Python logic — no database queries, no LLM reasoning.
+**Refusal handling:** If the node has previously asked for a field and the user still hasn't provided it, a single `RefusalDetection` LLM call checks whether the user is actively refusing:
+- **Mandatory fields** (`current_city`, `destination_city`): refusal triggers a firm but polite message explaining that the information is required and offering the user the option to type `exit`.
+- **Optional field** (`total_budget`): refusal sets `budget_optional = True` in state and the node continues without a budget constraint — the user is never asked again.
+
+This check is pure Python logic — no database queries, no LLM reasoning beyond the single refusal-detection call.
 
 ### Phase 2 — Country destination check
 Checks whether `destination_city` is actually a country name rather than a specific city. It queries the database for destination cities in that country that have available flights from the user's origin. If more than one city is found, the user is asked to choose. If exactly one city is found, the destination is silently corrected and the node continues.
@@ -55,26 +59,36 @@ When the user answers, `MemorySaver` ensures the full conversation history (incl
 ### `src/agent/state.py`
 - Added `enrichment_complete: bool` — tracks whether the enrichment gate has been passed in the current turn.
 - Added `user_preferences: dict` — stores filtering preferences extracted from the user (e.g. min star rating, max price).
+- Added `enrichment_asked_fields: list` — tracks which fields have already been requested so refusal detection is only triggered on follow-up turns.
+- Added `budget_optional: bool` — set to `True` when the user explicitly declines to provide a budget; prevents re-asking.
+
+### `src/agent/models.py` *(new)*
+- `TravelMetadata` — Pydantic model used by `extract_metadata` to pull origin, destination, and budget from conversation history.
+- `UserPreferences` — Pydantic model with four optional fields: `min_hotel_stars`, `max_hotel_price_per_night`, `max_flight_price`, `preferred_airline`.
+- `RefusalDetection` — Pydantic model with three boolean flags used to detect when the user is actively refusing to supply a required field.
+
+### `src/tools/enrichment_tools.py` *(new)*
+- `get_hotel_filter_options(city)` — `@tool`; calls `get_hotel_dimensions()` on the active provider.
+- `get_flight_filter_options(origin, destination)` — `@tool`; calls `get_flight_dimensions()` on the active provider.
+- `enrichment_tools` — list exported for model binding.
+- `enrichment_tool_map` — name → function dict used by the mini-agent's manual tool loop.
+
+### `src/agent/enrichment.py` *(new)*
+- `OPTION_THRESHOLD = 2` — maximum number of flights or hotels before preferences are solicited.
+- `_count_travel_options(origin, destination)` — fetches real flights and hotels from the active provider, filtering out "no results" messages.
+- `_get_country_cities(destination, origin)` — checks if the destination is a country name and returns the available cities.
+- `_apply_pref_filter(flights, hotels, prefs)` — filters fetched options against the user's stated preferences.
+- `make_check_enrichment(extraction_model, enrichment_question_model)` — factory that returns the `check_enrichment` node, closing over the injected LLM instances. Contains the complete five-phase logic described above.
 
 ### `src/agent/edge.py`
 - Added `after_enrichment(state)` — conditional edge function that returns `"agent"` when `enrichment_complete` is `True` and `END` otherwise.
 
 ### `src/agent/node.py`
-- Added imports: `tool` and `ToolMessage` from LangChain core; `create_data_provider` from `tools.tools`.
-- Added `OPTION_THRESHOLD = 2` constant.
-- Added `UserPreferences` Pydantic model with four optional fields: `min_hotel_stars`, `max_hotel_price_per_night`, `max_flight_price`, `preferred_airline`.
-- Added module-level helpers:
-  - `_count_travel_options(origin, destination)` — fetches real flights and hotels from the active provider, filtering out "no results" messages.
-  - `_get_country_cities(destination, origin)` — checks if the destination is a country name and returns the available cities.
-  - `_apply_pref_filter(flights, hotels, prefs)` — filters fetched options against the user's stated preferences.
-- Added module-level enrichment tools (`@tool`):
-  - `get_hotel_filter_options(city)` — targeted SQL query returning distinct star ratings and price range only.
-  - `get_flight_filter_options(origin, destination)` — targeted SQL query returning distinct airlines and price range only.
-- Inside `create_nodes()`:
-  - Created `enrichment_question_model` by binding the two enrichment tools to `extraction_model`.
-  - Added `check_enrichment` node implementing the five-phase logic described above.
-  - Updated `call_model` system prompt to include `user_preferences` when present, and to explicitly require tool calls before answering.
-  - Updated the return tuple to include `check_enrichment`.
+- Imports `TravelMetadata` from `agent.models`, `make_check_enrichment` from `agent.enrichment`, and `enrichment_tools` from `tools.enrichment_tools`. All enrichment-specific code has been removed.
+- `get_models(provider)` — factory returning `(model_with_tools, extraction_model)` for Google Gemini or Groq Llama.
+- `extract_travel_data(state)` — utility used by `formatter` to parse tool-call results out of message history.
+- `create_nodes(provider)` — builds `enrichment_question_model` by binding `enrichment_tools` to `extraction_model`, delegates enrichment node creation to `make_check_enrichment`, and defines `extract_metadata`, `call_model`, and `formatter` inline. Returns all four as a tuple.
+- `call_model` system prompt now handles three budget states: a known number, `budget_optional=True` ("Not specified — no budget constraint"), and unknown.
 
 ### `src/main.py`
 - Imported `MemorySaver` and `after_enrichment`.
