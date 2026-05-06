@@ -6,6 +6,7 @@ from agent.nodes.enrichment import EnrichmentNode
 from tools.tools import tools
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_groq import ChatGroq
+from langchain_ollama import ChatOllama
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -15,6 +16,7 @@ class TravelMetadata(BaseModel):
     current_city: Optional[str] = Field(default=None, description="The city the user is currently in / starting from")
     destination_city: Optional[str] = Field(default=None, description="The city the user wants to travel to")
     budget: Optional[float] = Field(default=None, description="The user's travel budget as a number, if mentioned")
+    trip_days: Optional[int] = Field(default=None, description="Number of days the user wants to spend on the trip, if mentioned")
 
 # --- Factory function for model selection ---
 def get_models(provider: str = "google"):
@@ -25,49 +27,55 @@ def get_models(provider: str = "google"):
         print(" Initializing Groq (Llama 3)...")
         model = ChatGroq(model="llama-3.1-8b-instant", temperature=0).bind_tools(tools)
         extraction_model = ChatGroq(model="llama-3.1-8b-instant", temperature=0)
+    elif provider.lower() == "ollama":
+        print(f" Initializing Ollama (local — {"gpt-oss:120b-cloud"})...")
+        model = ChatOllama(model="gpt-oss:120b-cloud", temperature=0).bind_tools(tools)
+        extraction_model = ChatOllama(model="gpt-oss:120b-cloud", temperature=0)
     else:
         print(" Initializing Google (Gemini 2.5 Flash)...")
         model = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0).bind_tools(tools)
         extraction_model = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0)
-        
+
     return model, extraction_model
 
 def extract_travel_data(state: AgentState):
-    # Use dictionaries to prevent duplicates (key is flight number or hotel name)
     flights_dict = {}
     hotels_dict = {}
+    trip_cost_calculations = []
 
     for msg in state.get("messages", []):
         if msg.type == "tool":
             tool_name = getattr(msg, "name", "")
             try:
                 data = json.loads(msg.content)
-                if isinstance(data, dict):
-                    data = [data]
-                    
                 if tool_name == "fetch_flights":
+                    if isinstance(data, dict):
+                        data = [data]
                     for f in data:
-                        # Use flight number as unique key
                         flight_num = f.get("flight_number", "unknown")
                         flights_dict[flight_num] = f
                 elif tool_name == "fetch_hotels":
+                    if isinstance(data, dict):
+                        data = [data]
                     for h in data:
-                        # Use hotel name as unique key
                         hotel_name = h.get("name", "unknown")
                         hotels_dict[hotel_name] = h
+                elif tool_name == "calculate_trip_cost":
+                    if isinstance(data, dict) and "total_estimate" in data:
+                        trip_cost_calculations.append(data)
             except json.JSONDecodeError:
                 continue
-            
+
     exclude_keys = {"messages", "step_count"}
     travel_data = {
-        key: value 
-        for key, value in state.items() 
+        key: value
+        for key, value in state.items()
         if key not in exclude_keys
     }
 
-    # Convert back to a list clean of duplicates
     travel_data["flights"] = list(flights_dict.values())
     travel_data["hotels"] = list(hotels_dict.values())
+    travel_data["trip_cost_calculations"] = trip_cost_calculations
 
     return travel_data
 
@@ -97,11 +105,11 @@ def create_nodes(provider: str):
             {
                 "role": "system",
                 "content": """
-Extract travel metadata from the conversation.
-Only fill a field if it is explicitly mentioned or very clear.
-Do not guess. If a field is missing, return null.
-Extract: current_city, destination_city, budget.
-"""
+                Extract travel metadata from the conversation.
+                Only fill a field if it is explicitly mentioned or very clear.
+                Do not guess. If a field is missing, return null.
+                Extract: current_city, destination_city, budget, trip_days.
+                """
             },
             *recent_messages,
         ])
@@ -112,6 +120,8 @@ Extract: current_city, destination_city, budget.
             updates["destination_city"] = metadata.destination_city
         if metadata.budget is not None:
             updates["total_budget"] = metadata.budget
+        if metadata.trip_days is not None:
+            updates["trip_days"] = metadata.trip_days
 
         # Return updates to be merged into the global state
         return updates
@@ -166,6 +176,7 @@ Extract: current_city, destination_city, budget.
         
         origin = state.get('current_city') or "NOT PROVIDED"
         dest = state.get('destination_city') or "NOT PROVIDED"
+        trip_days = state.get('trip_days') or 3
         if state.get('total_budget'):
             budget = state['total_budget']
         elif state.get('budget_optional'):
@@ -182,14 +193,16 @@ Extract: current_city, destination_city, budget.
         - User is currently in: {origin}
         - User wants to travel to: {dest}
         - User's budget: {budget}
+        - Trip duration: {trip_days} days
 
         CRITICAL INSTRUCTIONS & GUARDRAILS:
         1. MISSING INFO: If ANY of the 'CURRENT TRIP STATUS' fields are 'NOT PROVIDED', ask the user politely for the missing information. Do not search until you have all three.
-        2. EXPLICIT TOOL EXECUTION: You MUST gather real data. If you have the Origin, Destination, and Budget, you MUST call BOTH the `fetch_flights` AND `fetch_hotels` tools. 
-        3. TOOL RESTRICTION: DO NOT call weather, attractions, or cost calculator tools unless the user explicitly asks for them. Focus ONLY on flights and hotels.
-        4. CHECK BUDGET: You must use the budget information to filter your search results. Only return options that fit within the user's stated budget. If no options are found within budget, you may expand the search but must clearly indicate when presenting results.
-        4. NO HALLUCINATIONS: Check your conversation history. Have you received the JSON response from `fetch_flights` and `fetch_hotels`? If NO, you must call them right now. 
-        5. BOUNDARY ENFORCEMENT: Decline any non-travel questions and steer back to the trip.
+        2. EXPLICIT TOOL EXECUTION: You MUST gather real data. If you have the Origin, Destination, and Budget, you MUST call BOTH the `fetch_flights` AND `fetch_hotels` tools.
+        3. COST CALCULATION: After fetching flights and hotels, you MUST call `calculate_trip_cost` using the chosen flight price, the chosen hotel's price per night, and the trip duration ({trip_days} days). This gives the true total cost including accommodation.
+        4. CHECK BUDGET: Compare the total from `calculate_trip_cost` against the user's budget. Only present options whose total fits within the budget. If nothing fits, present the cheapest option and note it exceeds budget.
+        5. TOOL RESTRICTION: DO NOT call weather, attractions, or other tools unless the user explicitly asks. Focus ONLY on flights, hotels, and cost calculation.
+        6. NO HALLUCINATIONS: Check your conversation history. Have you received results from `fetch_flights`, `fetch_hotels`, and `calculate_trip_cost`? If NO, call them now.
+        7. BOUNDARY ENFORCEMENT: Decline any non-travel questions and steer back to the trip.
         
         DO NOT output the final itinerary or list the hotels/flights yourself. Just confirm you found them. DO NOT ask the user any questions. 
         The system will handle formatting the actual list.
@@ -224,19 +237,34 @@ Extract: current_city, destination_city, budget.
             return {}
 
         travel_data = extract_travel_data(state)
-        # TODO: Adding Number of Nights based on the budget.
+
+        # Filter hotels to only those affordable with at least one available flight
+        budget = state.get('total_budget')
+        trip_days = state.get('trip_days') or 3
+        if budget and travel_data.get('flights') and travel_data.get('hotels'):
+            affordable = [
+                h for h in travel_data['hotels']
+                if any(
+                    f.get('price', float('inf')) + h.get('price_per_night', float('inf')) * trip_days <= budget
+                    for f in travel_data['flights']
+                )
+            ]
+            travel_data['hotels'] = affordable  # empty list → formatter will show "no hotels" fallback
+
         system_prompt = """
         You are a strict data formatter. Your ONLY job is to output the provided <data> into the EXACT Markdown template below.
-        
+
         CRITICAL RULES:
         1. DO NOT add conversational filler.
         2. FORCE CURRENCY: You MUST use the '$' symbol for ALL prices and budgets. DO NOT use '€' or '£'.
         3. DO NOT ask the user any questions.
-        4. Use the exact currency provided in the budget.
-        5. If any section has no data, use the appropriate fallback text provided in the template.
-        6. Do not invent flights or hotels. Use ONLY what is in the <data>.
-        3. STRICT CONDITIONAL LOGIC: Follow the IF/ELSE logic in the template perfectly. Do not output the fallback text if data exists.
-        7. YOU MUST USE THIS EXACT TEMPLATE:
+        4. If any section has no data, use the appropriate fallback text provided in the template.
+        5. Do not invent flights or hotels. Use ONLY what is in the <data>.
+        6. STRICT CONDITIONAL LOGIC: Follow the IF/ELSE logic in the template perfectly. Do not output the fallback text if data exists.
+        7. TOTAL PRICE RULE: The <data> includes a "trip_cost_calculations" list with pre-computed totals from the calculate_trip_cost tool.
+           Use the lowest total_estimate from that list as "Total Price". DO NOT recompute the total yourself.
+           If trip_cost_calculations is empty, write "N/A" for Total Price.
+        8. YOU MUST USE THIS EXACT TEMPLATE:
 
         [IF NO FLIGHTS ARE FOUND, USE THIS EXACT TEXT AND DO NOT ADD ANYTHING]
         Based on our search, we unfortunately could not find any available flights from your origin to [Destination City] at this time.
@@ -248,8 +276,8 @@ Extract: current_city, destination_city, budget.
 
         **Destination:** [City Name, Country]
         **Total Budget:** [Budget with correct currency symbol]
-        
-        **Total Price :** [Total price of the flight + hotel with correct currency symbol]
+
+        **Total Price:** [Use the lowest total_estimate from trip_cost_calculations, with $ symbol]
 
         ---
 

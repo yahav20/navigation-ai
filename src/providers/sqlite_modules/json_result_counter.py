@@ -24,5 +24,9 @@ def get_flight_dimensions(provider, origin: str, destination: str) -> dict:
     }
 
 
+def get_origin_cities_in_country(provider, country_name: str, destination: str = None) -> list:
+    return []  # JSON provider has no country-level data
+
+
 def get_cities_in_country(provider, country_name: str, origin: str = None) -> list:
     return []  # JSON provider has no country-level data

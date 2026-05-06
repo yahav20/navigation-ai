@@ -15,5 +15,6 @@ class AgentState(TypedDict):
     user_preferences: dict
     enrichment_asked_fields: list  # field keys already requested from the user
     budget_optional: bool          # True when user explicitly declined to provide a budget
+    trip_days: int                 # number of trip days; defaults to 3 if user skips after being asked
     summary: str                   # rolling conversation summary maintained by summary_node
     alternative_destinations: list # populated when fetch_flights returns no results for the route

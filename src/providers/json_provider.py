@@ -5,6 +5,7 @@ from .sqlite_modules.json_result_counter import (
     get_hotel_dimensions as _hotel_dims,
     get_flight_dimensions as _flight_dims,
     get_cities_in_country as _country_cities,
+    get_origin_cities_in_country as _origin_cities,
 )
 
 TRAVEL_DB = './data/travel_db.json'
@@ -128,6 +129,9 @@ class JSONDataProvider(BaseDataProvider):
 
     def get_flight_dimensions(self, origin: str, destination: str) -> dict:
         return _flight_dims(self, origin, destination)
+
+    def get_origin_cities_in_country(self, country_name: str, destination: str = None) -> list:
+        return _origin_cities(self, country_name, destination)
 
     def get_cities_in_country(self, country_name: str, origin: str = None) -> list:
         return _country_cities(self, country_name, origin)

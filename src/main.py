@@ -86,25 +86,28 @@ def run_agent():
         
         last_printed_content = ""
         last_printed_state = ()
+        current_node = "unknown"
 
-        for event in graph.stream(initial_state, config, stream_mode="values"):
-            last_msg = event["messages"][-1]
+        for mode, data in graph.stream(initial_state, config, stream_mode=["values", "updates"]):
+            if mode == "updates":
+                current_node = next(iter(data))
+                print(f"\n{'='*10} Node: {current_node} {'='*10}")
+                continue
+
+            # mode == "values" — full state snapshot
+            last_msg = data["messages"][-1]
             msg_type = last_msg.__class__.__name__
-            
             content = str(last_msg.content) if hasattr(last_msg, 'content') else "No content"
-            
-            current = event.get('current_city', 'None')
-            dest = event.get('destination_city', 'None')
-            budget = event.get('total_budget', 'None')
+
+            current = data.get('current_city', 'None')
+            dest = data.get('destination_city', 'None')
+            budget = data.get('total_budget', 'None')
             current_state_tuple = (current, dest, budget)
-            
+
             if content != last_printed_content or current_state_tuple != last_printed_state:
-                
                 if content != last_printed_content:
-                    msg_type = last_msg.__class__.__name__
                     print(f"[{msg_type}] Content: {content}")
                     last_printed_content = content
-                
                 print(f"State -> Origin: {current} | Dest: {dest} | Budget: {budget}")
                 print("-" * 20)
                 last_printed_state = current_state_tuple

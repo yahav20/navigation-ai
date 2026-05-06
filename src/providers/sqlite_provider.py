@@ -5,6 +5,7 @@ from .sqlite_modules.sql_result_counter import (
     get_hotel_dimensions as _hotel_dims,
     get_flight_dimensions as _flight_dims,
     get_cities_in_country as _country_cities,
+    get_origin_cities_in_country as _origin_cities,
 )
 from .sqlite_modules.reachable_destinations import (
     get_reachable_destinations_by_distance as _reachable,
@@ -54,12 +55,15 @@ class SQLiteDataProvider(BaseDataProvider):
         if rows:
             return rows
 
-        # Fallback: find the country of the requested destination city
+        # Fallback: find the country via the flights table so we only match
+        # cities that actually exist in flight data (avoids wrong-country matches
+        # from the raw cities CSV, e.g. "Barcelona" appearing in Brazil).
         country_rows = self._query(
-            """SELECT co.name AS country_name, co.id AS country_id
-               FROM cities c
-               JOIN countries co ON c.country_id = co.id
-              WHERE LOWER(c.name) = ?
+            """SELECT DISTINCT co.name AS country_name, co.id AS country_id
+               FROM flights f
+               JOIN cities dc  ON f.destination_city_id = dc.id
+               JOIN countries co ON dc.country_id = co.id
+              WHERE LOWER(dc.name) = ?
               LIMIT 1""",
             (destination.strip().lower(),),
         )
@@ -139,6 +143,9 @@ class SQLiteDataProvider(BaseDataProvider):
 
     def get_flight_dimensions(self, origin: str, destination: str) -> dict:
         return _flight_dims(self, origin, destination)
+
+    def get_origin_cities_in_country(self, country_name: str, destination: str = None) -> list:
+        return _origin_cities(self, country_name, destination)
 
     def get_cities_in_country(self, country_name: str, origin: str = None) -> list:
         return _country_cities(self, country_name, origin)

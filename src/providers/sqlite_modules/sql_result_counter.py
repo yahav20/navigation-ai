@@ -45,6 +45,30 @@ def get_flight_dimensions(provider, origin: str, destination: str) -> dict:
     }
 
 
+def get_origin_cities_in_country(provider, country_name: str, destination: str = None) -> list:
+    """Return distinct origin cities in country_name that have outgoing flights (optionally to destination)."""
+    if destination:
+        rows = provider._query(
+            """SELECT DISTINCT oc.name
+                 FROM flights f
+                 JOIN cities oc ON f.origin_city_id      = oc.id
+                 JOIN cities dc ON f.destination_city_id = dc.id
+                 JOIN countries co ON oc.country_id      = co.id
+                WHERE LOWER(co.name) = ? AND LOWER(dc.name) = ?""",
+            (country_name.strip().lower(), destination.strip().lower()),
+        )
+    else:
+        rows = provider._query(
+            """SELECT DISTINCT oc.name
+                 FROM flights f
+                 JOIN cities oc ON f.origin_city_id = oc.id
+                 JOIN countries co ON oc.country_id  = co.id
+                WHERE LOWER(co.name) = ?""",
+            (country_name.strip().lower(),),
+        )
+    return [r["name"] for r in rows]
+
+
 def get_cities_in_country(provider, country_name: str, origin: str = None) -> list:
     if origin:
         rows = provider._query(
