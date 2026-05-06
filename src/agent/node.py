@@ -6,6 +6,7 @@ from agent.nodes.enrichment import EnrichmentNode
 from tools.tools import tools
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_groq import ChatGroq
+from langchain_ollama import ChatOllama
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -26,11 +27,15 @@ def get_models(provider: str = "google"):
         print(" Initializing Groq (Llama 3)...")
         model = ChatGroq(model="llama-3.1-8b-instant", temperature=0).bind_tools(tools)
         extraction_model = ChatGroq(model="llama-3.1-8b-instant", temperature=0)
+    elif provider.lower() == "ollama":
+        print(f" Initializing Ollama (local — {"gpt-oss:120b-cloud"})...")
+        model = ChatOllama(model="gpt-oss:120b-cloud", temperature=0).bind_tools(tools)
+        extraction_model = ChatOllama(model="gpt-oss:120b-cloud", temperature=0)
     else:
         print(" Initializing Google (Gemini 2.5 Flash)...")
         model = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0).bind_tools(tools)
         extraction_model = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0)
-        
+
     return model, extraction_model
 
 def extract_travel_data(state: AgentState):
