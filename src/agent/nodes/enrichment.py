@@ -1,8 +1,9 @@
 from langchain_core.messages import ToolMessage
+from langgraph.graph import END
 from agent.state import AgentState
 from agent.models import UserPreferences, RefusalDetection
 from tools.tools import create_data_provider
-from tools.enrichment_tools import enrichment_tool_map
+from tools.enrichment_tools import enrichment_tools, enrichment_tool_map
 
 OPTION_THRESHOLD = 2
 
@@ -255,15 +256,20 @@ def _phase5_ask_question(origin, destination, too_many, enrichment_question_mode
 # Node class — replaces the make_check_enrichment factory + nested function
 # ---------------------------------------------------------------------------
 
+def after_enrichment(state: AgentState) -> str:
+    """Conditional edge: route to agent when enrichment is complete, else surface question to user."""
+    return "agent" if state.get("enrichment_complete", False) else END
+
+
 class EnrichmentNode:
     """
     LangGraph node that runs the five-phase enrichment gate.
-    Accepts LLM instances at construction time; LangGraph calls it with state only.
+    Accepts only extraction_model at construction time; binds enrichment tools internally.
     """
 
-    def __init__(self, extraction_model, enrichment_question_model):
+    def __init__(self, extraction_model):
         self.extraction_model = extraction_model
-        self.enrichment_question_model = enrichment_question_model
+        self.enrichment_question_model = extraction_model.bind_tools(enrichment_tools)
 
     def __call__(self, state: AgentState):
         asked = set(state.get("enrichment_asked_fields") or [])

@@ -2,7 +2,6 @@ import json
 from agent.state import AgentState
 from agent.models import TravelMetadata
 from agent.nodes.enrichment import EnrichmentNode
-from tools.enrichment_tools import enrichment_tools
 from tools.tools import tools
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_groq import ChatGroq
@@ -56,7 +55,6 @@ def create_nodes(provider: str):
     Nodes close over the model instances so LangGraph receives plain state → state functions.
     """
     model, extraction_model = get_models(provider)
-    enrichment_question_model = extraction_model.bind_tools(enrichment_tools)
 
     def extract_metadata(state: AgentState):
         """Extract travel metadata from the conversation and update state."""
@@ -91,7 +89,7 @@ def create_nodes(provider: str):
 
         return updates
 
-    check_enrichment = EnrichmentNode(extraction_model, enrichment_question_model)
+    check_enrichment = EnrichmentNode(extraction_model)
 
     def call_model(state: AgentState):
         """Invoke the agent model; it will call fetch_flights / fetch_hotels tools as needed."""

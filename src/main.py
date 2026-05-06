@@ -4,7 +4,8 @@ from langgraph.prebuilt import ToolNode
 from langgraph.checkpoint.memory import MemorySaver
 
 from agent.state import AgentState
-from agent.edge import should_continue, after_enrichment
+from agent.edge import should_continue
+from agent.nodes.enrichment import after_enrichment
 from tools.tools import tools
 
 from agent.node import create_nodes
