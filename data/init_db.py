@@ -51,7 +51,9 @@ CREATE TABLE flights (
     airline             TEXT    NOT NULL,
     price               INTEGER NOT NULL,
     flight_number       TEXT    NOT NULL,
-    availability        TEXT    NOT NULL DEFAULT 'Available'
+    availability        TEXT    NOT NULL DEFAULT 'Available',
+    departure_time      DATETIME NOT NULL,
+    arrival_time        DATETIME NOT NULL
 );
 CREATE INDEX idx_flights_origin      ON flights(origin_city_id);
 CREATE INDEX idx_flights_destination ON flights(destination_city_id);
@@ -161,32 +163,28 @@ def seed_travel(conn: sqlite3.Connection) -> None:
         "new york":  ("New York City", "US"),
         "berlin":    ("Berlin",        "DE"),
         "amsterdam": ("Amsterdam",     "NL"),
+        "athens": ("Athens", "GR"), 
     }
     ids = {key: resolve_city(conn, name, alpha2) for key, (name, alpha2) in city_keys.items()}
 
     flights = [
-        # (origin_key, destination_key, airline, price, flight_number, availability)
-        ("tel aviv", "paris",     "El Al",           350, "LY321", "Available"),
-        ("tel aviv", "paris",     "Air France",      420, "AF123", "Available"),
-        ("tel aviv", "london",    "British Airways", 450, "BA164", "Limited"),
-        ("tel aviv", "london",    "Virgin Atlantic", 390, "VS100", "Available"),
-        ("tel aviv", "tokyo",     "El Al",           950, "LY091", "Available"),
-        ("tel aviv", "tokyo",     "Emirates",        820, "EK312", "Available"),
-        ("tel aviv", "new york",  "United",          750, "UA445", "Limited"),
-        ("tel aviv", "berlin",    "Lufthansa",       280, "LH909", "Available"),
-        ("tel aviv", "berlin",    "Ryanair",         110, "FR101", "Available"),
-        ("tel aviv", "amsterdam", "KLM",             410, "KL456", "Available"),
-        ("london",   "paris",     "Air France",      120, "AF124", "Available"),
-        ("london",   "tokyo",     "JAL",             890, "JL402", "Available"),
-        ("london",   "new york",  "Virgin Atlantic", 550, "VS001", "Limited"),
-        ("new york", "london",    "Virgin Atlantic", 550, "VS002", "Limited"),
-        ("new york", "paris",     "Air France",      480, "AF200", "Available"),
-    ]
+    
+    ("tel aviv", "paris", "El Al", 350, "LY321", "Available", "2026-06-01 08:00:00", "2026-06-01 12:00:00"),
+    ("tel aviv", "paris", "Air France", 420, "AF123", "Available", "2026-06-01 14:30:00", "2026-06-01 18:30:00"),
+    ("tel aviv", "london", "British Airways", 450, "BA164", "Limited", "2026-06-01 09:00:00", "2026-06-01 13:30:00"),
+    ("london", "paris", "Air France", 120, "AF124", "Available", "2026-06-01 16:00:00", "2026-06-01 17:30:00"),
+    ("london", "new york", "Virgin Atlantic", 550, "VS001", "Available", "2026-06-01 18:30:00", "2026-06-01 21:30:00"),
+    ("new york", "paris", "Air France", 480, "AF200", "Available", "2026-06-02 00:30:00", "2026-06-02 10:00:00"),
+    ("tel aviv", "new york", "El Al", 1200, "LY001", "Available", "2026-06-01 05:00:00", "2026-06-01 16:00:00"),
+    ("tel aviv", "athens", "Aegean", 100, "A301", "Available", "2026-06-01 10:00:00", "2026-06-01 12:00:00"),
+    ("athens", "new york", "Delta", 450, "DL101", "Available", "2026-06-01 15:00:00", "2026-06-01 21:00:00"),
+    ("london", "tokyo", "JAL", 700, "JL001", "Available", "2026-06-01 16:00:00", "2026-06-02 12:00:00"),
+]
     conn.executemany(
         """INSERT INTO flights
-               (origin_city_id, destination_city_id, airline, price, flight_number, availability)
-           VALUES (?, ?, ?, ?, ?, ?)""",
-        [(ids[o], ids[d], a, p, fn, av) for o, d, a, p, fn, av in flights],
+               (origin_city_id, destination_city_id, airline, price, flight_number, availability, departure_time, arrival_time)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        [(ids[o], ids[d], a, p, fn, av, dep, arr) for o, d, a, p, fn, av, dep, arr in flights],
     )
 
     hotels = [
