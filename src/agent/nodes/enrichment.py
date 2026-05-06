@@ -126,6 +126,13 @@ def _phase1_required_fields(state, extraction_model, asked):
             missing_labels.append("travel budget")
             missing_keys.add("total_budget")
 
+    if not state.get("trip_days"):
+        if "trip_days" in asked:
+            extra["trip_days"] = 3  # user was asked but didn't answer — use default
+        else:
+            missing_labels.append("number of days for the trip")
+            missing_keys.add("trip_days")
+
     if missing_labels:
         msg = extraction_model.invoke([
             {

@@ -15,6 +15,7 @@ class TravelMetadata(BaseModel):
     current_city: Optional[str] = Field(default=None, description="The city the user is currently in / starting from")
     destination_city: Optional[str] = Field(default=None, description="The city the user wants to travel to")
     budget: Optional[float] = Field(default=None, description="The user's travel budget as a number, if mentioned")
+    trip_days: Optional[int] = Field(default=None, description="Number of days the user wants to spend on the trip, if mentioned")
 
 # --- Factory function for model selection ---
 def get_models(provider: str = "google"):
@@ -97,11 +98,11 @@ def create_nodes(provider: str):
             {
                 "role": "system",
                 "content": """
-Extract travel metadata from the conversation.
-Only fill a field if it is explicitly mentioned or very clear.
-Do not guess. If a field is missing, return null.
-Extract: current_city, destination_city, budget.
-"""
+                Extract travel metadata from the conversation.
+                Only fill a field if it is explicitly mentioned or very clear.
+                Do not guess. If a field is missing, return null.
+                Extract: current_city, destination_city, budget.
+                """
             },
             *recent_messages,
         ])
@@ -112,6 +113,8 @@ Extract: current_city, destination_city, budget.
             updates["destination_city"] = metadata.destination_city
         if metadata.budget is not None:
             updates["total_budget"] = metadata.budget
+        if metadata.trip_days is not None:
+            updates["trip_days"] = metadata.trip_days
 
         # Return updates to be merged into the global state
         return updates
@@ -166,6 +169,7 @@ Extract: current_city, destination_city, budget.
         
         origin = state.get('current_city') or "NOT PROVIDED"
         dest = state.get('destination_city') or "NOT PROVIDED"
+        trip_days = state.get('trip_days') or "NOT PROVIDED"
         if state.get('total_budget'):
             budget = state['total_budget']
         elif state.get('budget_optional'):
@@ -182,6 +186,7 @@ Extract: current_city, destination_city, budget.
         - User is currently in: {origin}
         - User wants to travel to: {dest}
         - User's budget: {budget}
+        - Trip duration: {trip_days} days
 
         CRITICAL INSTRUCTIONS & GUARDRAILS:
         1. MISSING INFO: If ANY of the 'CURRENT TRIP STATUS' fields are 'NOT PROVIDED', ask the user politely for the missing information. Do not search until you have all three.
