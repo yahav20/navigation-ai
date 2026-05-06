@@ -79,6 +79,15 @@ class BaseDataProvider(ABC):
         pass
 
     @abstractmethod
+    def get_origin_cities_in_country(self, country_name: str, destination: str = None) -> list:
+        """
+        Check if the given name is a country and return origin cities that have
+        outgoing flights from that country. Returns an empty list if the name is
+        not a recognized country in the database.
+        """
+        pass
+
+    @abstractmethod
     def get_cities_in_country(self, country_name: str, origin: str = None) -> list:
         """
         Check if the given name is a country and return destination cities that have

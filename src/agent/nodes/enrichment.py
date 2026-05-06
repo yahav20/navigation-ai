@@ -21,8 +21,13 @@ def _count_travel_options(origin: str, destination: str):
 
 
 def _get_country_cities(destination: str, origin: str = None) -> list:
-    """Return cities in the country if destination is a country name, else empty list."""
+    """Return destination cities in the country if destination is a country name, else empty list."""
     return create_data_provider().get_cities_in_country(destination, origin)
+
+
+def _get_origin_cities_from_country(origin: str, destination: str = None) -> list:
+    """Return origin cities in the country if origin is a country name, else empty list."""
+    return create_data_provider().get_origin_cities_in_country(origin, destination)
 
 
 def _apply_pref_filter(flights: list, hotels: list, prefs: dict):
@@ -152,6 +157,42 @@ def _phase1_required_fields(state, extraction_model, asked):
         )
 
     return None, extra
+
+
+def _phase2a_origin_country(state, extraction_model, destination):
+    """
+    If origin looks like a country name, resolve it to a city.
+    Returns (terminal_dict or None, resolved_origin_string).
+    """
+    origin = state.get("current_city")
+    cities = _get_origin_cities_from_country(origin, destination)
+
+    if len(cities) > 1:
+        msg = extraction_model.invoke([
+            {
+                "role": "system",
+                "content": (
+                    "You are a friendly travel assistant. "
+                    "The user specified a country as their origin. "
+                    "Let them know the available departure cities and ask which one they'd like to fly from. "
+                    "Keep it friendly and brief."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"User wants to travel from {origin} (a country). "
+                    f"Available departure cities with flights: {', '.join(cities)}. "
+                    "Ask them to choose one."
+                ),
+            },
+        ])
+        return {"messages": [msg], "enrichment_complete": False}, origin
+
+    if len(cities) == 1:
+        return None, cities[0]
+
+    return None, origin
 
 
 def _phase2_country_destination(state, extraction_model, origin):
@@ -287,11 +328,18 @@ class EnrichmentNode:
             return terminal
 
         origin = state.get("current_city")
+        destination = state.get("destination_city")
 
-        # Phase 2 — country destination
-        terminal, destination = _phase2_country_destination(state, self.extraction_model, origin)
+        # Phase 2a — origin country check
+        terminal, origin = _phase2a_origin_country(state, self.extraction_model, destination)
         if terminal is not None:
             return {**extra, **terminal}
+        origin_update = {"current_city": origin} if origin != state.get("current_city") else {}
+
+        # Phase 2 — destination country check
+        terminal, destination = _phase2_country_destination(state, self.extraction_model, origin)
+        if terminal is not None:
+            return {**extra, **origin_update, **terminal}
 
         dest_update = {"destination_city": destination} if destination != state.get("destination_city") else {}
 
@@ -300,13 +348,13 @@ class EnrichmentNode:
         too_many = [label for label, lst in [("flights", flights), ("hotels", hotels)]
                     if len(lst) > OPTION_THRESHOLD]
         if not too_many:
-            return {**extra, **dest_update, "enrichment_complete": True}
+            return {**extra, **origin_update, **dest_update, "enrichment_complete": True}
 
         # Phase 4 — preference extraction
         terminal = _phase4_extract_preferences(state, self.extraction_model, flights, hotels)
         if terminal is not None:
-            return {**extra, **dest_update, **terminal}
+            return {**extra, **origin_update, **dest_update, **terminal}
 
         # Phase 5 — enrichment question mini-agent
-        return {**extra, **dest_update,
+        return {**extra, **origin_update, **dest_update,
                 **_phase5_ask_question(origin, destination, too_many, self.enrichment_question_model)}

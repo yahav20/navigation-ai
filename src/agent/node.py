@@ -190,11 +190,12 @@ def create_nodes(provider: str):
 
         CRITICAL INSTRUCTIONS & GUARDRAILS:
         1. MISSING INFO: If ANY of the 'CURRENT TRIP STATUS' fields are 'NOT PROVIDED', ask the user politely for the missing information. Do not search until you have all three.
-        2. EXPLICIT TOOL EXECUTION: You MUST gather real data. If you have the Origin, Destination, and Budget, you MUST call BOTH the `fetch_flights` AND `fetch_hotels` tools. 
-        3. TOOL RESTRICTION: DO NOT call weather, attractions, or cost calculator tools unless the user explicitly asks for them. Focus ONLY on flights and hotels.
-        4. CHECK BUDGET: You must use the budget information to filter your search results. Only return options that fit within the user's stated budget. If no options are found within budget, you may expand the search but must clearly indicate when presenting results.
-        4. NO HALLUCINATIONS: Check your conversation history. Have you received the JSON response from `fetch_flights` and `fetch_hotels`? If NO, you must call them right now. 
-        5. BOUNDARY ENFORCEMENT: Decline any non-travel questions and steer back to the trip.
+        2. EXPLICIT TOOL EXECUTION: You MUST gather real data. If you have the Origin, Destination, and Budget, you MUST call BOTH the `fetch_flights` AND `fetch_hotels` tools.
+        3. COST CALCULATION: After fetching flights and hotels, you MUST call `calculate_trip_cost` using the chosen flight price, the chosen hotel's price per night, and the trip duration ({trip_days} days). This gives the true total cost including accommodation.
+        4. CHECK BUDGET: Compare the total from `calculate_trip_cost` against the user's budget. Only present options whose total fits within the budget. If nothing fits, present the cheapest option and note it exceeds budget.
+        5. TOOL RESTRICTION: DO NOT call weather, attractions, or other tools unless the user explicitly asks. Focus ONLY on flights, hotels, and cost calculation.
+        6. NO HALLUCINATIONS: Check your conversation history. Have you received results from `fetch_flights`, `fetch_hotels`, and `calculate_trip_cost`? If NO, call them now.
+        7. BOUNDARY ENFORCEMENT: Decline any non-travel questions and steer back to the trip.
         
         DO NOT output the final itinerary or list the hotels/flights yourself. Just confirm you found them. DO NOT ask the user any questions. 
         The system will handle formatting the actual list.
