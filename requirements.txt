@@ -3,3 +3,4 @@ langchain-google-genai
 langchain-groq
 google-generativeai
 langgraph
+langchain_ollama
