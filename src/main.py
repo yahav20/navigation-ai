@@ -8,7 +8,7 @@ from tools.tools import tools
 
 # Note: We are now importing the function that creates the nodes, not the nodes themselves
 from agent.node import create_nodes
-from agent.node_alternative import create_alternative_nodes
+from src.agent.nodes.node_alternative import create_alternative_nodes
 
 # --- Choose which model provider to run here ---
 # Change to "groq" if Google quota is exceeded, or "google" if you have a valid key
