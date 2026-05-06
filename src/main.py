@@ -15,7 +15,7 @@ from agent.nodes.node_alternative import create_alternative_nodes
 
 # --- Choose which model provider to run here ---
 # Change to "groq" if Google quota is exceeded, or "google" if you have a valid key
-CHOSEN_PROVIDER = "groq"  # or "groq"
+CHOSEN_PROVIDER = "google"  # or "groq"
 
 def build_graph(provider: str = "google"):
     """
