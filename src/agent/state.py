@@ -12,3 +12,6 @@ class AgentState(TypedDict):
     total_budget: float
     step_count: int
     enrichment_complete: bool
+    user_preferences: dict
+    enrichment_asked_fields: list  # field keys already requested from the user
+    budget_optional: bool          # True when user explicitly declined to provide a budget

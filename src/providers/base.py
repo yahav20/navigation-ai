@@ -61,6 +61,39 @@ class BaseDataProvider(ABC):
         pass
     
     @abstractmethod
+    def get_hotel_dimensions(self, city: str) -> dict:
+        """
+        Return only the distinct filtering dimensions for hotels in a city —
+        star ratings available and price range. Used to formulate targeted
+        preference questions without fetching full hotel records.
+        """
+        pass
+
+    @abstractmethod
+    def get_flight_dimensions(self, origin: str, destination: str) -> dict:
+        """
+        Return only the distinct filtering dimensions for flights on a route —
+        available airlines and price range. Used to formulate targeted
+        preference questions without fetching full flight records.
+        """
+        pass
+
+    @abstractmethod
+    def get_cities_in_country(self, country_name: str, origin: str = None) -> list:
+        """
+        Check if the given name is a country and return destination cities that have
+        available flights to that country. Returns an empty list if the name is not
+        a recognized country in the database.
+
+        Args:
+            country_name: Potential country name to look up
+            origin: Optional origin city to restrict results to routable destinations
+        Returns:
+            List of city name strings, empty if country not found
+        """
+        pass
+
+    @abstractmethod
     def get_average_weather(self, city: str, season: str) -> float:
         """
         Get the average temperature for a specific city during a specific season.
