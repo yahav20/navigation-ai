@@ -82,6 +82,7 @@ Candidates:
         budget = state.get("total_budget")
         budget_optional = state.get("budget_optional", False)
         apply_budget = bool(budget) and not budget_optional
+        trip_days = state.get("trip_days") or 2
 
         enriched = []
         seen_cities = set()
@@ -111,8 +112,8 @@ Candidates:
             if apply_budget and flights and hotels:
                 cheapest_flight = min(f["price"] for f in flights)
                 cheapest_hotel = min(h["price_per_night"] for h in hotels)
-                flights = [f for f in flights if f["price"] + cheapest_hotel <= budget]
-                hotels = [h for h in hotels if cheapest_flight + h["price_per_night"] <= budget]
+                flights = [f for f in flights if f["price"] + cheapest_hotel * trip_days <= budget]
+                hotels = [h for h in hotels if cheapest_flight + h["price_per_night"] * trip_days <= budget]
 
             if not flights or not hotels:
                 continue
