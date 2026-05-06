@@ -11,3 +11,4 @@ class AgentState(TypedDict):
     destination_city: str
     total_budget: float
     step_count: int  
+    summary: str
