@@ -1,6 +1,11 @@
 import os
 import sqlite3
 from .base import BaseDataProvider
+from .sqlite_modules.sql_result_counter import (
+    get_hotel_dimensions as _hotel_dims,
+    get_flight_dimensions as _flight_dims,
+    get_cities_in_country as _country_cities,
+)
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "data", "travel_agency.db")
 
@@ -125,6 +130,15 @@ class SQLiteDataProvider(BaseDataProvider):
             "months": [m.strip() for m in rows[0]["months"].split(",")],
             "reason": rows[0]["reason"],
         }
+
+    def get_hotel_dimensions(self, city: str) -> dict:
+        return _hotel_dims(self, city)
+
+    def get_flight_dimensions(self, origin: str, destination: str) -> dict:
+        return _flight_dims(self, origin, destination)
+
+    def get_cities_in_country(self, country_name: str, origin: str = None) -> list:
+        return _country_cities(self, country_name, origin)
 
     def get_average_weather(self, city: str, season: str) -> dict:
         rows = self._query(

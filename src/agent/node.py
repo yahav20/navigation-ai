@@ -2,6 +2,7 @@ import json
 from typing import Optional
 from pydantic import BaseModel, Field
 from agent.state import AgentState
+from agent.nodes.enrichment import EnrichmentNode
 from tools.tools import tools
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_groq import ChatGroq
@@ -77,7 +78,8 @@ def extract_travel_data(state: AgentState):
 def create_nodes(provider: str):
     """Factory that initializes models and returns the node functions for the LangGraph."""
     model, extraction_model = get_models(provider)
-    
+    check_enrichment = EnrichmentNode(extraction_model)
+
     def extract_metadata(state: AgentState):
         """Extract travel metadata from the conversation and update state."""
         updates = {"step_count": state.get("step_count", 0)}
@@ -164,7 +166,12 @@ Extract: current_city, destination_city, budget.
         
         origin = state.get('current_city') or "NOT PROVIDED"
         dest = state.get('destination_city') or "NOT PROVIDED"
-        budget = state.get('total_budget') or "NOT PROVIDED"
+        if state.get('total_budget'):
+            budget = state['total_budget']
+        elif state.get('budget_optional'):
+            budget = "No budget constraint (user opted to skip)"
+        else:
+            budget = "NOT PROVIDED"
         
         # TODO: Refine Tool Restriction Logic
         system_prompt = f"""You are Atlas, a strict and professional luxury travel assistant.       
@@ -211,7 +218,7 @@ Extract: current_city, destination_city, budget.
         
         has_origin = bool(state.get('current_city'))
         has_dest = bool(state.get('destination_city'))
-        has_budget = bool(state.get('total_budget'))
+        has_budget = bool(state.get('total_budget')) or bool(state.get('budget_optional'))
 
         if not (has_origin and has_dest and has_budget):
             return {}
@@ -280,4 +287,4 @@ Extract: current_city, destination_city, budget.
         return {"messages": [response]}
         
     # Return both functions ready for graph execution
-    return extract_metadata, call_model, formatter,summary_node
+    return extract_metadata, check_enrichment, call_model, formatter, summary_node

@@ -10,5 +10,9 @@ class AgentState(TypedDict):
     current_city: str
     destination_city: str
     total_budget: float
-    step_count: int  
-    summary: str
+    step_count: int
+    enrichment_complete: bool
+    user_preferences: dict
+    enrichment_asked_fields: list  # field keys already requested from the user
+    budget_optional: bool          # True when user explicitly declined to provide a budget
+    summary: str                   # rolling conversation summary maintained by summary_node

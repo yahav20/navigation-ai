@@ -1,6 +1,11 @@
 import os
 import json
 from .base import BaseDataProvider
+from .sqlite_modules.json_result_counter import (
+    get_hotel_dimensions as _hotel_dims,
+    get_flight_dimensions as _flight_dims,
+    get_cities_in_country as _country_cities,
+)
 
 TRAVEL_DB = './data/travel_db.json'
 
@@ -113,6 +118,16 @@ class JSONDataProvider(BaseDataProvider):
                 return value
                 
         return {"message": f"No recommendations found for {city}."}
+
+
+    def get_hotel_dimensions(self, city: str) -> dict:
+        return _hotel_dims(self, city)
+
+    def get_flight_dimensions(self, origin: str, destination: str) -> dict:
+        return _flight_dims(self, origin, destination)
+
+    def get_cities_in_country(self, country_name: str, origin: str = None) -> list:
+        return _country_cities(self, country_name, origin)
 
     def get_average_weather(self, city: str, season: str) -> dict:
         """

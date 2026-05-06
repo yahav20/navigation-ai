@@ -17,7 +17,7 @@
       "availability": "Limited"
     },
     {
-      "origin": "TLV",
+      "origin": "Tel Aviv",
       "destination": "Paris",
       "airline": "El Al",
       "price": 350,
@@ -25,7 +25,23 @@
       "availability": "Available"
     },
     {
-      "origin": "TLV",
+      "origin": "Tel Aviv",
+      "destination": "Paris",
+      "airline": "Transavia",
+      "price": 280,
+      "flight_number": "HV534",
+      "availability": "Available"
+    },
+    {
+      "origin": "Tel Aviv",
+      "destination": "Paris",
+      "airline": "Wizz Air",
+      "price": 195,
+      "flight_number": "W64321",
+      "availability": "Limited"
+    },
+    {
+      "origin": "Tel Aviv",
       "destination": "London",
       "airline": "British Airways",
       "price": 420,
@@ -41,7 +57,7 @@
       "availability": "Available"
     },
     {
-      "origin": "TLV",
+      "origin": "Tel Aviv",
       "destination": "Amsterdam",
       "airline": "KLM",
       "price": 410,
@@ -63,6 +79,27 @@
       "price_per_night": 85,
       "stars": 2,
       "amenities": ["Free WiFi"]
+    },
+    {
+      "city": "Paris",
+      "name": "Hotel de Crillon",
+      "price_per_night": 720,
+      "stars": 5,
+      "amenities": ["Spa", "Pool", "Fine Dining", "Concierge"]
+    },
+    {
+      "city": "Paris",
+      "name": "Ibis Paris Gare du Nord",
+      "price_per_night": 110,
+      "stars": 3,
+      "amenities": ["Free WiFi", "24h Reception", "Bar"]
+    },
+    {
+      "city": "Paris",
+      "name": "Hotel du Louvre",
+      "price_per_night": 280,
+      "stars": 4,
+      "amenities": ["City View", "Restaurant", "Fitness Center"]
     },
     {
       "city": "London",
