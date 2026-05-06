@@ -96,9 +96,14 @@ def create_nodes(provider: str):
             return updates
 
         messages = state.get("messages", [])
-        recent_messages = messages[-6:] if messages else []
-        
-        # Use the chosen extraction_model
+        # Exclude tool messages and AI messages with tool_calls — Groq's structured output
+        # (which also uses function calling) conflicts with those message types.
+        recent_messages = [
+            msg for msg in messages[-10:]
+            if getattr(msg, "type", "") in ("human", "ai")
+            and not getattr(msg, "tool_calls", None)
+        ][-6:]
+
         extractor = extraction_model.with_structured_output(TravelMetadata)
         
         metadata: TravelMetadata = extractor.invoke([

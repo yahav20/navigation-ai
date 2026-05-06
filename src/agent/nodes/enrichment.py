@@ -343,18 +343,22 @@ class EnrichmentNode:
 
         dest_update = {"destination_city": destination} if destination != state.get("destination_city") else {}
 
+        return {**extra, **origin_update, **dest_update, "enrichment_complete": True}
+
+        # --- Phases 3-5 disabled (kept for future re-enabling) ---
+
         # Phase 3 — option count
-        flights, hotels = _count_travel_options(origin, destination)
-        too_many = [label for label, lst in [("flights", flights), ("hotels", hotels)]
-                    if len(lst) > OPTION_THRESHOLD]
-        if not too_many:
-            return {**extra, **origin_update, **dest_update, "enrichment_complete": True}
+        # flights, hotels = _count_travel_options(origin, destination)
+        # too_many = [label for label, lst in [("flights", flights), ("hotels", hotels)]
+        #             if len(lst) > OPTION_THRESHOLD]
+        # if not too_many:
+        #     return {**extra, **origin_update, **dest_update, "enrichment_complete": True}
 
         # Phase 4 — preference extraction
-        terminal = _phase4_extract_preferences(state, self.extraction_model, flights, hotels)
-        if terminal is not None:
-            return {**extra, **origin_update, **dest_update, **terminal}
+        # terminal = _phase4_extract_preferences(state, self.extraction_model, flights, hotels)
+        # if terminal is not None:
+        #     return {**extra, **origin_update, **dest_update, **terminal}
 
         # Phase 5 — enrichment question mini-agent
-        return {**extra, **origin_update, **dest_update,
-                **_phase5_ask_question(origin, destination, too_many, self.enrichment_question_model)}
+        # return {**extra, **origin_update, **dest_update,
+        #         **_phase5_ask_question(origin, destination, too_many, self.enrichment_question_model)}
