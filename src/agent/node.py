@@ -206,7 +206,7 @@ Extract: current_city, destination_city, budget.
 
         last_agent_message = state["messages"][-1].content if state.get("messages") else ""
         
-        if "?" in last_agent_message or "let me know" in last_agent_message.lower():
+        if "let me know" in last_agent_message.lower():
             return {}
         
         has_origin = bool(state.get('current_city'))
