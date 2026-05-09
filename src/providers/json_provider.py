@@ -1,7 +1,7 @@
 import os
 import json
 from .base import BaseDataProvider
-from .sqlite_modules.json_result_counter import (
+from .json_modules.json_result_counter import (
     get_hotel_dimensions as _hotel_dims,
     get_flight_dimensions as _flight_dims,
     get_cities_in_country as _country_cities,

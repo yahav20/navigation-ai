@@ -1,20 +1,13 @@
 import os
 import sqlite3
 from .base import BaseDataProvider
-from .sqlite_modules.sql_result_counter import (
-    get_hotel_dimensions as _hotel_dims,
-    get_flight_dimensions as _flight_dims,
-    get_cities_in_country as _country_cities,
-    get_origin_cities_in_country as _origin_cities,
-)
-from .sqlite_modules.reachable_destinations import (
-    get_reachable_destinations_by_distance as _reachable,
-)
+from .sqlite_mixins.hotel_queries import SQLiteHotelQueriesMixin
+from .sqlite_mixins.flight_queries import SQLiteFlightQueriesMixin
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "data", "travel_agency.db")
 
 
-class SQLiteDataProvider(BaseDataProvider):
+class SQLiteDataProvider(SQLiteHotelQueriesMixin, SQLiteFlightQueriesMixin, BaseDataProvider):
     """SQLite-backed data provider using the normalized FK schema."""
 
     def __init__(self, db_path: str = DB_PATH):
@@ -138,22 +131,7 @@ class SQLiteDataProvider(BaseDataProvider):
             "reason": rows[0]["reason"],
         }
 
-    def get_hotel_dimensions(self, city: str) -> dict:
-        return _hotel_dims(self, city)
 
-    def get_flight_dimensions(self, origin: str, destination: str) -> dict:
-        return _flight_dims(self, origin, destination)
-
-    def get_origin_cities_in_country(self, country_name: str, destination: str = None) -> list:
-        return _origin_cities(self, country_name, destination)
-
-    def get_cities_in_country(self, country_name: str, origin: str = None) -> list:
-        return _country_cities(self, country_name, origin)
-
-    def get_reachable_destinations_by_distance(
-        self, origin: str, destination: str, limit: int = 10
-    ) -> list:
-        return _reachable(self, origin, destination, limit)
 
     def get_average_weather(self, city: str, season: str) -> dict:
         rows = self._query(

@@ -2,8 +2,8 @@ from langchain_core.messages import ToolMessage
 from langgraph.graph import END
 from agent.state import AgentState
 from agent.models import UserPreferences, RefusalDetection
-from tools.tools import create_data_provider
-from tools.enrichment_tools import enrichment_tools, enrichment_tool_map
+from providers.factory import create_data_provider
+from tools import enrichment_tools, enrichment_tool_map
 
 OPTION_THRESHOLD = 2
 

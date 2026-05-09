@@ -2,7 +2,7 @@ from typing import List
 from pydantic import BaseModel, Field
 from langchain_core.messages import AIMessage
 from agent.state import AgentState
-from tools.tools import data_provider
+from tools.dependencies import data_provider
 
 
 class AlternativeSuggestion(BaseModel):

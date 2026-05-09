@@ -6,7 +6,7 @@ from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from agent.state import AgentState
 from agent.edge import should_continue, after_enrichment
 from agent.llm import get_models
-from tools.tools import tools
+from tools import core_tools
 
 from agent.nodes.metadata import MetadataNode
 from agent.nodes.enrichment import EnrichmentNode
@@ -37,7 +37,7 @@ def build_graph(provider: str = "google"):
     builder.add_node("extract_metadata", extract_metadata_node)
     builder.add_node("enrichment", enrichment_node)
     builder.add_node("agent", call_model_node)
-    builder.add_node("tools", ToolNode(tools))
+    builder.add_node("tools", ToolNode(core_tools))
     builder.add_node("formatter", formatter)
     builder.add_node("alternative_destination", alternative_destination_node)
     builder.add_node("formatter_alternative", formatter_alternative)

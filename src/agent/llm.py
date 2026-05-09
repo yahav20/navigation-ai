@@ -1,7 +1,7 @@
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_groq import ChatGroq
 from langchain_ollama import ChatOllama
-from tools.tools import tools
+from tools import core_tools as tools
 
 def get_models(provider: str = "google"):
     """

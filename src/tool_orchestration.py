@@ -2,7 +2,7 @@ import os
 from dotenv import load_dotenv 
 from langchain_google_genai import ChatGoogleGenerativeAI 
 from langchain_core.messages import HumanMessage, ToolMessage 
-from tools.tools import (
+from tools import (
     fetch_flights, 
     fetch_hotels, 
     calculate_trip_cost,
