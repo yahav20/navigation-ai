@@ -37,21 +37,26 @@ def run_agent():
                 print(f"\n{'='*10} Node: {current_node} {'='*10}")
                 continue
 
+            messages = data.get("messages", [])
+            if not messages:
+                continue
+                        
             # mode == "values" — full state snapshot
-            last_msg = data["messages"][-1]
+            last_msg = messages[-1]
             msg_type = last_msg.__class__.__name__
             content = str(last_msg.content) if hasattr(last_msg, 'content') else "No content"
 
             current = data.get('current_city', 'None')
             dest = data.get('destination_city', 'None')
             budget = data.get('total_budget', 'None')
-            current_state_tuple = (current, dest, budget)
+            trip_days = data.get('trip_days', 'None')
+            current_state_tuple = (current, dest, budget, trip_days)
 
             if content != last_printed_content or current_state_tuple != last_printed_state:
                 if content != last_printed_content:
                     print(f"[{msg_type}] Content: {content}")
                     last_printed_content = content
-                print(f"State -> Origin: {current} | Dest: {dest} | Budget: {budget}")
+                print(f"State -> Origin: {current} | Dest: {dest} | Budget: {budget} | Trip Days: {trip_days}")
                 print("-" * 20)
                 last_printed_state = current_state_tuple
 

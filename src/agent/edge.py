@@ -1,17 +1,20 @@
+# src/agent/edge.py
 import json
-
+from langgraph.graph import END
 from agent.state import AgentState
 
+# ---------------------------------------------------------
+# Routing Function 1: From Enrichment
+# ---------------------------------------------------------
+def after_enrichment(state: AgentState) -> str:
+    """Conditional edge: route to agent when enrichment is complete, else surface question to user."""
+    return "agent" if state.get("enrichment_complete", False) else END
 
+# ---------------------------------------------------------
+# Helper for the Main Agent Edge
+# ---------------------------------------------------------
 def _no_real_flights_in_history(state: AgentState) -> bool:
-    """True when the message history contains no usable flight records.
-
-    Covers two cases for the alt branch: (a) the agent called fetch_flights and
-    got back a 'no results' message, and (b) the agent skipped fetch_flights
-    entirely (the small Llama variants do this sometimes even when the prompt
-    insists). In both cases there is no flight to show, so the alt branch is
-    the right destination.
-    """
+    """True when the message history contains no usable flight records."""
     for msg in state.get("messages", []):
         if getattr(msg, "type", "") != "tool":
             continue
@@ -30,7 +33,9 @@ def _no_real_flights_in_history(state: AgentState) -> bool:
                 return False
     return True
 
-
+# ---------------------------------------------------------
+# Routing Function 2: From Agent Core
+# ---------------------------------------------------------
 def should_continue(state: AgentState):
     """
     Determines the next path in the graph based on the model's output.

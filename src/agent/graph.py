@@ -1,20 +1,19 @@
-from langgraph.checkpoint import memory
 from langgraph.graph import StateGraph, START, END
 from langgraph.prebuilt import ToolNode
 from langgraph.checkpoint.memory import MemorySaver
+from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
 from agent.state import AgentState
-from agent.edge import should_continue
-from agent.nodes.enrichment import after_enrichment
+from agent.edge import should_continue, after_enrichment
+from agent.llm import get_models
 from tools.tools import tools
 
-from agent.node import create_nodes
-from agent.nodes.node_alternative import create_alternative_nodes
-
-# --- Choose which model provider to run here ---
-# Change to "groq" if Google quota is exceeded, or "google" if you have a valid key
-CHOSEN_PROVIDER = "groq"  # or "groq"
-
+from agent.nodes.metadata import MetadataNode
+from agent.nodes.enrichment import EnrichmentNode
+from agent.nodes.agent_core import AgentNode
+from agent.nodes.summary import SummaryNode
+from agent.nodes.formatting import FormatterNode 
+from agent.nodes.node_alternative import AlternativeDestinationNode, FormatterAlternativeNode
 
 
 def build_graph(provider: str = "google"):
@@ -22,8 +21,15 @@ def build_graph(provider: str = "google"):
     Builds the graph using the specified model provider ('google' or 'groq').
     """
     # 1. Create the nodes with the chosen model provider
-    extract_metadata_node, enrichment_node, call_model_node, formatter, summary_node = create_nodes(provider)
-    alternative_destination_node, formatter_alternative = create_alternative_nodes(provider)
+    model_with_tools, extraction_model = get_models(provider)
+    
+    extract_metadata_node = MetadataNode(extraction_model)
+    enrichment_node = EnrichmentNode(extraction_model)
+    call_model_node = AgentNode(model_with_tools)
+    summary_node = SummaryNode(extraction_model)
+    formatter = FormatterNode(extraction_model)
+    alternative_destination_node = AlternativeDestinationNode(extraction_model)
+    formatter_alternative = FormatterAlternativeNode(extraction_model)
 
     # 2. Build the standard graph
     builder = StateGraph(AgentState)
@@ -57,5 +63,6 @@ def build_graph(provider: str = "google"):
     # The summary node marks the end of the processing cycle for the current turn
     builder.add_edge("summary", END)
     # Adding a checkpointer to save the agent's state across turns
-    memory = MemorySaver()
+    serializer = JsonPlusSerializer()
+    memory = MemorySaver(serde=serializer)
     return builder.compile(checkpointer=memory)

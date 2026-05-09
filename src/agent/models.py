@@ -6,6 +6,7 @@ class TravelMetadata(BaseModel):
     current_city: Optional[str] = Field(default=None, description="The city the user is currently in / starting from")
     destination_city: Optional[str] = Field(default=None, description="The city the user wants to travel to")
     budget: Optional[float] = Field(default=None, description="The user's travel budget as a number, if mentioned")
+    trip_days: Optional[int] = Field(default=None, description="Number of days the user wants to spend on the trip, if mentioned")
 
 
 class UserPreferences(BaseModel):
