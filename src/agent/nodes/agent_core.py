@@ -49,8 +49,7 @@ class AgentNode:
         The system will handle formatting the actual list.
         """
         
-        recent_history = clean_history[-6:]
-        messages_to_pass = [{"role": "system", "content": system_prompt}] + recent_history
+        messages_to_pass = [{"role": "system", "content": system_prompt}] + clean_history
         
         response = self.model.invoke(messages_to_pass)
         

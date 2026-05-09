@@ -56,8 +56,17 @@ class FormatterNode:
         if not state.get("messages"):
             return {}
 
-        last_agent_message = state["messages"][-1].content if state.get("messages") else ""
+        last_msg = state["messages"][-1]
+        content = last_msg.content if hasattr(last_msg, 'content') else "No content"
         
+        if isinstance(content, list):
+            last_agent_message = "".join(
+                part.get("text", "") for part in content 
+                if isinstance(part, dict) and part.get("type") == "text"
+            )
+        else:
+            last_agent_message = str(content)
+
         if "let me know" in last_agent_message.lower():
             return {}
         
