@@ -29,7 +29,11 @@ llm_with_tools = llm.bind_tools(tools)
  
 # 3. Step A: Intent Detection 
 query = "I want to fly from London to Paris and find a hotel under 200 dollars" 
-ai_msg = llm_with_tools.invoke(query) 
+try:
+    ai_msg = llm_with_tools.invoke(query) 
+except Exception as e:
+    print(f"\n[Error] Failed to connect to the AI model. Check internet or API key. Details: {e}")
+    exit(1)
 # 4. Step B: Manual Execution (The Manual Loop) 
 if ai_msg.tool_calls: 
     print(f"Model identified {len(ai_msg.tool_calls)} tool(s) to call.\n")    
@@ -62,7 +66,11 @@ if ai_msg.tool_calls:
         )
     
     # 5. Step C: Closing the Loop 
-    final_response = llm_with_tools.invoke(messages)
+    try:
+        final_response = llm_with_tools.invoke(messages)
+    except Exception as e:
+        print(f"\n[Error] Failed to connect to the AI model. Check internet or API key. Details: {e}")
+        exit(1)
     
     if isinstance(final_response.content, list) and final_response.content[0]['text']:
         clean_text = final_response.content[0].get('text', '')
