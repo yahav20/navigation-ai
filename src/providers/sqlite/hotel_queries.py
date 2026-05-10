@@ -1,5 +1,11 @@
+"""SQLite queries for hotels."""
+
+
 class SQLiteHotelQueriesMixin:
-    def fetch_hotels(self, city: str, max_price: int = None) -> list:
+    """Query hotel rows from the SQLite database."""
+
+    def fetch_hotels(self, city: str, max_price: int | None = None) -> list:
+        """Return hotels in the given city, optionally filtered by max price."""
         sql = """SELECT h.name, h.price_per_night, h.stars
                    FROM hotels h
                    JOIN cities c ON h.city_id = c.id
@@ -14,6 +20,7 @@ class SQLiteHotelQueriesMixin:
         return rows
 
     def get_hotel_dimensions(self, city: str) -> dict:
+        """Return distinct hotel star ratings and price range in the given city."""
         rows = self._query(
             """SELECT DISTINCT h.stars,
                       MIN(h.price_per_night) AS price_min,

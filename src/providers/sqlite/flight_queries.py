@@ -1,10 +1,11 @@
+"""SQLite queries for flights."""
+
+
 class SQLiteFlightQueriesMixin:
+    """Query flight rows from the SQLite database."""
+
     def fetch_flights(self, origin: str, destination: str) -> list:
-        """
-        Search by destination city name first.
-        If no results, fall back to destination country and suggest
-        other cities in that same country.
-        """
+        """Return flights from origin to destination, falling back to other cities in the same country."""
         rows = self._query(
             """SELECT oc.name  AS origin_city,
                       dc.name  AS destination_city,
@@ -64,6 +65,7 @@ class SQLiteFlightQueriesMixin:
         }]
 
     def get_flight_dimensions(self, origin: str, destination: str) -> dict:
+        """Return distinct airlines and price range for flights from origin to destination."""
         rows = self._query(
             """SELECT DISTINCT f.airline,
                       MIN(f.price) AS price_min,
@@ -86,7 +88,7 @@ class SQLiteFlightQueriesMixin:
             "price_max": max(all_prices) if all_prices else None,
         }
 
-    def get_origin_cities_in_country(self, country_name: str, destination: str = None) -> list:
+    def get_origin_cities_in_country(self, country_name: str, destination: str | None = None) -> list:
         """Return distinct origin cities in country_name that have outgoing flights (optionally to destination)."""
         if destination:
             rows = self._query(
@@ -109,7 +111,8 @@ class SQLiteFlightQueriesMixin:
             )
         return [r["name"] for r in rows]
 
-    def get_cities_in_country(self, country_name: str, origin: str = None) -> list:
+    def get_cities_in_country(self, country_name: str, origin: str | None = None) -> list:
+        """Return distinct destination cities in country_name (optionally only from origin)."""
         if origin:
             rows = self._query(
                 """SELECT DISTINCT dc.name
@@ -132,6 +135,7 @@ class SQLiteFlightQueriesMixin:
         return [r["name"] for r in rows]
 
     def get_reachable_destinations_by_distance(self, origin: str, destination: str, limit: int = 10) -> list:
+        """Return destinations reachable from origin sorted by distance from destination."""
         target = self._query(
             """SELECT c.lat, c.lng
                 FROM cities c

@@ -1,5 +1,11 @@
+"""SQLite queries for best-time-to-visit recommendations."""
+
+
 class SQLiteBestTimeQueriesMixin:
+    """Query best-time-to-visit rows from the SQLite database."""
+
     def get_best_time_to_visit(self, city: str) -> dict:
+        """Return the recommended visit months and reason for the given city."""
         rows = self._query(
             """SELECT b.months, b.reason
                FROM best_time_to_visit b

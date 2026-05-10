@@ -1,7 +1,13 @@
+"""Routing edges for the LangGraph travel agent."""
 # src/agent/edge.py
 import json
+
 from langgraph.graph import END
+
 from agent.state import AgentState
+
+MAX_STEPS = 5
+
 
 # ---------------------------------------------------------
 # Routing Function 1: From Enrichment
@@ -14,7 +20,7 @@ def after_enrichment(state: AgentState) -> str:
 # Helper for the Main Agent Edge
 # ---------------------------------------------------------
 def _no_real_flights_in_history(state: AgentState) -> bool:
-    """True when the message history contains no usable flight records."""
+    """Return True when the message history contains no usable flight records."""
     for msg in state.get("messages", []):
         if getattr(msg, "type", "") != "tool":
             continue
@@ -36,9 +42,9 @@ def _no_real_flights_in_history(state: AgentState) -> bool:
 # ---------------------------------------------------------
 # Routing Function 2: From Agent Core
 # ---------------------------------------------------------
-def should_continue(state: AgentState):
-    """
-    Determines the next path in the graph based on the model's output.
+def should_continue(state: AgentState) -> str:
+    """Return the next graph path based on the model's output.
+
     Returns 'tools' if the model wants to call a function, 'alternative_destination'
     when fetch_flights came back empty for a known origin/destination, otherwise 'formatter'.
     """
@@ -48,9 +54,7 @@ def should_continue(state: AgentState):
     dest = state.get("destination_city")
 
     # Safety Check: Stop after 5 tool invocations in a single turn
-    MAX_STEPS = 5
     if step_count >= MAX_STEPS:
-        print("--- Agent stopped due to maximum step count. Possible infinite loop. ---")
         if origin and dest and _no_real_flights_in_history(state):
             return "alternative_destination"
         return "formatter"

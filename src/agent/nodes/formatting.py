@@ -1,37 +1,67 @@
+"""Format the agent's gathered travel data into a Markdown response."""
 import json
+
+from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import BaseMessage
+
 from agent.state import AgentState
 
-def extract_travel_data(state: AgentState):
-    """
-    Helper function used by the Formatter to parse tool executions 
-    and deduplicate flights and hotels.
-    """
-    flights_dict = {}
-    hotels_dict = {}
-    trip_cost_calculations = []
+
+def _parse_tool_payload(msg: BaseMessage) -> object | None:
+    """Return the parsed JSON payload of a tool message, or None on failure."""
+    try:
+        return json.loads(msg.content)
+    except json.JSONDecodeError:
+        return None
+
+
+def _ingest_flights(data: object, flights_dict: dict) -> None:
+    """Merge fetch_flights tool output into the flights dictionary."""
+    if isinstance(data, dict):
+        data = [data]
+    if not isinstance(data, list):
+        return
+    for f in data:
+        flight_num = f.get("flight_number", "unknown")
+        flights_dict[flight_num] = f
+
+
+def _ingest_hotels(data: object, hotels_dict: dict) -> None:
+    """Merge fetch_hotels tool output into the hotels dictionary."""
+    if isinstance(data, dict):
+        data = [data]
+    if not isinstance(data, list):
+        return
+    for h in data:
+        hotel_name = h.get("name", "unknown")
+        hotels_dict[hotel_name] = h
+
+
+def _ingest_trip_cost(data: object, trip_cost_calculations: list) -> None:
+    """Append calculate_trip_cost output to the running list."""
+    if isinstance(data, dict) and "total_estimate" in data:
+        trip_cost_calculations.append(data)
+
+
+def extract_travel_data(state: AgentState) -> dict:
+    """Parse tool executions and deduplicate flights and hotels for the formatter."""
+    flights_dict: dict = {}
+    hotels_dict: dict = {}
+    trip_cost_calculations: list = []
 
     for msg in state.get("messages", []):
-        if msg.type == "tool":
-            tool_name = getattr(msg, "name", "")
-            try:
-                data = json.loads(msg.content)
-                if tool_name == "fetch_flights":
-                    if isinstance(data, dict):
-                        data = [data]
-                    for f in data:
-                        flight_num = f.get("flight_number", "unknown")
-                        flights_dict[flight_num] = f
-                elif tool_name == "fetch_hotels":
-                    if isinstance(data, dict):
-                        data = [data]
-                    for h in data:
-                        hotel_name = h.get("name", "unknown")
-                        hotels_dict[hotel_name] = h
-                elif tool_name == "calculate_trip_cost":
-                    if isinstance(data, dict) and "total_estimate" in data:
-                        trip_cost_calculations.append(data)
-            except json.JSONDecodeError:
-                continue
+        if msg.type != "tool":
+            continue
+        tool_name = getattr(msg, "name", "")
+        data = _parse_tool_payload(msg)
+        if data is None:
+            continue
+        if tool_name == "fetch_flights":
+            _ingest_flights(data, flights_dict)
+        elif tool_name == "fetch_hotels":
+            _ingest_hotels(data, hotels_dict)
+        elif tool_name == "calculate_trip_cost":
+            _ingest_trip_cost(data, trip_cost_calculations)
 
     exclude_keys = {"messages", "step_count"}
     travel_data = {
@@ -48,20 +78,23 @@ def extract_travel_data(state: AgentState):
 
 
 class FormatterNode:
-    def __init__(self, extraction_model):
+    """Render the final travel itinerary as Markdown."""
+
+    def __init__(self, extraction_model: BaseChatModel) -> None:
+        """Store the chat model used to render the formatted response."""
         self.extraction_model = extraction_model
 
-    def __call__(self, state: AgentState):
-        """Final node to format the gathered travel data into a pretty Markdown response."""
+    def __call__(self, state: AgentState) -> dict:
+        """Format the gathered travel data into a Markdown response."""
         if not state.get("messages"):
             return {}
 
         last_msg = state["messages"][-1]
-        content = last_msg.content if hasattr(last_msg, 'content') else "No content"
-        
+        content = last_msg.content if hasattr(last_msg, "content") else "No content"
+
         if isinstance(content, list):
             last_agent_message = "".join(
-                part.get("text", "") for part in content 
+                part.get("text", "") for part in content
                 if isinstance(part, dict) and part.get("type") == "text"
             )
         else:
@@ -69,10 +102,10 @@ class FormatterNode:
 
         if "let me know" in last_agent_message.lower():
             return {}
-        
-        has_origin = bool(state.get('current_city'))
-        has_dest = bool(state.get('destination_city'))
-        has_budget = bool(state.get('total_budget')) or bool(state.get('budget_optional'))
+
+        has_origin = bool(state.get("current_city"))
+        has_dest = bool(state.get("destination_city"))
+        has_budget = bool(state.get("total_budget")) or bool(state.get("budget_optional"))
 
         if not (has_origin and has_dest and has_budget):
             return {}
@@ -80,17 +113,17 @@ class FormatterNode:
         travel_data = extract_travel_data(state)
 
         # Filter hotels to only those affordable with at least one available flight
-        budget = state.get('total_budget')
-        trip_days = state.get('trip_days') or 3
-        if budget and travel_data.get('flights') and travel_data.get('hotels'):
+        budget = state.get("total_budget")
+        trip_days = state.get("trip_days") or 3
+        if budget and travel_data.get("flights") and travel_data.get("hotels"):
             affordable = [
-                h for h in travel_data['hotels']
+                h for h in travel_data["hotels"]
                 if any(
-                    f.get('price', float('inf')) + h.get('price_per_night', float('inf')) * trip_days <= budget
-                    for f in travel_data['flights']
+                    f.get("price", float("inf")) + h.get("price_per_night", float("inf")) * trip_days <= budget
+                    for f in travel_data["flights"]
                 )
             ]
-            travel_data['hotels'] = affordable
+            travel_data["hotels"] = affordable
 
         system_prompt = """
         You are a strict data formatter. Your ONLY job is to output the provided <data> into the EXACT Markdown template below.
@@ -147,10 +180,10 @@ class FormatterNode:
 
         messages_to_pass = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"<data>\n{travel_data}\n</data>"}
+            {"role": "user", "content": f"<data>\n{travel_data}\n</data>"},
         ]
 
         response = self.extraction_model.invoke(messages_to_pass)
-        response.name = "formatter_output" 
+        response.name = "formatter_output"
 
         return {"messages": [response]}

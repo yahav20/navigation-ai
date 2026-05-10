@@ -1,5 +1,11 @@
+"""SQLite queries for average weather data."""
+
+
 class SQLiteWeatherQueriesMixin:
+    """Query average-weather rows from the SQLite database."""
+
     def get_average_weather(self, city: str, season: str) -> dict:
+        """Return the average weather for the given city and season."""
         rows = self._query(
             """SELECT w.season, w.temperature
                FROM average_weather w

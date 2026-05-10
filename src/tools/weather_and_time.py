@@ -1,18 +1,16 @@
+"""LangChain tools for weather and best-time-to-visit lookups."""
 from langchain_core.tools import tool
-from .dependencies import data_provider
+
+from tools.dependencies import data_provider
+
 
 @tool
-def get_best_time_to_visit(city: str):
-    """
-    Find the recommended months to visit a specific city and the underlying reasons (e.g., weather, festivals).
-    Use this when a user is unsure about when to travel to a destination.
-    """
+def get_best_time_to_visit(city: str) -> dict:
+    """Find the recommended months to visit a city and the reasons such as weather or festivals."""
     return data_provider.get_best_time_to_visit(city)
 
+
 @tool
-def get_average_weather(city: str, season: str):
-    """
-    Get the average temperature for a specific city during a specific season.
-    Valid seasons are: 'Spring', 'Summer', 'Autumn', 'Winter'.
-    """
+def get_average_weather(city: str, season: str) -> dict:
+    """Get the average temperature for a city in a given season ('Spring', 'Summer', 'Autumn', 'Winter')."""
     return data_provider.get_average_weather(city, season)

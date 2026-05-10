@@ -1,12 +1,14 @@
-import os
+"""SQLite-backed data provider."""
 import sqlite3
-from .flight_queries import SQLiteFlightQueriesMixin
-from .hotel_queries import SQLiteHotelQueriesMixin
-from .activity_queries import SQLiteActivityQueriesMixin
-from .best_time_queries import SQLiteBestTimeQueriesMixin
-from .weather_queries import SQLiteWeatherQueriesMixin
+from pathlib import Path
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "..", "data", "travel_agency.db")
+from providers.sqlite.activity_queries import SQLiteActivityQueriesMixin
+from providers.sqlite.best_time_queries import SQLiteBestTimeQueriesMixin
+from providers.sqlite.flight_queries import SQLiteFlightQueriesMixin
+from providers.sqlite.hotel_queries import SQLiteHotelQueriesMixin
+from providers.sqlite.weather_queries import SQLiteWeatherQueriesMixin
+
+DB_PATH = str(Path(__file__).parent / ".." / ".." / ".." / "data" / "travel_agency.db")
 
 
 class SQLiteDataProvider(
@@ -18,13 +20,15 @@ class SQLiteDataProvider(
 ):
     """SQLite-backed data provider. Query logic lives in topic mixins."""
 
-    def __init__(self, db_path: str = DB_PATH):
-        self.db_path = os.path.abspath(db_path)
+    def __init__(self, db_path: str = DB_PATH) -> None:
+        """Initialize the provider with the database path."""
+        self.db_path = str(Path(db_path).resolve())
 
     def _query(self, sql: str, params: tuple = ()) -> list[dict]:
-        if not os.path.exists(self.db_path):
+        if not Path(self.db_path).exists():
+            msg = f"Database not found at {self.db_path}. Run data/init_db.py first."
             raise FileNotFoundError(
-                f"Database not found at {self.db_path}. Run data/init_db.py first."
+                msg,
             )
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row

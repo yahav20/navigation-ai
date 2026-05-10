@@ -1,3 +1,4 @@
-from .provider import SQLiteDataProvider
+"""SQLite data provider package."""
+from providers.sqlite.provider import SQLiteDataProvider
 
-__all__ = ['SQLiteDataProvider']
+__all__ = ["SQLiteDataProvider"]

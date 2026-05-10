@@ -1,4 +1,6 @@
+"""LangChain tools for fetching filter dimensions used during enrichment."""
 from langchain_core.tools import tool
+
 from providers import SQLiteDataProvider
 
 data_provider = SQLiteDataProvider()
@@ -6,21 +8,13 @@ data_provider = SQLiteDataProvider()
 
 @tool
 def get_hotel_filter_options(city: str) -> dict:
-    """
-    Fetch distinct hotel filtering dimensions for a destination city:
-    which star ratings exist and the price range per night.
-    Use this to decide what preference question to ask the user about hotels.
-    """
+    """Fetch distinct hotel filtering dimensions for a destination city, including available star ratings and the price-per-night range."""
     return data_provider.get_hotel_dimensions(city)
 
 
 @tool
 def get_flight_filter_options(origin: str, destination: str) -> dict:
-    """
-    Fetch distinct flight filtering dimensions for a route:
-    which airlines operate it and the ticket price range.
-    Use this to decide what preference question to ask the user about flights.
-    """
+    """Fetch distinct flight filtering dimensions for a route, including operating airlines and the ticket price range."""
     return data_provider.get_flight_dimensions(origin, destination)
 
 

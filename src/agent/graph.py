@@ -1,28 +1,30 @@
-from langgraph.graph import StateGraph, START, END
-from langgraph.prebuilt import ToolNode
+"""Build the LangGraph state graph for the travel agent."""
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+from langgraph.graph import END, START, StateGraph
+from langgraph.graph.state import CompiledStateGraph
+from langgraph.prebuilt import ToolNode
 
-from agent.state import AgentState
-from agent.edge import should_continue, after_enrichment
+from agent.edge import after_enrichment, should_continue
 from agent.llm import get_models
+from agent.nodes.agent_core import AgentNode
+from agent.nodes.enrichment import EnrichmentNode
+from agent.nodes.formatting import FormatterNode
+from agent.nodes.metadata import MetadataNode
+from agent.nodes.node_alternative import (
+    AlternativeDestinationNode,
+    FormatterAlternativeNode,
+)
+from agent.nodes.summary import SummaryNode
+from agent.state import AgentState
 from tools import core_tools
 
-from agent.nodes.metadata import MetadataNode
-from agent.nodes.enrichment import EnrichmentNode
-from agent.nodes.agent_core import AgentNode
-from agent.nodes.summary import SummaryNode
-from agent.nodes.formatting import FormatterNode 
-from agent.nodes.node_alternative import AlternativeDestinationNode, FormatterAlternativeNode
 
-
-def build_graph(provider: str = "google"):
-    """
-    Builds the graph using the specified model provider ('google' or 'groq').
-    """
+def build_graph(provider: str = "google") -> CompiledStateGraph:
+    """Build the graph using the specified model provider ('google' or 'groq')."""
     # 1. Create the nodes with the chosen model provider
     model_with_tools, extraction_model = get_models(provider)
-    
+
     extract_metadata_node = MetadataNode(extraction_model)
     enrichment_node = EnrichmentNode(extraction_model)
     call_model_node = AgentNode(model_with_tools)

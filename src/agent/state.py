@@ -1,11 +1,15 @@
+"""Typed state shared across nodes of the travel-agent graph."""
 from typing import Annotated, TypedDict
+
 from langgraph.graph.message import add_messages
 
+
 class AgentState(TypedDict):
-    """
-    The state of the agent, tracked across the graph execution.
+    """Track the state of the agent across the graph execution.
+
     'add_messages' ensures history is preserved.
     """
+
     messages: Annotated[list, add_messages]
     current_city: str
     destination_city: str
