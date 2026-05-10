@@ -1,3 +1,3 @@
-from providers.factory import create_data_provider
+from providers import SQLiteDataProvider
 
-data_provider = create_data_provider("sqlite")
+data_provider = SQLiteDataProvider()

@@ -2,8 +2,10 @@ from langchain_core.messages import ToolMessage
 from langgraph.graph import END
 from agent.state import AgentState
 from agent.models import UserPreferences, RefusalDetection
-from providers.factory import create_data_provider
+from providers import SQLiteDataProvider
 from tools import enrichment_tools, enrichment_tool_map
+
+data_provider = SQLiteDataProvider()
 
 OPTION_THRESHOLD = 2
 
@@ -14,20 +16,19 @@ OPTION_THRESHOLD = 2
 
 def _count_travel_options(origin: str, destination: str):
     """Return real (non-error) flights and hotels from the active provider."""
-    provider = create_data_provider()
-    flights = [f for f in provider.fetch_flights(origin, destination) if "message" not in f]
-    hotels  = [h for h in provider.fetch_hotels(destination)           if "message" not in h]
+    flights = [f for f in data_provider.fetch_flights(origin, destination) if "message" not in f]
+    hotels  = [h for h in data_provider.fetch_hotels(destination)           if "message" not in h]
     return flights, hotels
 
 
 def _get_country_cities(destination: str, origin: str = None) -> list:
     """Return destination cities in the country if destination is a country name, else empty list."""
-    return create_data_provider().get_cities_in_country(destination, origin)
+    return data_provider.get_cities_in_country(destination, origin)
 
 
 def _get_origin_cities_from_country(origin: str, destination: str = None) -> list:
     """Return origin cities in the country if origin is a country name, else empty list."""
-    return create_data_provider().get_origin_cities_in_country(origin, destination)
+    return data_provider.get_origin_cities_in_country(origin, destination)
 
 
 def _apply_pref_filter(flights: list, hotels: list, prefs: dict):

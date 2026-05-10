@@ -1,4 +1,3 @@
-from .base import BaseDataProvider
-from .json_provider import JSONDataProvider
+from .sqlite import SQLiteDataProvider
 
-__all__ = ['BaseDataProvider', 'JSONDataProvider', 'SQLiteDataProvider']
+__all__ = ['SQLiteDataProvider']

@@ -1,4 +1,68 @@
 class SQLiteFlightQueriesMixin:
+    def fetch_flights(self, origin: str, destination: str) -> list:
+        """
+        Search by destination city name first.
+        If no results, fall back to destination country and suggest
+        other cities in that same country.
+        """
+        rows = self._query(
+            """SELECT oc.name  AS origin_city,
+                      dc.name  AS destination_city,
+                      co.name  AS destination_country,
+                      f.airline, f.price, f.flight_number, f.availability
+               FROM flights f
+               JOIN cities oc  ON f.origin_city_id      = oc.id
+               JOIN cities dc  ON f.destination_city_id = dc.id
+               JOIN countries co ON dc.country_id        = co.id
+              WHERE LOWER(oc.name) = ? AND LOWER(dc.name) = ?""",
+            (origin.strip().lower(), destination.strip().lower()),
+        )
+
+        if rows:
+            return rows
+
+        # Fallback: find the country via the flights table so we only match
+        # cities that actually exist in flight data (avoids wrong-country matches
+        # from the raw cities CSV, e.g. "Barcelona" appearing in Brazil).
+        country_rows = self._query(
+            """SELECT DISTINCT co.name AS country_name, co.id AS country_id
+               FROM flights f
+               JOIN cities dc  ON f.destination_city_id = dc.id
+               JOIN countries co ON dc.country_id = co.id
+              WHERE LOWER(dc.name) = ?
+              LIMIT 1""",
+            (destination.strip().lower(),),
+        )
+
+        if not country_rows:
+            return [{"message": f"No flights found from {origin} to {destination}."}]
+
+        country_name = country_rows[0]["country_name"]
+        country_id   = country_rows[0]["country_id"]
+
+        alt_rows = self._query(
+            """SELECT oc.name  AS origin_city,
+                      dc.name  AS destination_city,
+                      co.name  AS destination_country,
+                      f.airline, f.price, f.flight_number, f.availability
+               FROM flights f
+               JOIN cities oc  ON f.origin_city_id      = oc.id
+               JOIN cities dc  ON f.destination_city_id = dc.id
+               JOIN countries co ON dc.country_id        = co.id
+              WHERE LOWER(oc.name) = ?
+                AND dc.country_id  = ?
+                AND LOWER(dc.name) != ?""",
+            (origin.strip().lower(), country_id, destination.strip().lower()),
+        )
+
+        if not alt_rows:
+            return [{"message": f"No flights found from {origin} to {destination} or elsewhere in {country_name}."}]
+
+        return [{
+            "message": f"No direct flights to {destination}, but here are flights to other cities in {country_name}:",
+            "alternatives": alt_rows,
+        }]
+
     def get_flight_dimensions(self, origin: str, destination: str) -> dict:
         rows = self._query(
             """SELECT DISTINCT f.airline,
