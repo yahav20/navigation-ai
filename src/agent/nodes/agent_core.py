@@ -1,60 +1,50 @@
 # src/agent/nodes/agent_core.py
 from langchain_core.runnables import Runnable
-
 from agent.state import AgentState
 
-
 class AgentNode:
-    """Drive the main agent step that decides whether to call tools or reply."""
-
     def __init__(self, model_with_tools: Runnable) -> None:
         self.model = model_with_tools
 
     def __call__(self, state: AgentState) -> dict:
         current_step = state.get("step_count", 0) + 1
-        summary = state.get("summary", "")
-
-        clean_history = [
-            msg for msg in state.get("messages", [])
-            if getattr(msg, "type", "") != "formatter_output"
-        ]
+        messages = state.get("messages", [])
+        
+        clean_history = [m for m in messages if getattr(m, "type", "") != "formatter_output"]
 
         origin = state.get("current_city") or "NOT PROVIDED"
         dest = state.get("destination_city") or "NOT PROVIDED"
         trip_days = state.get("trip_days") or 3
-        
-        if state.get("total_budget"):
-            budget = state["total_budget"]
-        elif state.get("budget_optional"):
-            budget = "No budget constraint"
+        budget = state.get("total_budget") or "NOT PROVIDED"
+
+        executed_tools = [getattr(m, "name", "") for m in messages if getattr(m, "type", "") == "tool"]
+
+        if "fetch_flights" not in executed_tools:
+            action = f"CRITICAL ACTION: You MUST call `fetch_flights` with origin='{origin}' and destination='{dest}'. Do nothing else."
+        elif "fetch_hotels" not in executed_tools:
+            action = f"CRITICAL ACTION: You MUST call `fetch_hotels` with city='{dest}'. Do nothing else."
+        elif "calculate_trip_cost" not in executed_tools:
+            action = "CRITICAL ACTION: You MUST call `calculate_trip_cost` using the flight and hotel prices you fetched."
         else:
-            budget = "NOT PROVIDED"
+            action = "You have all the data. Just say 'I have finished gathering the travel data.' DO NOT call any tools."
 
-        system_prompt = f"""You are Atlas, a professional luxury travel assistant.
-        CONTEXT FROM PREVIOUS EXCHANGES:
-        {summary or "No previous context."}
-
-        CURRENT TRIP STATUS:
+        system_prompt = f"""You are Atlas, a strict robotic travel agent.
+        
+        TRIP DETAILS:
         - Origin: {origin}
         - Destination: {dest}
         - Budget: {budget}
         - Duration: {trip_days} days
 
-        CRITICAL INSTRUCTIONS (EXECUTE IN EXACT ORDER):
-        1. If Origin, Destination, or Budget are 'NOT PROVIDED', ask the user for them.
-        2. You MUST call `fetch_flights` to get flight options.
-        3. You MUST call `fetch_hotels` to get hotel options.
-        4. ONLY AFTER you have real flight prices and hotel prices, call `calculate_trip_cost`. 
-        5. NEVER invent prices. NEVER send a flight price of 0.0 to the calculator.
+        {action}
 
-        Once you have fetched flights, hotels, and cost, simply output a short confirmation message.
+        RULES:
+        1. You must ONLY execute the CRITICAL ACTION requested above.
+        2. DO NOT skip steps.
+        3. DO NOT hallucinate prices.
         """
 
         messages_to_pass = [{"role": "system", "content": system_prompt}, *clean_history]
-
         response = self.model.invoke(messages_to_pass)
 
-        return {
-            "messages": [response],
-            "step_count": current_step,
-        }
+        return {"messages": [response], "step_count": current_step}
