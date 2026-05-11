@@ -35,7 +35,8 @@ def _no_real_flights_in_history(state: AgentState) -> bool:
         if not isinstance(data, list):
             continue
         for entry in data:
-            if isinstance(entry, dict) and "flight_number" in entry:
+            # התיקון כאן: בודקים אם יש flight_number (טיסה ישירה) או route (קונקשיין)
+            if isinstance(entry, dict) and ("flight_number" in entry or "route" in entry):
                 return False
     return True
 
