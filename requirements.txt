@@ -4,4 +4,5 @@ langchain-groq
 google-generativeai
 langgraph
 langchain_ollama
+langchain-openai
 langgraph-checkpoint-sqlite 
