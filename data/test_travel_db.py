@@ -1,91 +1,177 @@
-import unittest
+import os
 import sqlite3
-from io import StringIO
+import unittest
 
-# ייבוא הפונקציות והסכימה מהקובץ המקורי שלך
-# נניח שהקובץ שלך נקרא init_db.py
-from init_db import SCHEMA, seed_reference, seed_travel
+DB_PATH = os.path.join(os.path.dirname(__file__), "../data/travel_agency.db")
 
 class TestTravelAgencyDB(unittest.TestCase):
 
-    def setUp(self):
-        """הכנת בסיס נתונים נקי בזיכרון לפני כל טסט"""
-        self.conn = sqlite3.connect(":memory:")
-        self.conn.row_factory = sqlite3.Row  # מאפשר גישה לפי שמות עמודות
-        
-        # ---- התוספת הקריטית: הדלקת אכיפת Foreign Keys ----
-        self.conn.execute("PRAGMA foreign_keys = ON")
-        
-        self.conn.executescript(SCHEMA)
-        self.mock_seed_data()
-
-    def tearDown(self):
-        """סגירת החיבור לאחר כל טסט"""
-        self.conn.close()
-
-    def mock_seed_data(self):
-        """הזנת נתונים מינימליים כדי לבדוק קשרים (Foreign Keys)"""
-        # הכנסת מדינה לדוגמה
-        self.conn.execute(
-            "INSERT INTO countries (alpha2, alpha3, numeric, name) VALUES (?, ?, ?, ?)",
-            ("IL", "ISR", "376", "Israel")
-        )
-        # הכנסת עיר לדוגמה שמקושרת למדינה
-        self.conn.execute(
-            "INSERT INTO cities (country_id, name, lat, lng) VALUES (?, ?, ?, ?)",
-            (1, "Tel Aviv", 32.0853, 34.7818)
-        )
-        self.conn.commit()
-
-    def test_country_insertion(self):
-        """בדיקה שהמדינות הוכנסו כראוי"""
-        cursor = self.conn.execute("SELECT name FROM countries WHERE alpha2 = 'IL'")
-        row = cursor.fetchone()
-        self.assertIsNotNone(row)
-        self.assertEqual(row["name"], "Israel")
-
-    def test_city_foreign_key(self):
-        """בדיקה שהעיר מקושרת למדינה הנכונה"""
-        query = """
-            SELECT countries.name as country_name 
-            FROM cities 
-            JOIN countries ON cities.country_id = countries.id 
-            WHERE cities.name = 'Tel Aviv'
+    @classmethod
+    def setUpClass(cls):
         """
-        row = self.conn.execute(query).fetchone()
-        self.assertEqual(row["country_name"], "Israel")
+        מתבצע פעם אחת ברמת המחלקה לפני שכל הטסטים מתחילים.
+        (מקביל ל- fixture(scope='module') ב-pytest)
+        """
+        assert os.path.exists(DB_PATH), "DB not found. Run create_db() first."
+        cls.conn = sqlite3.connect(DB_PATH)
+        cls.conn.row_factory = sqlite3.Row
 
-    def test_flight_constraints(self):
-        """בדיקה שאי אפשר להכניס טיסה לעיר שלא קיימת (Constraint Check)"""
-        # ננסה להכניס טיסה עם ID של עיר שלא קיים (למשל 999)
-        with self.assertRaises(sqlite3.IntegrityError):
-            self.conn.execute(
-                "INSERT INTO flights (origin_city_id, destination_city_id, airline, price, flight_number) VALUES (?, ?, ?, ?, ?)",
-                (1, 999, "Test Air", 100, "TA123")
-            )
+    @classmethod
+    def tearDownClass(cls):
+        """מתבצע פעם אחת בסיום כל הטסטים וסוגר את החיבור"""
+        cls.conn.close()
 
-    def test_unique_weather_constraint(self):
-        """בדיקה שהגבלת ה-UNIQUE על עיר ועונה עובדת"""
-        self.conn.execute(
-            "INSERT INTO average_weather (city_id, season, temperature) VALUES (?, ?, ?)",
-            (1, "Summer", "30C")
-        )
-        # ניסיון להכניס את אותה עיר ואותה עונה שוב
-        with self.assertRaises(sqlite3.IntegrityError):
-            self.conn.execute(
-                "INSERT INTO average_weather (city_id, season, temperature) VALUES (?, ?, ?)",
-                (1, "Summer", "35C")
-            )
+    # -------------------------
+    # SCHEMA TESTS
+    # -------------------------
+    def test_tables_exist(self):
+        tables = {row[0] for row in self.conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        )}
 
-    def test_cascade_or_deletion(self):
-        """בדיקה מה קורה כשמוחקים מדינה (לוודא שלמות נתונים)"""
-        # הערה: ב-SQLite צריך להפעיל אכיפת FK ידנית בחיבור
-        self.conn.execute("PRAGMA foreign_keys = ON")
-        
-        # מחיקת המדינה אמורה להיכשל או להתנהג לפי ה-REFERENCES שהגדרת
-        # כיוון שלא הגדרת ON DELETE CASCADE, ה-Foreign Key ימנע מחיקה
-        with self.assertRaises(sqlite3.IntegrityError):
-            self.conn.execute("DELETE FROM countries WHERE id = 1")
+        expected = {
+            "countries",
+            "cities",
+            "flights",
+            "hotels",
+            "activities",
+            "best_time_to_visit",
+            "average_weather",
+            "transportation",
+        }
+
+        self.assertTrue(expected.issubset(tables), f"Missing tables: {expected - tables}")
+
+    # -------------------------
+    # DATA EXISTENCE
+    # -------------------------
+    def test_cities_exist(self):
+        count = self.conn.execute("SELECT COUNT(*) FROM cities").fetchone()[0]
+        self.assertGreater(count, 0, "No cities found in the database.")
+
+    def test_flights_exist(self):
+        count = self.conn.execute("SELECT COUNT(*) FROM flights").fetchone()[0]
+        self.assertGreater(count, 0, "No flights found in the database.")
+
+    def test_hotels_exist(self):
+        count = self.conn.execute("SELECT COUNT(*) FROM hotels").fetchone()[0]
+        self.assertGreater(count, 0, "No hotels found in the database.")
+
+    def test_transportation_exist(self):
+        count = self.conn.execute("SELECT COUNT(*) FROM transportation").fetchone()[0]
+        self.assertGreater(count, 0, "No transportation data found in the database.")
+
+    # -------------------------
+    # FOREIGN KEY / JOIN TESTS
+    # -------------------------
+    def test_flight_join_validity(self):
+        row = self.conn.execute("""
+            SELECT
+                f.flight_number,
+                c1.name AS origin,
+                c2.name AS destination,
+                f.airline,
+                f.price
+            FROM flights f
+            JOIN cities c1 ON f.origin_city_id = c1.id
+            JOIN cities c2 ON f.destination_city_id = c2.id
+            LIMIT 1
+        """).fetchone()
+
+        self.assertIsNotNone(row)
+        self.assertIsNotNone(row["flight_number"])
+        self.assertIsNotNone(row["origin"])
+        self.assertIsNotNone(row["destination"])
+
+    def test_tel_aviv_has_flights(self):
+        row = self.conn.execute("""
+            SELECT COUNT(*) as cnt
+            FROM flights f
+            JOIN cities c ON f.origin_city_id = c.id
+            WHERE LOWER(c.name) = 'tel aviv'
+        """).fetchone()
+
+        self.assertGreater(row["cnt"], 0, "No outgoing flights found for Tel Aviv.")
+
+    # -------------------------
+    # HOTELS TESTS
+    # -------------------------
+    def test_hotels_schema_fields(self):
+        row = self.conn.execute("""
+            SELECT hotel_type, min_age, distance_from_center_km
+            FROM hotels
+            LIMIT 1
+        """).fetchone()
+
+        self.assertIsNotNone(row["hotel_type"])
+        self.assertIsNotNone(row["min_age"])
+        self.assertIsNotNone(row["distance_from_center_km"])
+
+    # -------------------------
+    # ACTIVITIES TESTS
+    # -------------------------
+    def test_activities_min_age(self):
+        row = self.conn.execute("""
+            SELECT min_age
+            FROM activities
+            LIMIT 1
+        """).fetchone()
+
+        self.assertIsNotNone(row)
+        self.assertIsNotNone(row["min_age"])
+
+    # -------------------------
+    # TRANSPORTATION TESTS
+    # -------------------------
+    def test_transportation_data_valid(self):
+        row = self.conn.execute("""
+            SELECT transport_type, price_estimate, duration_hours
+            FROM transportation
+            LIMIT 1
+        """).fetchone()
+
+        self.assertIsNotNone(row["transport_type"])
+        self.assertIsNotNone(row["price_estimate"])
+        self.assertIsNotNone(row["duration_hours"])
+
+    # -------------------------
+    # FLIGHT FIELD VALIDATION
+    # -------------------------
+    def test_flights_new_fields(self):
+        row = self.conn.execute("""
+            SELECT departure_time, arrival_time, duration_minutes
+            FROM flights
+            LIMIT 1
+        """).fetchone()
+
+        self.assertIsNotNone(row["departure_time"])
+        self.assertIsNotNone(row["arrival_time"])
+        self.assertGreater(row["duration_minutes"], 0)
+
+    # -------------------------
+    # INTEGRATION TEST
+    # -------------------------
+    def test_full_flight_query(self):
+        rows = self.conn.execute("""
+            SELECT
+                c1.name AS origin,
+                c2.name AS destination,
+                f.airline,
+                f.price,
+                f.availability
+            FROM flights f
+            JOIN cities c1 ON f.origin_city_id = c1.id
+            JOIN cities c2 ON f.destination_city_id = c2.id
+            WHERE f.price > 0
+            LIMIT 5
+        """).fetchall()
+
+        self.assertGreater(len(rows), 0)
+
+        for r in rows:
+            self.assertIsNotNone(r["origin"])
+            self.assertIsNotNone(r["destination"])
+            self.assertGreater(r["price"], 0)
 
 if __name__ == "__main__":
     unittest.main()

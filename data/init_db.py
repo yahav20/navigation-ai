@@ -1,18 +1,3 @@
-"""
-One-time script to create and seed data/travel_agency.db.
-
-Schema:
-    countries          — full ISO 3166-1 list, fetched from public CSV
-    cities             — world cities with lat/lng, FK to countries
-    flights            — origin/destination FK to cities
-    hotels             — FK to cities
-    activities         — FK to cities
-    best_time_to_visit — recommended travel months per city, FK to cities
-    average_weather    — seasonal temperatures per city, FK to cities
-
-Run from the project root:  python data/init_db.py
-"""
-
 import csv
 import io
 import os
@@ -26,250 +11,169 @@ WORLD_CITIES_URL = "https://raw.githubusercontent.com/joelacus/world-cities/main
 
 SCHEMA = """
 CREATE TABLE countries (
-    id        INTEGER PRIMARY KEY AUTOINCREMENT,
-    alpha2    TEXT NOT NULL UNIQUE,
-    alpha3    TEXT NOT NULL UNIQUE,
-    numeric   TEXT NOT NULL UNIQUE,
-    name      TEXT NOT NULL,
-    region    TEXT,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    alpha2 TEXT NOT NULL UNIQUE,
+    alpha3 TEXT NOT NULL UNIQUE,
+    numeric TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    region TEXT,
     subregion TEXT
 );
 
 CREATE TABLE cities (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    country_id INTEGER NOT NULL REFERENCES countries(id),
-    name       TEXT NOT NULL,
-    lat        REAL NOT NULL,
-    lng        REAL NOT NULL
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    country_id INTEGER NOT NULL REFERENCES countries (id),
+    name TEXT NOT NULL,
+    lat REAL NOT NULL,
+    lng REAL NOT NULL
 );
-CREATE INDEX idx_cities_country_id ON cities(country_id);
-
-CREATE TABLE flights (
-    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-    origin_city_id      INTEGER NOT NULL REFERENCES cities(id),
-    destination_city_id INTEGER NOT NULL REFERENCES cities(id),
-    airline             TEXT    NOT NULL,
-    price               INTEGER NOT NULL,
-    flight_number       TEXT    NOT NULL,
-    availability        TEXT    NOT NULL DEFAULT 'Available'
-);
-CREATE INDEX idx_flights_origin      ON flights(origin_city_id);
-CREATE INDEX idx_flights_destination ON flights(destination_city_id);
-
-CREATE TABLE hotels (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    city_id         INTEGER NOT NULL REFERENCES cities(id),
-    name            TEXT    NOT NULL,
-    price_per_night INTEGER NOT NULL,
-    stars           INTEGER NOT NULL
-);
-CREATE INDEX idx_hotels_city ON hotels(city_id);
+CREATE INDEX idx_cities_country_id ON cities (country_id);
 
 CREATE TABLE activities (
-    id       INTEGER PRIMARY KEY AUTOINCREMENT,
-    city_id  INTEGER NOT NULL REFERENCES cities(id),
-    name     TEXT    NOT NULL,
-    category TEXT    NOT NULL,
-    price    INTEGER NOT NULL
-);
-CREATE INDEX idx_activities_city ON activities(city_id);
-
-CREATE TABLE best_time_to_visit (
-    id      INTEGER PRIMARY KEY AUTOINCREMENT,
-    city_id INTEGER NOT NULL UNIQUE REFERENCES cities(id),
-    months  TEXT    NOT NULL,
-    reason  TEXT    NOT NULL
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    city_id INTEGER NOT NULL REFERENCES cities (id),
+    name TEXT NOT NULL,
+    category TEXT NOT NULL,
+    price INTEGER NOT NULL,
+    min_age INTEGER DEFAULT 0
 );
 
 CREATE TABLE average_weather (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    city_id     INTEGER NOT NULL REFERENCES cities(id),
-    season      TEXT    NOT NULL,
-    temperature TEXT    NOT NULL,
-    UNIQUE(city_id, season)
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    city_id INTEGER NOT NULL REFERENCES cities (id),
+    season TEXT NOT NULL,
+    temperature TEXT NOT NULL,
+    UNIQUE (city_id, season)
 );
-CREATE INDEX idx_weather_city ON average_weather(city_id);
-"""
 
+CREATE TABLE best_time_to_visit (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    city_id INTEGER NOT NULL UNIQUE REFERENCES cities (id),
+    months TEXT NOT NULL,
+    reason TEXT NOT NULL
+);
+
+CREATE TABLE flights (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    origin_city_id INTEGER NOT NULL REFERENCES cities (id),
+    destination_city_id INTEGER NOT NULL REFERENCES cities (id),
+    airline TEXT NOT NULL,
+    price INTEGER NOT NULL,
+    flight_number TEXT NOT NULL,
+    departure_time DATETIME NOT NULL,
+    arrival_time DATETIME NOT NULL,
+    duration_minutes INTEGER NOT NULL,
+    availability TEXT NOT NULL DEFAULT 'Available'
+);
+CREATE INDEX idx_flights_destination ON flights (destination_city_id);
+
+CREATE TABLE hotels (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    city_id INTEGER NOT NULL REFERENCES cities (id),
+    name TEXT NOT NULL,
+    price_per_night INTEGER NOT NULL,
+    stars INTEGER NOT NULL,
+    min_age INTEGER DEFAULT 0,
+    hotel_type TEXT CHECK (hotel_type IN ('Luxury', 'Family', 'Romantic', 'Backpacker', 'Business')),
+    distance_from_center_km REAL
+);
+CREATE INDEX idx_hotels_city ON hotels (city_id);
+
+CREATE TABLE transportation (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    from_city_id INTEGER NOT NULL REFERENCES cities (id),
+    to_city_id INTEGER NOT NULL REFERENCES cities (id),
+    transport_type TEXT CHECK (transport_type IN ('Train', 'Bus', 'Rental Car', 'Shuttle')),
+    price_estimate REAL,
+    duration_hours REAL,
+    FOREIGN KEY (from_city_id) REFERENCES cities (id),
+    FOREIGN KEY (to_city_id) REFERENCES cities (id)
+);
+"""
 
 def fetch_csv(url: str) -> list[dict]:
     with urllib.request.urlopen(url) as resp:
         text = resp.read().decode("utf-8")
     return list(csv.DictReader(io.StringIO(text)))
 
-
 def seed_reference(conn: sqlite3.Connection) -> None:
-    print("fetching country codes...")
+    print("Fetching reference data...")
     countries = fetch_csv(COUNTRY_CODES_URL)
-    print("fetching world cities...")
     cities = fetch_csv(WORLD_CITIES_URL)
 
     country_rows = [
-        (
-            row["ISO3166-1-Alpha-2"],
-            row["ISO3166-1-Alpha-3"],
-            row["ISO3166-1-numeric"],
-            row.get("official_name_en") or row.get("UNTERM English Short") or row.get("CLDR display name") or "",
-            row.get("Region Name") or None,
-            row.get("Sub-region Name") or None,
-        )
-        for row in countries
-        if row.get("ISO3166-1-Alpha-2") and row.get("ISO3166-1-Alpha-3") and row.get("ISO3166-1-numeric")
+        (r["ISO3166-1-Alpha-2"], r["ISO3166-1-Alpha-3"], r["ISO3166-1-numeric"], 
+         r.get("official_name_en") or r.get("UNTERM English Short") or "", 
+         r.get("Region Name"), r.get("Sub-region Name"))
+        for r in countries if r.get("ISO3166-1-Alpha-2")
     ]
-    conn.executemany(
-        "INSERT INTO countries (alpha2, alpha3, numeric, name, region, subregion) VALUES (?, ?, ?, ?, ?, ?)",
-        country_rows,
-    )
+    conn.executemany("INSERT INTO countries (alpha2, alpha3, numeric, name, region, subregion) VALUES (?,?,?,?,?,?)", country_rows)
 
-    alpha2_to_id = {alpha2: cid for cid, alpha2 in conn.execute("SELECT id, alpha2 FROM countries")}
-    city_rows = []
-    for city in cities:
-        cid = alpha2_to_id.get(city["country"])
-        if cid is None:
-            continue
-        city_rows.append((cid, city["name"], float(city["lat"]), float(city["lng"])))
-    conn.executemany(
-        "INSERT INTO cities (country_id, name, lat, lng) VALUES (?, ?, ?, ?)",
-        city_rows,
-    )
-    print(f"  countries: {len(country_rows)}")
-    print(f"  cities:    {len(city_rows)}")
-
+    alpha2_to_id = {a2: cid for cid, a2 in conn.execute("SELECT id, alpha2 FROM countries")}
+    city_rows = [(alpha2_to_id[c["country"]], c["name"], float(c["lat"]), float(c["lng"])) 
+                 for c in cities if c["country"] in alpha2_to_id]
+    conn.executemany("INSERT INTO cities (country_id, name, lat, lng) VALUES (?,?,?,?)", city_rows)
 
 def resolve_city(conn: sqlite3.Connection, name: str, alpha2: str) -> int:
-    row = conn.execute(
-        """SELECT cities.id
-             FROM cities
-             JOIN countries ON cities.country_id = countries.id
-            WHERE LOWER(cities.name) = LOWER(?)
-              AND countries.alpha2 = ?
-            LIMIT 1""",
-        (name, alpha2),
-    ).fetchone()
-    if row is None:
-        raise ValueError(f"city not found in seed reference data: {name!r} ({alpha2})")
-    return row[0]
-
+    row = conn.execute("SELECT cities.id FROM cities JOIN countries ON cities.country_id = countries.id WHERE LOWER(cities.name) = LOWER(?) AND countries.alpha2 = ? LIMIT 1", (name, alpha2)).fetchone()
+    return row[0] if row else None
 
 def seed_travel(conn: sqlite3.Connection) -> None:
-    # key → (city name as it appears in world_cities, ISO alpha-2)
     city_keys = {
-        "tel aviv":  ("Tel Aviv",      "IL"),
-        "paris":     ("Paris",         "FR"),
-        "london":    ("London",        "GB"),
-        "tokyo":     ("Tokyo",         "JP"),
-        "new york":  ("New York City", "US"),
-        "berlin":    ("Berlin",        "DE"),
-        "amsterdam": ("Amsterdam",     "NL"),
+        "tel aviv": ("Tel Aviv", "IL"), "paris": ("Paris", "FR"), "london": ("London", "GB"),
+        "tokyo": ("Tokyo", "JP"), "new york": ("New York City", "US"), "berlin": ("Berlin", "DE"),
+        "amsterdam": ("Amsterdam", "NL")
     }
-    ids = {key: resolve_city(conn, name, alpha2) for key, (name, alpha2) in city_keys.items()}
+    ids = {k: resolve_city(conn, name, a2) for k, (name, a2) in city_keys.items()}
 
+    # Flights: (origin, dest, airline, price, flight_no, availability, dep, arr, duration_minutes)
     flights = [
-        # (origin_key, destination_key, airline, price, flight_number, availability)
-        ("tel aviv", "paris",     "El Al",           350, "LY321", "Available"),
-        ("tel aviv", "paris",     "Air France",      420, "AF123", "Available"),
-        ("tel aviv", "london",    "British Airways", 450, "BA164", "Limited"),
-        ("tel aviv", "london",    "Virgin Atlantic", 390, "VS100", "Available"),
-        ("tel aviv", "tokyo",     "El Al",           950, "LY091", "Available"),
-        ("tel aviv", "tokyo",     "Emirates",        820, "EK312", "Available"),
-        ("tel aviv", "new york",  "United",          750, "UA445", "Limited"),
-        ("tel aviv", "berlin",    "Lufthansa",       280, "LH909", "Available"),
-        ("tel aviv", "berlin",    "Ryanair",         110, "FR101", "Available"),
-        ("tel aviv", "amsterdam", "KLM",             410, "KL456", "Available"),
-        ("london",   "paris",     "Air France",      120, "AF124", "Available"),
-        ("london",   "tokyo",     "JAL",             890, "JL402", "Available"),
-        ("london",   "new york",  "Virgin Atlantic", 550, "VS001", "Limited"),
-        ("new york", "london",    "Virgin Atlantic", 550, "VS002", "Limited"),
-        ("new york", "paris",     "Air France",      480, "AF200", "Available"),
+        ("tel aviv", "paris", "El Al", 350, "LY321", "Available", "2026-06-01 08:00:00", "2026-06-01 11:50:00", 290),
+        ("paris", "london", "Air France", 120, "AF125", "Available", "2026-06-01 13:00:00", "2026-06-01 14:15:00", 75),
+        ("london", "tokyo", "JAL", 890, "JL402", "Available", "2026-06-01 19:00:00", "2026-06-02 15:00:00", 780),
+        ("tel aviv", "london", "British Airways", 450, "BA164", "Limited", "2026-06-01 07:30:00", "2026-06-01 11:00:00", 330)
     ]
     conn.executemany(
-        """INSERT INTO flights
-               (origin_city_id, destination_city_id, airline, price, flight_number, availability)
-           VALUES (?, ?, ?, ?, ?, ?)""",
-        [(ids[o], ids[d], a, p, fn, av) for o, d, a, p, fn, av in flights],
+        "INSERT INTO flights (origin_city_id, destination_city_id, airline, price, flight_number, availability, departure_time, arrival_time, duration_minutes) VALUES (?,?,?,?,?,?,?,?,?)",
+        [(ids[o], ids[d], a, p, fn, av, dep, arr, dur) for o,d,a,p,fn,av,dep,arr,dur in flights]
     )
 
+    # Hotels: (city, name, price, stars, min_age, type, distance)
     hotels = [
-        ("paris",     "Hotel de Ville",        150, 3),
-        ("paris",     "Luxury Ritz",           600, 5),
-        ("paris",     "Ibis Budget Paris",      85, 2),
-        ("london",    "The Savoy",             450, 5),
-        ("london",    "Premier Inn London",    120, 3),
-        ("tokyo",     "Shibuya Capsule",        50, 2),
-        ("tokyo",     "Park Hyatt Tokyo",      700, 5),
-        ("new york",  "The Plaza",             850, 5),
-        ("new york",  "Broadway Hotel",        190, 3),
-        ("berlin",    "Berlin Central Hostel",  40, 1),
-        ("berlin",    "Hilton Berlin",         220, 4),
-        ("amsterdam", "Canal Boutique Hotel",  180, 4),
+        ("paris", "Luxury Ritz", 600, 5, 18, "Luxury", 0.2),
+        ("london", "Premier Inn London", 120, 3, 0, "Business", 2.5),
+        ("tokyo", "Shibuya Capsule", 50, 2, 18, "Backpacker", 1.0),
+        ("tel aviv", "The Norman", 500, 5, 21, "Luxury", 0.8)
     ]
     conn.executemany(
-        "INSERT INTO hotels (city_id, name, price_per_night, stars) VALUES (?, ?, ?, ?)",
-        [(ids[c], n, p, s) for c, n, p, s in hotels],
+        "INSERT INTO hotels (city_id, name, price_per_night, stars, min_age, hotel_type, distance_from_center_km) VALUES (?,?,?,?,?,?,?)",
+        [(ids[c], n, p, s, ma, t, dist) for c,n,p,s,ma,t,dist in hotels]
     )
 
+    # Activities: (city, name, category, price, min_age)
     activities = [
-        ("paris",     "Louvre Museum",       "Culture",       20),
-        ("paris",     "Eiffel Tower",        "Sightseeing",   35),
-        ("paris",     "Disneyland Paris",    "Family",        95),
-        ("london",    "London Eye",          "Sightseeing",   30),
-        ("london",    "British Museum",      "Culture",        0),
-        ("tokyo",     "Robot Cafe",          "Entertainment", 60),
-        ("tokyo",     "Mount Fuji Day Trip", "Nature",       120),
-        ("new york",  "Statue of Liberty",   "Sightseeing",   25),
-        ("berlin",    "Berlin Wall Tour",    "History",       15),
-        ("berlin",    "Techno Club Entry",   "Nightlife",     25),
-        ("amsterdam", "Rijksmuseum",         "Culture",       22),
-        ("amsterdam", "Canal Boat Tour",     "Sightseeing",   18),
+        ("paris", "Louvre Museum", "Culture", 20, 0),
+        ("tokyo", "Robot Cafe", "Entertainment", 60, 12),
+        ("london", "Pub Crawl", "Nightlife", 30, 18)
     ]
     conn.executemany(
-        "INSERT INTO activities (city_id, name, category, price) VALUES (?, ?, ?, ?)",
-        [(ids[c], n, cat, p) for c, n, cat, p in activities],
+        "INSERT INTO activities (city_id, name, category, price, min_age) VALUES (?,?,?,?,?)",
+        [(ids[c], n, cat, p, ma) for c,n,cat,p,ma in activities]
     )
 
-    # best_time_to_visit  (city_key, months CSV, reason)
-    best_times = [
-        ("paris",     "April,May,September",  "Pleasant weather and fewer crowds."),
-        ("london",    "May,June,July",         "Best chance for sunshine and outdoor events."),
-        ("tokyo",     "March,April,November",  "Cherry blossoms in spring, beautiful autumn foliage."),
-        ("amsterdam", "April,May,September",   "Tulip season in spring and mild cycling weather."),
-        ("new york",  "April,May,September",   "Mild temperatures and fewer tourists than summer."),
-        ("berlin",    "May,June,July",         "Warm summers with long daylight hours and festivals."),
+    # Transportation: (from, to, type, price, duration)
+    transport = [
+        ("paris", "london", "Train", 95, 2.25),
+        ("london", "paris", "Bus", 35, 7.0)
     ]
     conn.executemany(
-        "INSERT INTO best_time_to_visit (city_id, months, reason) VALUES (?, ?, ?)",
-        [(ids[c], m, r) for c, m, r in best_times],
+        "INSERT INTO transportation (from_city_id, to_city_id, transport_type, price_estimate, duration_hours) VALUES (?,?,?,?,?)",
+        [(ids[f], ids[t], ty, p, d) for f,t,ty,p,d in transport]
     )
-
-    # average_weather  (city_key, season, temperature)
-    weather = [
-        ("paris",     "Spring", "15C"), ("paris",     "Summer", "25C"),
-        ("paris",     "Autumn", "16C"), ("paris",     "Winter",  "5C"),
-        ("london",    "Spring", "12C"), ("london",    "Summer", "22C"),
-        ("london",    "Autumn", "14C"), ("london",    "Winter",  "6C"),
-        ("tokyo",     "Spring", "18C"), ("tokyo",     "Summer", "30C"),
-        ("tokyo",     "Autumn", "21C"), ("tokyo",     "Winter",  "8C"),
-        ("amsterdam", "Spring", "13C"), ("amsterdam", "Summer", "22C"),
-        ("amsterdam", "Autumn", "14C"), ("amsterdam", "Winter",  "4C"),
-        ("new york",  "Spring", "13C"), ("new york",  "Summer", "28C"),
-        ("new york",  "Autumn", "15C"), ("new york",  "Winter",  "2C"),
-        ("berlin",    "Spring", "12C"), ("berlin",    "Summer", "25C"),
-        ("berlin",    "Autumn", "13C"), ("berlin",    "Winter",  "1C"),
-    ]
-    conn.executemany(
-        "INSERT INTO average_weather (city_id, season, temperature) VALUES (?, ?, ?)",
-        [(ids[c], s, t) for c, s, t in weather],
-    )
-
-    print(f"  flights:           {len(flights)}")
-    print(f"  hotels:            {len(hotels)}")
-    print(f"  activities:        {len(activities)}")
-    print(f"  best_time_to_visit:{len(best_times)}")
-    print(f"  average_weather:   {len(weather)}")
-
 
 def create_travel_db() -> None:
     conn = sqlite3.connect(DB_PATH)
+    conn.execute("PRAGMA foreign_keys = ON")
     try:
         conn.executescript(SCHEMA)
         seed_reference(conn)
@@ -279,15 +183,7 @@ def create_travel_db() -> None:
         conn.close()
     print(f"Database created at: {DB_PATH}")
 
-
 if __name__ == "__main__":
     if os.path.exists(DB_PATH):
-        answer = input(
-            f"WARNING: '{DB_PATH}' already exists and will be wiped.\n"
-            "Are you sure you want to continue? (yes/no): "
-        ).strip().lower()
-        if answer != "yes":
-            print("Aborted. Database was not modified.")
-            raise SystemExit(0)
         os.remove(DB_PATH)
     create_travel_db()
