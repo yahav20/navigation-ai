@@ -1,4 +1,5 @@
 """Build the LangGraph state graph for the travel agent."""
+from agent.nodes.adjustments import AdjustmentsNode
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.graph import END, START, StateGraph
@@ -26,6 +27,7 @@ def build_graph(provider: str = "google") -> CompiledStateGraph:
     model_with_tools, extraction_model = get_models(provider)
 
     extract_metadata_node = MetadataNode(extraction_model)
+    adjustments_node = AdjustmentsNode(extraction_model)
     enrichment_node = EnrichmentNode(extraction_model)
     call_model_node = AgentNode(model_with_tools)
     summary_node = SummaryNode(extraction_model)
@@ -37,6 +39,7 @@ def build_graph(provider: str = "google") -> CompiledStateGraph:
     builder = StateGraph(AgentState)
 
     builder.add_node("extract_metadata", extract_metadata_node)
+    builder.add_node("adjustments", adjustments_node)
     builder.add_node("enrichment", enrichment_node)
     builder.add_node("agent", call_model_node)
     builder.add_node("tools", ToolNode(core_tools))
@@ -46,7 +49,8 @@ def build_graph(provider: str = "google") -> CompiledStateGraph:
     builder.add_node("summary", summary_node)
 
     # 3. Define the workflow edges
-    builder.add_edge(START, "extract_metadata")
+    builder.add_edge(START, "adjustments")
+    builder.add_edge("adjustments", "extract_metadata")
     builder.add_edge("extract_metadata", "enrichment")
     builder.add_conditional_edges("enrichment", after_enrichment, {"agent": "agent", END: END})
     builder.add_conditional_edges(

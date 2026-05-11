@@ -27,3 +27,13 @@ class RefusalDetection(BaseModel):
     refusing_origin_city: bool = Field(default=False, description="User explicitly refuses or claims to be unable to provide their origin/departure city")
     refusing_destination_city: bool = Field(default=False, description="User explicitly refuses or claims to be unable to provide their destination city")
     refusing_budget: bool = Field(default=False, description="User explicitly refuses or claims to be unable to provide their travel budget")
+
+
+class TravelAdjustments(BaseModel):
+    """Detect if the user explicitly wants to adjust their existing travel parameters."""
+    
+    is_adjustment: bool = Field(default=False, description="True ONLY if the user is explicitly changing their destination, origin, budget, or trip days.")
+    new_destination: str | None = Field(default=None, description="The new destination city, if updated.")
+    new_origin: str | None = Field(default=None, description="The new origin city, if updated.")
+    new_budget: float | None = Field(default=None, description="The new total budget, if updated.")
+    new_trip_days: int | None = Field(default=None, description="The new trip duration in days, if updated.")
