@@ -1,6 +1,4 @@
 """SQLite queries for flights."""
-
-
 class SQLiteFlightQueriesMixin:
     """Query flight rows from the SQLite database."""
 
@@ -182,7 +180,6 @@ class SQLiteFlightQueriesMixin:
         origin_clean = origin.strip().lower()
         dest_clean = destination.strip().lower()
 
-        # --- שאילתה עבור עצירה אחת (1-Stop) ---
         one_stop_query = """
             SELECT
                 c1.name AS origin_city,
@@ -201,13 +198,12 @@ class SQLiteFlightQueriesMixin:
             JOIN cities c2 ON f1.destination_city_id = c2.id
             JOIN cities c3 ON f2.destination_city_id = c3.id
             WHERE LOWER(c1.name) = ? AND LOWER(c3.name) = ?
-              AND c1.id != c2.id AND c2.id != c3.id -- מניעת מסלול מעגלי
+              AND c1.id != c2.id AND c2.id != c3.id 
             ORDER BY total_price ASC
             LIMIT 10
         """
         one_stop_rows = self._query(one_stop_query, (origin_clean, dest_clean))
 
-        # --- שאילתה עבור שתי עצירות (2-Stops) ---
         two_stop_query = """
             SELECT
                 c1.name AS origin_city,
@@ -233,13 +229,12 @@ class SQLiteFlightQueriesMixin:
             JOIN cities c4 ON f3.destination_city_id = c4.id
             WHERE LOWER(c1.name) = ? AND LOWER(c4.name) = ?
               AND c1.id != c2.id AND c2.id != c3.id AND c3.id != c4.id
-              AND c1.id != c3.id AND c2.id != c4.id -- מניעת מסלול מעגלי מורכב
+              AND c1.id != c3.id AND c2.id != c4.id 
             ORDER BY total_price ASC
             LIMIT 10
         """
         two_stop_rows = self._query(two_stop_query, (origin_clean, dest_clean))
 
-        # --- עיבוד התוצאות למבנה נוח עבור ה-Agent ---
         results = []
         
         for row in one_stop_rows:
@@ -283,11 +278,9 @@ class SQLiteFlightQueriesMixin:
                 ]
             })
 
-        # מיון כל התוצאות (גם עצירה אחת וגם שתיים) מהזול ליקר
         results = sorted(results, key=lambda x: x["total_price"])
 
         if not results:
             return [{"message": f"No connecting flights found from {origin} to {destination}."}]
 
-        # מחזירים את 10 התוצאות הראשונות למודל
         return results[:10]

@@ -128,21 +128,17 @@ def seed_travel(conn: sqlite3.Connection) -> None:
 
     # Flights: (origin, dest, airline, price, flight_no, availability, dep, arr, duration_minutes)
     flights = [
-        # יציאות מתל אביב
         ("tel aviv", "paris", "El Al", 350, "LY321", "Available", "2026-06-01 08:00:00", "2026-06-01 11:50:00", 290),
         ("tel aviv", "london", "British Airways", 450, "BA164", "Limited", "2026-06-01 07:30:00", "2026-06-01 11:00:00", 330),
         
-        # יציאות מניו יורק (טיסות ישירות למרכזים באירופה - Leg 1)
         ("new york", "london", "Virgin Atlantic", 550, "VS002", "Available", "2026-06-01 19:00:00", "2026-06-02 07:00:00", 420),
         ("new york", "paris", "Air France", 480, "AF200", "Available", "2026-06-01 18:30:00", "2026-06-02 07:45:00", 435),
         ("new york", "amsterdam", "Delta", 500, "DL300", "Available", "2026-06-01 20:00:00", "2026-06-02 09:30:00", 450),
         
-        # מרכזים באירופה לברלין (טיסות המשך - Leg 2 - שממריאות אחרי הנחיתה מניו יורק!)
         ("london", "berlin", "Ryanair", 60, "FR555", "Available", "2026-06-02 10:00:00", "2026-06-02 12:00:00", 120),
         ("paris", "berlin", "Lufthansa", 160, "LH111", "Available", "2026-06-02 11:30:00", "2026-06-02 13:15:00", 105),
         ("amsterdam", "berlin", "EasyJet", 80, "U2444", "Available", "2026-06-02 13:00:00", "2026-06-02 14:20:00", 80),
         
-        # עוד טיסות
         ("paris", "london", "Air France", 120, "AF125", "Available", "2026-06-01 13:00:00", "2026-06-01 14:15:00", 75),
         ("london", "tokyo", "JAL", 890, "JL402", "Available", "2026-06-01 19:00:00", "2026-06-02 15:00:00", 780),
     ]
@@ -157,10 +153,10 @@ def seed_travel(conn: sqlite3.Connection) -> None:
         ("london", "Premier Inn London", 120, 3, 0, "Business", 2.5),
         ("tokyo", "Shibuya Capsule", 50, 2, 18, "Backpacker", 1.0),
         ("tel aviv", "The Norman", 500, 5, 21, "Luxury", 0.8),
-        # עכשיו יש מלונות בברלין!
+       
         ("berlin", "Hilton Berlin", 220, 4, 18, "Business", 0.5),
         ("berlin", "Berlin Central Hostel", 40, 1, 18, "Backpacker", 2.0),
-        # ויש מלונות בניו יורק!
+  
         ("new york", "The Plaza", 850, 5, 21, "Luxury", 0.1),
         ("new york", "Broadway Hotel", 190, 3, 18, "Family", 1.2),
     ]

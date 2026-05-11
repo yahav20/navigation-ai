@@ -8,17 +8,13 @@ class TestTravelAgencyDB(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        """
-        מתבצע פעם אחת ברמת המחלקה לפני שכל הטסטים מתחילים.
-        (מקביל ל- fixture(scope='module') ב-pytest)
-        """
+       
         assert os.path.exists(DB_PATH), "DB not found. Run create_db() first."
         cls.conn = sqlite3.connect(DB_PATH)
         cls.conn.row_factory = sqlite3.Row
 
     @classmethod
     def tearDownClass(cls):
-        """מתבצע פעם אחת בסיום כל הטסטים וסוגר את החיבור"""
         cls.conn.close()
 
     # -------------------------
