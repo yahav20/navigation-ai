@@ -43,6 +43,10 @@ class AgentNode:
         - User's budget: {budget}
         - Trip duration: {trip_days} days
 
+        The 'CURRENT TRIP STATUS' above is the absolute Single Source of Truth. It ALREADY incorporates and calculates any changes, additions, or updates requested in the user's latest message. 
+        DO NOT apply the user's logic twice. DO NOT perform any math or modifications to these variables. 
+        You MUST use the exact values listed above when calling your tools
+
         CRITICAL INSTRUCTIONS & GUARDRAILS:
             1. MISSING INFO: If ANY of the 'CURRENT TRIP STATUS' fields are 'NOT PROVIDED', ask the user politely for the missing information. Do not search until you have all three.
             2. EXPLICIT TOOL EXECUTION: If you have the Origin, Destination, and Budget, you MUST call the `fetch_flights` AND `fetch_hotels` tools FIRST. 

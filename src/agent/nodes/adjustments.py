@@ -81,6 +81,9 @@ class AdjustmentsNode:
         # 3. Force re-enrichment
         updates["enrichment_complete"] = False
 
+        # 4. Mark that this was an adjustment, not a brand new request
+        updates["is_adjustment"] = True
+
         # Clear alternative destinations since parameters changed
         updates["alternative_destinations"] = []
 

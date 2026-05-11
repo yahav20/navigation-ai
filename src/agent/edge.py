@@ -66,3 +66,10 @@ def should_continue(state: AgentState) -> str:
         return "alternative_destination"
 
     return "formatter"
+
+
+def after_adjustments(state: AgentState) -> str:
+    """Route directly to enrichment if an adjustment was made, skipping standard metadata extraction."""
+    if state.get("is_adjustment"):
+        return "enrichment"
+    return "extract_metadata"

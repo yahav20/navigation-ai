@@ -17,6 +17,7 @@ class AgentState(TypedDict):
     step_count: int
     enrichment_complete: bool
     user_preferences: dict
+    is_adjustment: bool            # True when the user just modified their trip parameters
     enrichment_asked_fields: list  # field keys already requested from the user
     budget_optional: bool          # True when user explicitly declined to provide a budget
     trip_days: int                 # number of trip days; defaults to 3 if user skips after being asked

@@ -6,7 +6,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode
 
-from agent.edge import after_enrichment, should_continue
+from agent.edge import after_adjustments, after_enrichment, should_continue
 from agent.llm import get_models
 from agent.nodes.agent_core import AgentNode
 from agent.nodes.enrichment import EnrichmentNode
@@ -50,7 +50,11 @@ def build_graph(provider: str = "google") -> CompiledStateGraph:
 
     # 3. Define the workflow edges
     builder.add_edge(START, "adjustments")
-    builder.add_edge("adjustments", "extract_metadata")
+    builder.add_conditional_edges(
+        "adjustments", 
+        after_adjustments, 
+        {"enrichment": "enrichment", "extract_metadata": "extract_metadata"}
+    )
     builder.add_edge("extract_metadata", "enrichment")
     builder.add_conditional_edges("enrichment", after_enrichment, {"agent": "agent", END: END})
     builder.add_conditional_edges(

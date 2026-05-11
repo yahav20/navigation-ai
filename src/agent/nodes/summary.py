@@ -72,4 +72,5 @@ class SummaryNode:
         return {
             "summary": new_summary,
             "messages": delete_commands,
+            "is_adjustment": False,
         }
