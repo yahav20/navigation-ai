@@ -52,10 +52,7 @@ class AgentNode:
            d. `fetch_activities` — get available activities at the destination.
            e. `get_average_weather` — call with the destination city and the current or upcoming season (Spring/Summer/Autumn/Winter).
            f. `get_best_time_to_visit` — call with the destination city.
-        3. BUDGET VALIDATION: After calling `calculate_trip_cost`, compare the total_estimate against the user's budget ({budget}).
-           - If total_estimate <= budget: proceed normally.
-           - If total_estimate > budget: still present the cheapest option but clearly flag it exceeds budget.
-        4. NO HALLUCINATIONS: Check your conversation history. Have you received results from ALL six tools above? If NO, call the missing ones now.
+        3. NO HALLUCINATIONS: Check your conversation history. Have you received results from ALL six tools above? If NO, call the missing ones now.
         5. BOUNDARY ENFORCEMENT: Decline any non-travel questions and steer back to the trip.
 
         DO NOT output the final itinerary yourself. Just confirm you found the data. The system will handle formatting.

@@ -69,15 +69,6 @@ def _ingest_best_time(data: object, container: list) -> None:
             container.append(data)
 
 
-def _validate_budget(trip_cost_calculations: list, budget: float | None) -> dict:
-    """Return budget validation result: fits, over-by amount, or unknown."""
-    if not trip_cost_calculations or budget is None:
-        return {"status": "unknown"}
-    lowest = min(c["total_estimate"] for c in trip_cost_calculations)
-    if lowest <= budget:
-        return {"status": "within", "remaining": round(budget - lowest, 2), "total": lowest}
-    return {"status": "over", "over_by": round(lowest - budget, 2), "total": lowest}
-
 
 def extract_travel_data(state: AgentState) -> dict:
     """Parse tool executions and deduplicate all travel data for the formatter."""
@@ -121,9 +112,6 @@ def extract_travel_data(state: AgentState) -> dict:
     travel_data["activities"] = activities_list
     travel_data["weather"] = weather_dict
     travel_data["best_time"] = best_time_list[0] if best_time_list else {}
-    travel_data["budget_validation"] = _validate_budget(
-        trip_cost_calculations, state.get("total_budget")
-    )
 
     return travel_data
 
@@ -174,8 +162,7 @@ class FormatterNode:
                     for f in travel_data["flights"]
                 )
             ]
-            # If nothing is affordable, keep all options so the agent can flag over-budget
-            travel_data["hotels"] = affordable if affordable else travel_data["hotels"]
+            travel_data["hotels"] = affordable
 
         system_prompt = """
         You are a strict data formatter. Your ONLY job is to output the provided <data> into the EXACT Markdown template below.
@@ -189,11 +176,7 @@ class FormatterNode:
         6. STRICT CONDITIONAL LOGIC: Follow the IF/ELSE logic in the template perfectly.
         7. TOTAL PRICE RULE: Use the lowest total_estimate from trip_cost_calculations as "Total Price". DO NOT recompute.
            If trip_cost_calculations is empty, write "N/A".
-        8. BUDGET VALIDATION RULE: Use the budget_validation field in <data>:
-           - If status is "within": show "✅ Within budget — $[remaining] remaining"
-           - If status is "over":   show "⚠️ Exceeds budget by $[over_by]"
-           - If status is "unknown": omit the budget status line.
-        9. YOU MUST USE THIS EXACT TEMPLATE:
+        8. YOU MUST USE THIS EXACT TEMPLATE:
 
         [IF NO FLIGHTS ARE FOUND, USE THIS EXACT TEXT AND DO NOT ADD ANYTHING]
         Based on our search, we unfortunately could not find any available flights from your origin to [Destination City] at this time.
@@ -206,7 +189,6 @@ class FormatterNode:
         **Destination:** [City Name, Country]
         **Total Budget:** [Budget with correct currency symbol]
         **Total Price:** [lowest total_estimate from trip_cost_calculations, with $ symbol]
-        **Budget Status:** [budget validation line per rule 8]
 
         ---
 
