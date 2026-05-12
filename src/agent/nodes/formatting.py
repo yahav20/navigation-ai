@@ -8,7 +8,6 @@ from agent.state import AgentState
 
 
 def _parse_tool_payload(msg: BaseMessage) -> object | None:
-    """Return the parsed JSON payload of a tool message, or None on failure."""
     try:
         return json.loads(msg.content)
     except json.JSONDecodeError:
@@ -16,18 +15,20 @@ def _parse_tool_payload(msg: BaseMessage) -> object | None:
 
 
 def _ingest_flights(data: object, flights_dict: dict) -> None:
-    """Merge fetch_flights tool output into the flights dictionary."""
     if isinstance(data, dict):
         data = [data]
     if not isinstance(data, list):
         return
     for f in data:
-        flight_num = f.get("flight_number", "unknown")
+        if "route" in f:
+            flight_num = "-".join([leg.get("flight", "unk") for leg in f["route"]])
+        else:
+            flight_num = f.get("flight_number", "unknown")
+            
         flights_dict[flight_num] = f
 
 
 def _ingest_hotels(data: object, hotels_dict: dict) -> None:
-    """Merge fetch_hotels tool output into the hotels dictionary."""
     if isinstance(data, dict):
         data = [data]
     if not isinstance(data, list):
@@ -38,7 +39,6 @@ def _ingest_hotels(data: object, hotels_dict: dict) -> None:
 
 
 def _ingest_trip_cost(data: object, trip_cost_calculations: list) -> None:
-    """Append calculate_trip_cost output to the running list."""
     if isinstance(data, dict) and "total_estimate" in data:
         trip_cost_calculations.append(data)
 
@@ -86,7 +86,7 @@ def extract_travel_data(state: AgentState) -> dict:
         data = _parse_tool_payload(msg)
         if data is None:
             continue
-        if tool_name == "fetch_flights":
+        if tool_name in ["fetch_flights", "find_connecting_flights"]:
             _ingest_flights(data, flights_dict)
         elif tool_name == "fetch_hotels":
             _ingest_hotels(data, hotels_dict)
@@ -101,9 +101,7 @@ def extract_travel_data(state: AgentState) -> dict:
 
     exclude_keys = {"messages", "step_count"}
     travel_data = {
-        key: value
-        for key, value in state.items()
-        if key not in exclude_keys
+        key: value for key, value in state.items() if key not in exclude_keys
     }
 
     travel_data["flights"] = list(flights_dict.values())
@@ -117,14 +115,10 @@ def extract_travel_data(state: AgentState) -> dict:
 
 
 class FormatterNode:
-    """Render the final travel itinerary as Markdown."""
-
     def __init__(self, extraction_model: BaseChatModel) -> None:
-        """Store the chat model used to render the formatted response."""
         self.extraction_model = extraction_model
 
     def __call__(self, state: AgentState) -> dict:
-        """Format the gathered travel data into a Markdown response."""
         if not state.get("messages"):
             return {}
 
@@ -133,8 +127,7 @@ class FormatterNode:
 
         if isinstance(content, list):
             last_agent_message = "".join(
-                part.get("text", "") for part in content
-                if isinstance(part, dict) and part.get("type") == "text"
+                part.get("text", "") for part in content if isinstance(part, dict) and part.get("type") == "text"
             )
         else:
             last_agent_message = str(content)
@@ -151,20 +144,58 @@ class FormatterNode:
 
         travel_data = extract_travel_data(state)
 
-        # Filter hotels to only those affordable with at least one available flight
         budget = state.get("total_budget")
         trip_days = state.get("trip_days") or 3
+        
         if budget and travel_data.get("flights") and travel_data.get("hotels"):
-            affordable = [
-                h for h in travel_data["hotels"]
-                if any(
-                    f.get("price", float("inf")) + h.get("price_per_night", float("inf")) * trip_days <= budget
-                    for f in travel_data["flights"]
-                )
-            ]
+            affordable = []
+            for h in travel_data["hotels"]:
+                hotel_total = h.get("price_per_night", float("inf")) * trip_days
+                for f in travel_data["flights"]:
+                    flight_price = f.get("total_price") if "total_price" in f else f.get("price", float("inf"))
+                    if flight_price + hotel_total <= budget:
+                        affordable.append(h)
+                        break 
             travel_data["hotels"] = affordable
 
-        system_prompt = """
+        flights = travel_data.get("flights", [])
+        hotels = travel_data.get("hotels", [])
+
+        if not flights:
+            flight_section = "Based on our search, we unfortunately could not find any available flights from your origin to [Destination City] at this time."
+        elif "route" in flights[0]:
+            # connecting flight template
+            flight_section = """
+            Based on our search, we have found the following connecting flight option:
+            **Total Flight Price:** [total_price with correct currency symbol]
+            * **Leg 1:** [from] ➔ [to] | **Airline:** [airline] (**Flight:** [flight]) | **Dep:** [departure_time] **Arr:** [arrival_time]
+            * **Leg 2:** [from] ➔ [to] | **Airline:** [airline] (**Flight:** [flight]) | **Dep:** [departure_time] **Arr:** [arrival_time]
+            """
+        else:
+        #  direct flight template
+            flight_section = """
+            Based on our search, we have found the following flight option:
+            * **Airline:** [Airline Name]
+            * **Flight Number:** [Flight Number]
+            * **Departure:** [departure_time] | **Arrival:** [arrival_time]
+            * **Price:** [Price with correct currency symbol]
+            """
+
+        if not hotels:
+            hotel_section = "No affordable hotels were found within your budget."
+        else:
+            hotel_section = """
+            Based on our search, we've found excellent options to suit different preferences:
+
+            **1. [Hotel Name]**
+                * [Star Emojis] ([Number] Stars) | **Type:** [hotel_type]
+                * **Price Per Night:** [Price with correct currency symbol]
+                * **Distance from Center:** [distance_from_center_km] km
+            
+            [Repeat numbered list for additional hotels]
+            """
+
+        system_prompt = f"""
         You are a strict data formatter. Your ONLY job is to output the provided <data> into the EXACT Markdown template below.
 
         CRITICAL RULES:
@@ -181,8 +212,6 @@ class FormatterNode:
         [IF NO FLIGHTS ARE FOUND, USE THIS EXACT TEXT AND DO NOT ADD ANYTHING]
         Based on our search, we unfortunately could not find any available flights from your origin to [Destination City] at this time.
 
-        ---
-        [IF FLIGHTS ARE FOUND IN THE DATA, USE THIS FORMAT:]
         [Greeting tailored to the destination]
         ### ✨ **Your [Destination City] Escape** ✨
 
@@ -193,43 +222,13 @@ class FormatterNode:
         ---
 
         ### ✈️ **Your Flight Details**
-        * **Airline:** [Airline Name]
-        * **Flight Number:** [Flight Number]
-        * **Price:** [Price with correct currency symbol]
-        * **Status:** Available
+        {flight_section}
 
         ---
 
         ### 🏨 **Accommodation Options in [Destination City]**
-        [IF HOTELS FOUND:]
-        **1. [Hotel Name]**
-            * [Star Emojis] ([Number] Stars)
-            * **Price Per Night:** [Price with correct currency symbol]
+        {hotel_section}
 
-        [Repeat for each hotel]
-
-        ---
-
-        ### 🎯 **Things To Do in [Destination City]**
-        [IF activities FOUND IN DATA:]
-        **1. [Activity Name]** — [Category] — $[Price]
-        [Repeat for each activity, max 5]
-        [IF no activities: omit this section]
-
-        ---
-
-        ### 🌤️ **Weather & Best Time to Visit**
-        [IF weather FOUND IN DATA:]
-        * **[Season]:** [Temperature]
-        [Repeat for each season available]
-
-        [IF best_time FOUND IN DATA AND has months:]
-        * **Best months to visit:** [months joined by comma]
-        * **Why:** [reason]
-
-        [IF neither weather nor best_time: omit this section]
-
-        ---
         [Appropriate closing sign-off]
         """
 
