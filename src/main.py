@@ -11,17 +11,10 @@ warnings.filterwarnings("ignore", category=LangChainPendingDeprecationWarning)
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer  # noqa: E402
 from langgraph.checkpoint.sqlite import SqliteSaver  # noqa: E402
 
+import ui  # noqa: E402
 from agent.graph import build_graph  # noqa: E402
-from config.setting import CHOSEN_PROVIDER  # noqa: E402
 from config.session_name import generate_session_name  # noqa: E402
-
-BANNER = r"""
-       _   _____ _      _    ____
-      / \ |_   _| |    / \  / ___|
-     / _ \  | | | |   / _ \ \___ \
-    / ___ \ | | | |__/ ___ \ ___) |
-   /_/   \_\|_| |_____/_/   \_\____/
-"""
+from config.setting import CHOSEN_PROVIDER  # noqa: E402
 
 CHECKPOINT_DB = Path(__file__).resolve().parent.parent / "data" / "checkpoints.db"
 
@@ -52,66 +45,59 @@ def _interactive_loop(conn: sqlite3.Connection, session_id: str) -> None:
     config = {"configurable": {"thread_id": session_id}}
 
     resuming = bool(graph.get_state(config).values)
+    ui.render_banner(CHOSEN_PROVIDER, session_id, CHECKPOINT_DB, resuming)
 
-    print(BANNER)
-    print(f"--- Autonomous Travel Agent Started ({CHOSEN_PROVIDER.upper()}) ---")
-    print(f"Session: {session_id} (state persisted to {CHECKPOINT_DB})")
-    print("Type 'exit' or 'quit' to end the session.")
-    print("-" * 50)
-    if resuming:
-        print(f"Agent: Welcome back! Resuming session '{session_id}'. How can I help you continue?")
-    else:
-        print("Agent: Hello! I'm your travel assistant. Where are you starting from and where would you like to go?")
-    print("-" * 50)
+    prompt_session = ui.make_prompt_session()
 
     while True:
-        user_input = input("\nUser: ")
-        if user_input.strip().lower() in ["exit", "quit"]:
-            print("Goodbye!")
+        user_input = ui.ask_user(prompt_session)
+        if user_input is None:
+            ui.render_goodbye(newline=True)
             break
-
-        initial_state = {
-            "messages": [("user", user_input)],
-            "step_count": 0,
-        }
-
-        last_printed_content = ""
-        last_printed_state = ()
-        current_node = "unknown"
+        if user_input.strip().lower() in {"exit", "quit"}:
+            ui.render_goodbye()
+            break
+        if not user_input.strip():
+            continue
 
         try:
-            for mode, data in graph.stream(initial_state, config, stream_mode=["values", "updates"]):
-                if mode == "updates":
-                    current_node = next(iter(data))
-                    print(f"\n{'=' * 10} Node: {current_node} {'=' * 10}")
-                    continue
-
-                messages = data.get("messages", [])
-                if not messages:
-                    continue
-
-                # mode == "values" — full state snapshot
-                last_msg = messages[-1]
-                msg_type = last_msg.__class__.__name__
-                content = str(last_msg.content) if hasattr(last_msg, "content") else "No content"
-
-                current = data.get("current_city", "None")
-                dest = data.get("destination_city", "None")
-                budget = data.get("total_budget", "None")
-                trip_days = data.get("trip_days", "None")
-                current_state_tuple = (current, dest, budget, trip_days)
-
-                if content != last_printed_content or current_state_tuple != last_printed_state:
-                    if content != last_printed_content:
-                        print(f"[{msg_type}] Content: {content}")
-                        last_printed_content = content
-                    print(f"State -> Origin: {current} | Dest: {dest} | Budget: {budget} | Trip Days: {trip_days}")
-                    print("-" * 20)
-                    last_printed_state = current_state_tuple
+            _run_turn(graph, config, user_input)
         except Exception as e:  # noqa: BLE001  # top-level handler: report connection/runtime errors to user
-            print(f"\n[Error] Connection failed. Please check your internet connection and API key. Details: {e}")
-            print("Shutting down gracefully...")
+            ui.render_error(e)
             break
+
+
+def _run_turn(graph, config: dict, user_input: str) -> None:
+    initial_state = {"messages": [("user", user_input)], "step_count": 0}
+    last_content = ""
+    last_state: tuple = ()
+
+    with ui.thinking():
+        for mode, data in graph.stream(initial_state, config, stream_mode=["values", "updates"]):
+            if mode == "updates":
+                ui.render_node(next(iter(data)))
+                continue
+
+            messages = data.get("messages", [])
+            if not messages:
+                continue
+
+            last_msg = messages[-1]
+            content = str(last_msg.content) if hasattr(last_msg, "content") else "No content"
+            state_tuple = (
+                data.get("current_city", "None"),
+                data.get("destination_city", "None"),
+                data.get("total_budget", "None"),
+                data.get("trip_days", "None"),
+            )
+
+            if content == last_content and state_tuple == last_state:
+                continue
+            if content != last_content:
+                ui.render_agent_message(last_msg.__class__.__name__, content)
+                last_content = content
+            ui.render_state(*state_tuple)
+            last_state = state_tuple
 
 
 if __name__ == "__main__":
