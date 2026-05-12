@@ -294,36 +294,43 @@ def _phase2_country_destination(
     return None, destination
 
 
-def _phase4_extract_preferences(
+def _extract_general_preferences(
     state: AgentState,
     extraction_model: BaseChatModel,
-    flights: list,
-    hotels: list,
-) -> dict | None:
-    """Scan history for stated preferences and apply them as a filter.
+) -> dict:
+    """Scan the latest user message for stated preferences and update the state."""
+    messages = state.get("messages", [])
+    
+    # חיפוש ההודעה האחרונה של המשתמש
+    last_user_message = next((m for m in reversed(messages) if getattr(m, "type", "") == "human"), None)
+    
+    if not last_user_message:
+        return {}
 
-    Returns a terminal dict if preferences resolve the option count, else None.
-    """
+    # שימוש ב-Pydantic Model שכבר קיים אצלך: UserPreferences
     extracted: UserPreferences = extraction_model.with_structured_output(UserPreferences).invoke([
         {
             "role": "system",
             "content": (
-                "Extract any travel preferences the user has explicitly expressed. "
-                "Only extract clearly stated preferences. Return null for anything not mentioned."
+                "Extract any travel preferences the user has explicitly expressed in their latest message. "
+                "Look for dietary restrictions, preferred airlines, mobility/accessibility needs, or hotel vibes. "
+                "Return null for anything not mentioned."
             ),
         },
-        *state["messages"],
+        {"role": "user", "content": last_user_message.content},
     ])
 
-    prefs = {k: v for k, v in extracted.model_dump().items() if v is not None}
-    if not prefs:
-        return None
-
-    filtered_flights, filtered_hotels = _apply_pref_filter(flights, hotels, prefs)
-    if filtered_flights or filtered_hotels:
-        return {"user_preferences": prefs, "enrichment_complete": True}
-    # Preferences matched nothing — proceed with all options
-    return {"enrichment_complete": True}
+    # סינון שדות שהם None
+    new_prefs = {k: v for k, v in extracted.model_dump().items() if v is not None}
+    
+    if not new_prefs:
+        return {} # לא נמצאו העדפות חדשות
+        
+    # מיזוג ההעדפות החדשות עם הקיימות
+    current_prefs = state.get("user_preferences") or {}
+    updated_prefs = {**current_prefs, **new_prefs}
+    
+    return {"user_preferences": updated_prefs}
 
 
 def _phase5_ask_question(
@@ -411,14 +418,15 @@ class EnrichmentNode:
             return {**extra, **terminal}
         origin_update = {"current_city": origin} if origin != state.get("current_city") else {}
 
-        # Phase 2 — destination country check
         terminal, destination = _phase2_country_destination(state, self.extraction_model, origin)
         if terminal is not None:
             return {**extra, **origin_update, **terminal}
 
         dest_update = {"destination_city": destination} if destination != state.get("destination_city") else {}
 
-        return {**extra, **origin_update, **dest_update, "enrichment_complete": True}
+        pref_update = _extract_general_preferences(state, self.extraction_model)
+
+        return {**extra, **origin_update, **dest_update, **pref_update, "enrichment_complete": True}
 
         # --- Phases 3-5 disabled (kept for future re-enabling) ---
 
