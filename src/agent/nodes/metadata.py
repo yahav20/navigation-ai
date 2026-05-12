@@ -29,14 +29,25 @@ class MetadataNode:
 
         extractor = self.extraction_model.with_structured_output(TravelMetadata)
 
+        current_trip_days = state.get("trip_days")
+
         metadata: TravelMetadata = extractor.invoke([
             {
                 "role": "system",
-                "content": """
+                "content": f"""
                 Extract travel metadata from the conversation.
                 Only fill a field if it is explicitly mentioned or very clear.
                 Do not guess. If a field is missing, return null.
                 Extract: current_city, destination_city, budget, trip_days.
+
+                IMPORTANT — trip_days resolution:
+                The current trip duration in state is: {current_trip_days} days.
+                If the user says something relative like "increase by 2 days", "add 3 days",
+                "make it longer by 1 day", or "reduce by 2 days", compute the new absolute
+                value from the current state value and return that number.
+                Example: current is 5, user says "add 2 days" → return 7.
+                Example: current is 5, user says "reduce by 1 day" → return 4.
+                If the user gives an absolute number like "6 days", return that directly.
                 """,
             },
             *recent_messages,
