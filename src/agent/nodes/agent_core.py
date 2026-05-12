@@ -9,6 +9,7 @@ class AgentNode:
     def __call__(self, state: AgentState) -> dict:
         current_step = state.get("step_count", 0) + 1
         messages = state.get("messages", [])
+        summary = state.get("summary", "")
         
         clean_history = [m for m in messages if getattr(m, "type", "") != "formatter_output"]
 
@@ -30,6 +31,9 @@ class AgentNode:
 
         system_prompt = f"""You are Atlas, a strict robotic travel agent.
         
+        CONTEXT FROM PREVIOUS EXCHANGES:
+        {summary or "No previous context. This is a new conversation."}
+
         TRIP DETAILS:
         - Origin: {origin}
         - Destination: {dest}
