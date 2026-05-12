@@ -191,6 +191,12 @@ class FormatterNode:
             [Repeat numbered list for additional hotels]
             """
 
+        weather_info = travel_data.get("weather", {})
+        best_time_info = travel_data.get("best_time", {})
+
+        weather_str = "\n".join([f"* **{season.capitalize()}:** {temp}" for season, temp in weather_info.items()]) if weather_info else "Data not available."
+        best_time_str = best_time_info.get("months", "Data not available.") if isinstance(best_time_info, dict) else "Data not available."
+        
         system_prompt = f"""
         You are a strict data formatter. Your ONLY job is to output the provided <data> into the EXACT Markdown template below.
 
@@ -217,6 +223,10 @@ class FormatterNode:
 
         ### 🏨 **Accommodation Options in [Destination City]**
         {hotel_section}
+        
+        ### 🌤️ **Destination Insights**
+        * **Best Time to Visit:** {best_time_str}
+        * **Average Weather:** {weather_str}
 
         [Appropriate closing sign-off]
         """
