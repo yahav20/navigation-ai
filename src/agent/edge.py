@@ -73,3 +73,18 @@ def after_adjustments(state: AgentState) -> str:
     if state.get("is_adjustment"):
         return "enrichment"
     return "extract_metadata"
+
+def after_router(state: AgentState) -> str:
+    """Route from the RouterNode based on the classified intent."""
+    intent = state.get("intent", "other")
+    
+    if intent == "new_travel_plan":
+        return "extract_metadata"      
+    elif intent == "update_travel_plan":
+        return "adjustments"           
+    elif intent == "recommendations":
+        return "recommendations"       
+    # elif intent == "general_interaction":
+    #     return "general_interaction"   
+    else:
+        return END

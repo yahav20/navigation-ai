@@ -6,8 +6,9 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode
 
-from agent.edge import after_adjustments, after_enrichment, should_continue
+from agent.edge import after_enrichment, should_continue, after_router
 from agent.llm import get_models
+from agent.nodes.router import RouterNode
 from agent.nodes.agent_core import AgentNode
 from agent.nodes.enrichment import EnrichmentNode
 from agent.nodes.formatting import FormatterNode
@@ -19,6 +20,11 @@ from agent.nodes.node_alternative import (
 from agent.nodes.summary import SummaryNode
 from agent.state import AgentState
 from tools import core_tools
+
+# TODO: Replace with actual recommendations node
+def dummy_recommendations_node(state: AgentState):
+    from langchain_core.messages import AIMessage
+    return {"messages": [AIMessage(content="I am the recommendations agent! My code is coming soon.")]}
 
 
 def build_graph(provider: str = "google") -> CompiledStateGraph:
@@ -34,10 +40,13 @@ def build_graph(provider: str = "google") -> CompiledStateGraph:
     formatter = FormatterNode(extraction_model)
     alternative_destination_node = AlternativeDestinationNode(extraction_model)
     formatter_alternative = FormatterAlternativeNode(extraction_model)
+    router_node = RouterNode(extraction_model)
 
     # 2. Build the standard graph
     builder = StateGraph(AgentState)
 
+    builder.add_node("router", router_node)
+    builder.add_node("recommendations", dummy_recommendations_node)
     builder.add_node("extract_metadata", extract_metadata_node)
     builder.add_node("adjustments", adjustments_node)
     builder.add_node("enrichment", enrichment_node)
@@ -49,13 +58,23 @@ def build_graph(provider: str = "google") -> CompiledStateGraph:
     builder.add_node("summary", summary_node)
 
     # 3. Define the workflow edges
-    builder.add_edge(START, "adjustments")
+    builder.add_edge(START, "router")
+    
     builder.add_conditional_edges(
-        "adjustments", 
-        after_adjustments, 
-        {"enrichment": "enrichment", "extract_metadata": "extract_metadata"}
+        "router", 
+        after_router, 
+        {
+            "extract_metadata": "extract_metadata", 
+            "adjustments": "adjustments",
+            "recommendations": "recommendations",
+            END: END
+        }
     )
+    
     builder.add_edge("extract_metadata", "enrichment")
+    builder.add_edge("adjustments", "enrichment")
+
+    builder.add_edge("recommendations", "summary")
     builder.add_conditional_edges("enrichment", after_enrichment, {"agent": "agent", END: END})
     builder.add_conditional_edges(
         "agent",

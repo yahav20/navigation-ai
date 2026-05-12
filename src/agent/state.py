@@ -24,3 +24,5 @@ class AgentState(TypedDict):
     summary: str                   # rolling conversation summary maintained by summary_node
     alternative_destinations: list # populated when fetch_flights returns no results for the route
     plan : list[str]               # list of steps the agent plans to take, updated by the agent_core node
+    intent: str                    # intent classification
+

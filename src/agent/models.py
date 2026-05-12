@@ -1,5 +1,6 @@
 """Pydantic models for structured extraction by the travel agent."""
 
+from typing import Literal
 from pydantic import BaseModel, Field
 
 
@@ -37,3 +38,23 @@ class TravelAdjustments(BaseModel):
     new_origin: str | None = Field(default=None, description="The new origin city, if updated.")
     new_budget: float | None = Field(default=None, description="The new total budget, if updated.")
     new_trip_days: int | None = Field(default=None, description="The new trip duration in days, if updated.")
+
+class IntentClassification(BaseModel):
+    """Classify the user's primary intent to route them to the correct agent."""
+    
+    intent: Literal[
+        "new_travel_plan", 
+        "update_travel_plan", 
+        "recommendations" #, 
+        # "general_interaction", 
+        # "other"
+    ] = Field(
+        description=(
+            "Classify the user's intent:\n"
+            "- 'new_travel_plan': Starting a brand new trip from scratch.\n"
+            "- 'update_travel_plan': Changing parameters (budget, days, destination) of an EXISTING trip.\n"
+            "- 'recommendations': Asking for what to do, attractions, food, or weather at a destination.\n"
+            # "- 'general_interaction': Saying hello, thanks, or casual chat.\n"
+            # "- 'other': Out of scope."
+        )
+    )
