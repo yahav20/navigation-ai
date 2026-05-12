@@ -300,14 +300,12 @@ def _extract_general_preferences(
 ) -> dict:
     """Scan the latest user message for stated preferences and update the state."""
     messages = state.get("messages", [])
-    
-    # חיפוש ההודעה האחרונה של המשתמש
+
     last_user_message = next((m for m in reversed(messages) if getattr(m, "type", "") == "human"), None)
     
     if not last_user_message:
         return {}
 
-    # שימוש ב-Pydantic Model שכבר קיים אצלך: UserPreferences
     extracted: UserPreferences = extraction_model.with_structured_output(UserPreferences).invoke([
         {
             "role": "system",
@@ -320,13 +318,13 @@ def _extract_general_preferences(
         {"role": "user", "content": last_user_message.content},
     ])
 
-    # סינון שדות שהם None
+
     new_prefs = {k: v for k, v in extracted.model_dump().items() if v is not None}
     
     if not new_prefs:
-        return {} # לא נמצאו העדפות חדשות
+        return {} 
         
-    # מיזוג ההעדפות החדשות עם הקיימות
+
     current_prefs = state.get("user_preferences") or {}
     updated_prefs = {**current_prefs, **new_prefs}
     

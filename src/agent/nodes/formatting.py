@@ -161,7 +161,6 @@ class FormatterNode:
         flights = travel_data.get("flights", [])
         hotels = travel_data.get("hotels", [])
 
-        # הותאם לנתונים שבאמת חוזרים מה-DB
         if not flights:
             flight_section = "Based on our search, we unfortunately could not find any available flights from your origin to the destination at this time."
         elif "route" in flights[0]:
@@ -179,7 +178,6 @@ class FormatterNode:
             * **Price:** [Price with correct currency symbol]
             """
 
-        # הותאם לנתונים שבאמת חוזרים מה-DB (ללא סוג ומרחק מהמרכז)
         if not hotels:
             hotel_section = "No affordable hotels were found within your budget."
         else:
@@ -193,7 +191,6 @@ class FormatterNode:
             [Repeat numbered list for additional hotels]
             """
 
-        # הפרומפט נוקה מהוראות סותרות
         system_prompt = f"""
         You are a strict data formatter. Your ONLY job is to output the provided <data> into the EXACT Markdown template below.
 
