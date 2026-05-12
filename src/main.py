@@ -13,6 +13,7 @@ from langgraph.checkpoint.sqlite import SqliteSaver  # noqa: E402
 
 from agent.graph import build_graph  # noqa: E402
 from config.setting import CHOSEN_PROVIDER  # noqa: E402
+from config.session_name import generate_session_name  # noqa: E402
 
 BANNER = r"""
        _   _____ _      _    ____
@@ -29,8 +30,8 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Autonomous Travel Agent")
     parser.add_argument(
         "--session",
-        default="default",
-        help="Session name (thread_id) to resume or create. Defaults to 'default'.",
+        default=None,
+        help="Session name (thread_id) to resume or create. Defaults to a random name like 'happy-traveler'.",
     )
     return parser.parse_args()
 
@@ -115,4 +116,4 @@ def _interactive_loop(conn: sqlite3.Connection, session_id: str) -> None:
 
 if __name__ == "__main__":
     args = _parse_args()
-    run_agent(session_id=args.session)
+    run_agent(session_id=args.session or generate_session_name())
