@@ -9,7 +9,7 @@ class AgentNode:
     def __call__(self, state: AgentState) -> dict:
         current_step = state.get("step_count", 0) + 1
         messages = state.get("messages", [])
-        summary = state.get("summary", "")
+        summary = state.get("summary", [])
         
         clean_history = [m for m in messages if getattr(m, "type", "") != "formatter_output"]
 
