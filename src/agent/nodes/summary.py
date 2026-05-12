@@ -23,8 +23,6 @@ class SummaryNode:
         if len(messages) < MIN_MESSAGES_TO_SUMMARIZE:
             return {}
 
-        recent_messages = messages[-6:]
-
         summary_prompt = f"""
             You are a memory management module for a travel agent.
             Your task is to maintain a concise "World State" summary.
@@ -48,16 +46,26 @@ class SummaryNode:
 
         response = self.extraction_model.invoke([
             {"role": "system", "content": summary_prompt},
-            *recent_messages,
+            *messages,
         ])
 
         new_summary = response.content
 
-        messages_to_keep = 2
-        messages_to_delete = messages[:-messages_to_keep]
+        messages_to_keep_ids = set()
 
-        # Deleting all messages to manage context window size
-        delete_commands = [RemoveMessage(id=m.id) for m in messages_to_delete if m.id is not None]
+        for m in reversed(messages):
+            if m.type == "human":
+                messages_to_keep_ids.add(m.id)
+                break
+
+        if messages:
+            messages_to_keep_ids.add(messages[-1].id)
+
+        delete_commands = [
+            RemoveMessage(id=m.id)
+            for m in messages
+            if m.id is not None and m.id not in messages_to_keep_ids
+        ]
 
         return {
             "summary": new_summary,

@@ -40,12 +40,20 @@ class AgentNode:
         - Budget: {budget}
         - Duration: {trip_days} days
 
-        {action}
+        CRITICAL INSTRUCTIONS & GUARDRAILS:
+        1. MISSING INFO: If ANY of the 'CURRENT TRIP STATUS' fields are 'NOT PROVIDED', ask the user politely for the missing information. Do not search until you have all three.
+        2. EXPLICIT TOOL EXECUTION: You MUST gather real data by calling ALL of the following tools in order:
+           a. `fetch_flights` — get available flights from origin to destination.
+           b. `fetch_hotels` — get available hotels at the destination.
+           c. `calculate_trip_cost` — call with the cheapest available flight price, cheapest available hotel price per night, and {trip_days} days. This gives the true total cost.
+           d. `fetch_activities` — get available activities at the destination.
+           e. `get_average_weather` — call with the destination city and the current or upcoming season (Spring/Summer/Autumn/Winter).
+           f. `get_best_time_to_visit` — call with the destination city.
+        3. NO HALLUCINATIONS: Check your conversation history. Have you received results from ALL six tools above? If NO, call the missing ones now.
+        5. BOUNDARY ENFORCEMENT: Decline any non-travel questions and steer back to the trip.
 
-        RULES:
-        1. You must ONLY execute the CRITICAL ACTION requested above.
-        2. DO NOT skip steps.
-        3. DO NOT hallucinate prices.
+        DO NOT output the final itinerary yourself. Just confirm you found the data. The system will handle formatting.
+        DO NOT ask the user any questions.
         """
 
         messages_to_pass = [{"role": "system", "content": system_prompt}, *clean_history]
