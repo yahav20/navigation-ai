@@ -1,4 +1,5 @@
 """Build the LangGraph state graph for the travel agent."""
+from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.graph import END, START, StateGraph
@@ -20,8 +21,16 @@ from agent.state import AgentState
 from tools import core_tools
 
 
-def build_graph(provider: str = "google") -> CompiledStateGraph:
-    """Build the graph using the specified model provider ('google' or 'groq')."""
+def build_graph(
+    provider: str = "google",
+    checkpointer: BaseCheckpointSaver | None = None,
+) -> CompiledStateGraph:
+    """Build the graph using the specified model provider ('google' or 'groq').
+
+    If no `checkpointer` is supplied, falls back to an in-memory saver so the
+    graph still works for tests and one-shot invocations. Persistent runs
+    should pass a durable checkpointer (e.g. `SqliteSaver`).
+    """
     # 1. Create the nodes with the chosen model provider
     model_with_tools, extraction_model = get_models(provider)
 
@@ -65,6 +74,6 @@ def build_graph(provider: str = "google") -> CompiledStateGraph:
     # The summary node marks the end of the processing cycle for the current turn
     builder.add_edge("summary", END)
     # Adding a checkpointer to save the agent's state across turns
-    serializer = JsonPlusSerializer()
-    memory = MemorySaver(serde=serializer)
-    return builder.compile(checkpointer=memory)
+    if checkpointer is None:
+        checkpointer = MemorySaver(serde=JsonPlusSerializer())
+    return builder.compile(checkpointer=checkpointer)
