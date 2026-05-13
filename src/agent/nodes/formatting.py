@@ -3,6 +3,7 @@ import json
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import BaseMessage
+from langchain_core.messages import AIMessage
 
 from agent.state import AgentState
 
@@ -122,25 +123,15 @@ class FormatterNode:
         if not state.get("messages"):
             return {}
 
-        last_msg = state["messages"][-1]
-        content = last_msg.content if hasattr(last_msg, "content") else "No content"
-
-        if isinstance(content, list):
-            last_agent_message = "".join(
-                part.get("text", "") for part in content if isinstance(part, dict) and part.get("type") == "text"
-            )
-        else:
-            last_agent_message = str(content)
-
-        if "let me know" in last_agent_message.lower():
-            return {}
-
         has_origin = bool(state.get("current_city"))
         has_dest = bool(state.get("destination_city"))
-        has_budget = bool(state.get("total_budget")) or bool(state.get("budget_optional"))
+        budget = state.get("total_budget")
+        trip_days = state.get("trip_days")
 
-        if not (has_origin and has_dest and has_budget):
-            return {}
+        is_adjustment = state.get("is_adjustment", False)
+
+        if not (has_origin and has_dest and bool(budget) and bool(trip_days)):
+            return {}   
 
         travel_data = extract_travel_data(state)
 
@@ -158,6 +149,28 @@ class FormatterNode:
                         break 
             travel_data["hotels"] = affordable
 
+        # Check in the code if we have the necessary data
+        has_flights = bool(travel_data.get("flights"))
+        has_hotels = bool(travel_data.get("hotels"))
+
+        # Determine the texts based on the state (adjustment or initial search)
+        if is_adjustment:
+            success_greeting = "✅ **Trip Updated Successfully!** Here are the new details based on your requested changes:"
+            no_flights_text = "⚠️ **Update Failed:** I tried to update your trip, but unfortunately, I couldn't find any available flights matching your new request."
+            no_hotels_text = "⚠️ **Update Failed:** I found flights for your new request, but I couldn't find any hotels that fit your newly adjusted budget constraints."
+        else:
+            success_greeting = "Here is your perfect travel plan!"
+            no_flights_text = f"Based on our search, we unfortunately could not find any available flights from {state.get('current_city')} to {state.get('destination_city')} at this time."
+            no_hotels_text = "Based on our search, we found flights but could not find any hotels within your specified budget."
+
+        # --- Solution: Handle failure cases directly in code, without LLM ---
+        if not has_flights:
+            return {"messages": [AIMessage(content=no_flights_text, name="formatter_output")]}
+        
+        if not has_hotels:
+            return {"messages": [AIMessage(content=no_hotels_text, name="formatter_output")]}
+
+        # --- Call LLM only in case of success with a clean prompt ---
         flights = travel_data.get("flights", [])
         hotels = travel_data.get("hotels", [])
 
@@ -203,16 +216,22 @@ class FormatterNode:
         CRITICAL RULES:
         1. DO NOT add conversational filler.
         2. FORCE CURRENCY: You MUST use the '$' symbol for ALL prices and budgets. DO NOT use '€' or '£'.
-        3. Do not invent any data. Use ONLY what is in the <data>.
-        4. TOTAL PRICE RULE: Use the lowest total_estimate from trip_cost_calculations as "Total Price". If empty, write "N/A".
-        5. YOU MUST USE THIS EXACT TEMPLATE:
+        3. DO NOT ask the user any questions.
+        4. If any section has no data, omit that section entirely — do not write placeholder text.
+        5. Do not invent any data. Use ONLY what is in the <data>.
+        6. STRICT CONDITIONAL LOGIC: Follow the IF/ELSE logic in the template perfectly.
+        7. TOTAL PRICE RULE: Use the lowest total_estimate from trip_cost_calculations as "Total Price". DO NOT recompute.
+           If trip_cost_calculations is empty, write "N/A".
+        8. YOU MUST USE THIS EXACT TEMPLATE:
 
-        [Greeting tailored to the destination]
-        ### ✨ **Your [Destination City] Escape** ✨
+        {success_greeting}
+        ### ✨ **Your {state.get("destination_city")} Escape** ✨
 
-        **Destination:** [City Name, Country]
-        **Total Budget:** [Budget with correct currency symbol]
-        **Total Price:** [lowest total_estimate from trip_cost_calculations, with $ symbol]
+        **Destination:** {state.get("destination_city")}
+        **Total Budget:** ${budget}
+        **Trip Days:** {trip_days}
+
+        **Total Price:** [Use the lowest total_estimate, with $ symbol]
 
         ---
 
@@ -221,7 +240,7 @@ class FormatterNode:
 
         ---
 
-        ### 🏨 **Accommodation Options in [Destination City]**
+        ### 🏨 **Accommodation Options in {state.get("destination_city")}**
         {hotel_section}
         
         ### 🌤️ **Destination Insights**

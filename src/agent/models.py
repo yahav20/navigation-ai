@@ -1,5 +1,6 @@
 """Pydantic models for structured extraction by the travel agent."""
 
+from typing import Literal
 from pydantic import BaseModel, Field
 
 
@@ -31,3 +32,33 @@ class RefusalDetection(BaseModel):
     refusing_origin_city: bool = Field(default=False, description="User explicitly refuses or claims to be unable to provide their origin/departure city")
     refusing_destination_city: bool = Field(default=False, description="User explicitly refuses or claims to be unable to provide their destination city")
     refusing_budget: bool = Field(default=False, description="User explicitly refuses or claims to be unable to provide their travel budget")
+
+
+class TravelAdjustments(BaseModel):
+    """Detect if the user explicitly wants to adjust their existing travel parameters."""
+    
+    is_adjustment: bool = Field(default=False, description="True ONLY if the user is explicitly changing their destination, origin, budget, or trip days.")
+    new_destination: str | None = Field(default=None, description="The new destination city, if updated.")
+    new_origin: str | None = Field(default=None, description="The new origin city, if updated.")
+    new_budget: float | None = Field(default=None, description="The new total budget, if updated.")
+    new_trip_days: int | None = Field(default=None, description="The new trip duration in days, if updated.")
+
+class IntentClassification(BaseModel):
+    """Classify the user's primary intent to route them to the correct agent."""
+    
+    intent: Literal[
+        "new_travel_plan", 
+        "update_travel_plan", 
+        "recommendations" #, 
+        # "general_interaction", 
+        # "other"
+    ] = Field(
+        description=(
+            "Classify the user's intent:\n"
+            "- 'new_travel_plan': Starting a brand new trip from scratch.\n"
+            "- 'update_travel_plan': Changing parameters (budget, days, destination) of an EXISTING trip.\n"
+            "- 'recommendations': Asking for what to do, attractions, food, or weather at a destination.\n"
+            # "- 'general_interaction': Saying hello, thanks, or casual chat.\n"
+            # "- 'other': Out of scope."
+        )
+    )
