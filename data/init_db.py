@@ -232,6 +232,10 @@ def seed_travel(conn: sqlite3.Connection) -> None:
      "2026-06-01 12:00:00", "2026-06-01 14:15:00",
      75, "Available", 1.25),
 
+     ("paris", "tel aviv", "El Al", 355, "LY322",
+     "2026-06-02 08:00:00", "2026-06-02 11:50:00",
+     295, "Available", 5.0),
+
     ("paris", "london", "Air France", 120, "AF125",
      "2026-06-01 13:00:00", "2026-06-01 14:15:00",
      75, "Available", 1.25),
