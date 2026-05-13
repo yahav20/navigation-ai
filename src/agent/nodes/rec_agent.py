@@ -128,15 +128,22 @@ YOUR TOOLS AND WHEN TO USE THEM:
     → For activity-type queries: Nature, Culture, History, Family, Nightlife, Entertainment, Sightseeing
     → Pick from the AVAILABLE ACTIVITY CATEGORIES list above
 
+- find_destinations_within_budget_auto(origin, total_budget)
+    → Use when the user gives a budget AND an origin but does NOT specify trip duration
+    → Automatically uses each city's recommended minimum stay to calculate cost
+    → Returns recommended_days per city — always include this in DATA COLLECTED so the user
+      knows the duration is a recommendation, not something they specified
+    → This is the preferred tool when trip_days is unknown
+
 - find_destinations_within_budget(origin, total_budget, trip_days)
-    → Use THIS (not get_reachable_destinations) when the user gives both a budget AND an origin
+    → Use ONLY when the user has explicitly stated a trip duration
     → Calculates minimum cost as cheapest_flight + (cheapest_hotel × days) and filters by budget
-    → Always prefer this over manual filtering — it does the math correctly in one call
-    → If the user doesn't give trip_days, assume 5 days as a default
 
 - get_reachable_destinations(origin, max_flight_hours)
     → Use ONLY when the user explicitly states an origin city/country AND has no budget
     → DO NOT call this if the user has not mentioned where they are flying from
+    → The origin MUST come directly from the user's message — never use a tool result
+      (e.g. a city returned by find_destinations_by_tag) as the origin parameter
     → Use max_flight_hours to filter by actual flight duration:
         short haul → max_flight_hours=2.5
         medium haul → max_flight_hours=5
@@ -164,11 +171,22 @@ YOUR TOOLS AND WHEN TO USE THEM:
     → When the user asks about weather in a specific season for a specific city
 
 COMBINING TOOLS — KEY STRATEGIES:
-1. User mentions origin + budget (with or without trip days):
-   → Call find_destinations_within_budget(origin, budget, days) — this is the single correct tool for budget questions
-   → Then optionally call get_city_overview on the matching cities for richer data
+1. User mentions origin + budget, NO trip_days given:
+   → Call find_destinations_within_budget_auto(origin, budget)
+   → Each result includes recommended_days — always report it in DATA COLLECTED as:
+     "City: flight $X, hotel $Y/night, est. total $Z (based on recommended X-day stay)"
+   → Then optionally call get_city_overview on matching cities for richer data
 
-2. User mentions origin + vibe/tag (no budget):
+1b. User mentions origin + budget + explicit trip_days:
+   → Call find_destinations_within_budget(origin, budget, trip_days)
+   → Then optionally call get_city_overview on matching cities for richer data
+
+2. User mentions vibe/tag only, NO origin:
+   → Call find_destinations_by_tag or find_destinations_by_vibe
+   → Present the matching cities. Do NOT call get_reachable_destinations — you have no origin.
+   → Do NOT use a tool-returned city as the origin for get_reachable_destinations.
+
+2b. User mentions origin + vibe/tag (no budget):
    → Call get_reachable_destinations(origin) AND find_destinations_by_tag / find_destinations_by_vibe
    → Cross-reference: lead with destinations that appear in BOTH lists; mention others separately
 

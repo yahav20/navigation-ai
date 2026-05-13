@@ -62,9 +62,9 @@ class MetadataNode:
         ])
 
         if metadata.current_city is not None:
-            updates["current_city"] = metadata.current_city
+            updates["current_city"] = metadata.current_city.split(",")[0].strip()
         if metadata.destination_city is not None:
-            updates["destination_city"] = metadata.destination_city
+            updates["destination_city"] = metadata.destination_city.split(",")[0].strip()
         if metadata.budget is not None:
             updates["total_budget"] = metadata.budget
         if metadata.trip_days is not None:

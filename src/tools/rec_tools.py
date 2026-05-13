@@ -52,6 +52,20 @@ def find_destinations_by_tag(tag: str) -> list[dict]:
 
 
 @tool
+def find_destinations_within_budget_auto(origin: str, total_budget: float) -> list[dict]:
+    """Find destinations affordable from a given origin within a total budget, using each city's recommended stay length.
+
+    Unlike find_destinations_within_budget, this tool does NOT require trip_days.
+    It automatically looks up the recommended minimum stay for each destination and uses that
+    to calculate the minimum trip cost (cheapest_flight + cheapest_hotel × recommended_days).
+    Returns recommended_days in each result so the user can be informed of the assumed duration.
+
+    Use this when the user mentions a budget and an origin but does NOT specify trip duration.
+    """
+    return _provider.find_within_budget_auto_duration(origin, total_budget)
+
+
+@tool
 def find_destinations_within_budget(origin: str, total_budget: float, trip_days: int) -> list[dict]:
     """Find destinations affordable from a given origin within a total budget for a given number of days.
 
@@ -97,6 +111,7 @@ rec_tools = [
     find_destinations_by_vibe,
     find_destinations_by_tag,
     get_reachable_destinations,
+    find_destinations_within_budget_auto,
     find_destinations_within_budget,
     get_city_overview,
     get_trip_duration_recommendation,

@@ -95,6 +95,36 @@ class RecommendationQueriesMixin:
         rows = self._query("SELECT DISTINCT tag FROM city_tags ORDER BY tag")
         return [r["tag"] for r in rows]
 
+    def find_within_budget_auto_duration(self, origin: str, budget: float) -> list[dict]:
+        """Return destinations within budget using each city's recommended minimum stay.
+
+        Uses recommended_duration.min_days per city (falls back to 5 if missing).
+        Returns recommended_days in results so the caller can surface it to the user.
+        """
+        rows = self._query(
+            """SELECT dc.name AS city,
+                      co.name AS country,
+                      MIN(f.price)                                                              AS cheapest_flight,
+                      MIN(h.price_per_night)                                                   AS cheapest_hotel_per_night,
+                      COALESCE(rd.min_days, 5)                                                 AS recommended_days,
+                      MIN(f.price) + (MIN(h.price_per_night) * COALESCE(rd.min_days, 5))      AS estimated_min_total,
+                      MIN(f.duration_hours)                                                    AS min_flight_hours
+               FROM flights f
+               JOIN cities oc ON f.origin_city_id      = oc.id
+               JOIN cities dc ON f.destination_city_id = dc.id
+               JOIN countries co ON dc.country_id      = co.id
+               JOIN hotels h  ON h.city_id             = dc.id
+               LEFT JOIN recommended_duration rd ON rd.city_id = dc.id
+              WHERE LOWER(oc.name) = ?
+              GROUP BY dc.id
+             HAVING MIN(f.price) + (MIN(h.price_per_night) * COALESCE(rd.min_days, 5)) <= ?
+              ORDER BY estimated_min_total ASC""",
+            (origin.strip().lower(), budget),
+        )
+        if not rows:
+            return [{"message": f"No destinations found from '{origin}' within a ${budget:.0f} budget."}]
+        return rows
+
     def find_within_budget(self, origin: str, budget: float, trip_days: int) -> list[dict]:
         """Return destinations where cheapest_flight + (cheapest_hotel * days) fits the budget.
 
