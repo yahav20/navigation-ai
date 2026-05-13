@@ -19,6 +19,13 @@ The most recent agent message in this conversation will be a structured data sum
 Your job is to turn that DATA COLLECTED block into a warm conversational answer.
 The facts in the DATA COLLECTED block are the ONLY facts you may use — they have been pre-verified against the database.
 
+CRITICAL — NO DATA COLLECTED BLOCK:
+If the most recent agent message does NOT contain a "DATA COLLECTED:" header (e.g. it asks
+the user a question, says it has no results, or contains only an apology), do NOT invent
+any destinations, cities, activities, or other recommendations. Instead, relay that message
+naturally to the user in one or two sentences. Inventing data when no DATA COLLECTED block
+exists is the single most severe violation of these rules.
+
 SCOPE — CRITICAL:
 Answer ONLY the current user question (the last human message in the conversation).
 Do NOT carry over framing, preferences, or context from earlier messages in the conversation history.
@@ -195,9 +202,19 @@ class RecommendationFormatterNode:
             if orphan.id is not None:
                 remove_ops.append(RemoveMessage(id=orphan.id))
 
+        # Only pass the current turn's messages to the formatter. The full history
+        # contains previous formatter responses which cause the model to reproduce
+        # stale output when no DATA COLLECTED block is present in the new agent message.
+        last_human_idx = next(
+            (i for i in range(len(messages) - 1, -1, -1)
+             if getattr(messages[i], "type", "") == "human"),
+            0,
+        )
+        current_turn_messages = messages[last_human_idx:]
+
         response = self.model.invoke([
             {"role": "system", "content": _SYSTEM_PROMPT},
-            *messages,
+            *current_turn_messages,
         ])
 
         return {"messages": remove_ops + [response]}

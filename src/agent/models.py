@@ -55,9 +55,13 @@ class IntentClassification(BaseModel):
     ] = Field(
         description=(
             "Classify the user's intent:\n"
-            "- 'new_travel_plan': Starting a brand new trip from scratch.\n"
+            "- 'new_travel_plan': Starting a brand new trip from scratch, OR transitioning from "
+            "recommendation browsing to actual trip planning (e.g. 'plan this trip', 'let's book this', "
+            "'I want to go there', 'book it', 'sounds good, let's go').\n"
             "- 'update_travel_plan': Changing parameters (budget, days, destination) of an EXISTING trip.\n"
-            "- 'recommendations': Asking where to go, what to do, attractions, food, weather, OR refining search parameters (budget, days) within an ACTIVE RECOMMENDATION FLOW.\n"
+            "- 'recommendations': Asking where to go, what to do, attractions, food, or weather. "
+            "Also covers refining search parameters (budget, days) within an ACTIVE RECOMMENDATION FLOW "
+            "when the user is still browsing — NOT when they want to start actual trip planning.\n"
             # "- 'general_interaction': Saying hello, thanks, or casual chat.\n"
             # "- 'other': Out of scope."
         )

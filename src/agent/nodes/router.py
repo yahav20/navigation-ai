@@ -40,6 +40,12 @@ class RouterNode:
         - Destination: {state.get("destination_city", "None")}
         - Budget: {state.get("total_budget", "None")}
 
+        TRANSITION RULE (critical): If the system is in ACTIVE RECOMMENDATION FLOW and the user
+        says something like "plan this trip", "let's go", "book this", "sounds good let's do it",
+        "I want to go there", or any phrase that signals they are ready to commit to a trip —
+        classify as 'new_travel_plan', NOT 'recommendations'. The user is transitioning from
+        browsing destinations to starting actual trip planning.
+
         User message: "{last_msg.content}"
         """
 
