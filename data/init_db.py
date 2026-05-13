@@ -51,7 +51,8 @@ CREATE TABLE flights (
     airline             TEXT    NOT NULL,
     price               INTEGER NOT NULL,
     flight_number       TEXT    NOT NULL,
-    availability        TEXT    NOT NULL DEFAULT 'Available'
+    availability        TEXT    NOT NULL DEFAULT 'Available',
+    duration_hours      REAL
 );
 CREATE INDEX idx_flights_origin      ON flights(origin_city_id);
 CREATE INDEX idx_flights_destination ON flights(destination_city_id);
@@ -89,6 +90,23 @@ CREATE TABLE average_weather (
     UNIQUE(city_id, season)
 );
 CREATE INDEX idx_weather_city ON average_weather(city_id);
+
+CREATE TABLE city_tags (
+    id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    city_id INTEGER NOT NULL REFERENCES cities(id),
+    tag     TEXT    NOT NULL,
+    UNIQUE(city_id, tag)
+);
+CREATE INDEX idx_city_tags_city ON city_tags(city_id);
+CREATE INDEX idx_city_tags_tag  ON city_tags(tag);
+
+CREATE TABLE recommended_duration (
+    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    city_id  INTEGER NOT NULL UNIQUE REFERENCES cities(id),
+    min_days INTEGER NOT NULL,
+    max_days INTEGER NOT NULL,
+    notes    TEXT    NOT NULL
+);
 """
 
 
@@ -165,28 +183,28 @@ def seed_travel(conn: sqlite3.Connection) -> None:
     ids = {key: resolve_city(conn, name, alpha2) for key, (name, alpha2) in city_keys.items()}
 
     flights = [
-        # (origin_key, destination_key, airline, price, flight_number, availability)
-        ("tel aviv", "paris",     "El Al",           350, "LY321", "Available"),
-        ("tel aviv", "paris",     "Air France",      420, "AF123", "Available"),
-        ("tel aviv", "london",    "British Airways", 450, "BA164", "Limited"),
-        ("tel aviv", "london",    "Virgin Atlantic", 390, "VS100", "Available"),
-        ("tel aviv", "tokyo",     "El Al",           950, "LY091", "Available"),
-        ("tel aviv", "tokyo",     "Emirates",        820, "EK312", "Available"),
-        ("tel aviv", "new york",  "United",          750, "UA445", "Limited"),
-        ("tel aviv", "berlin",    "Lufthansa",       280, "LH909", "Available"),
-        ("tel aviv", "berlin",    "Ryanair",         110, "FR101", "Available"),
-        ("tel aviv", "amsterdam", "KLM",             410, "KL456", "Available"),
-        ("london",   "paris",     "Air France",      120, "AF124", "Available"),
-        ("london",   "tokyo",     "JAL",             890, "JL402", "Available"),
-        ("london",   "new york",  "Virgin Atlantic", 550, "VS001", "Limited"),
-        ("new york", "london",    "Virgin Atlantic", 550, "VS002", "Limited"),
-        ("new york", "paris",     "Air France",      480, "AF200", "Available"),
+        # (origin_key, destination_key, airline, price, flight_number, availability, duration_hours)
+        ("tel aviv", "paris",     "El Al",            350, "LY321", "Available",  4.5),
+        ("tel aviv", "paris",     "Air France",       420, "AF123", "Available",  4.5),
+        ("tel aviv", "london",    "British Airways",  450, "BA164", "Limited",    5.0),
+        ("tel aviv", "london",    "Virgin Atlantic",  390, "VS100", "Available",  5.0),
+        ("tel aviv", "tokyo",     "El Al",            950, "LY091", "Available", 11.5),
+        ("tel aviv", "tokyo",     "Emirates",         820, "EK312", "Available", 13.0),
+        ("tel aviv", "new york",  "United",           750, "UA445", "Limited",   11.0),
+        ("tel aviv", "berlin",    "Lufthansa",        280, "LH909", "Available",  3.5),
+        ("tel aviv", "berlin",    "Ryanair",          110, "FR101", "Available",  3.5),
+        ("tel aviv", "amsterdam", "KLM",              410, "KL456", "Available",  4.5),
+        ("london",   "paris",     "Air France",       120, "AF124", "Available",  1.25),
+        ("london",   "tokyo",     "JAL",              890, "JL402", "Available", 12.0),
+        ("london",   "new york",  "Virgin Atlantic",  550, "VS001", "Limited",    7.5),
+        ("new york", "london",    "Virgin Atlantic",  550, "VS002", "Limited",    7.0),
+        ("new york", "paris",     "Air France",       480, "AF200", "Available",  7.5),
     ]
     conn.executemany(
         """INSERT INTO flights
-               (origin_city_id, destination_city_id, airline, price, flight_number, availability)
-           VALUES (?, ?, ?, ?, ?, ?)""",
-        [(ids[o], ids[d], a, p, fn, av) for o, d, a, p, fn, av in flights],
+               (origin_city_id, destination_city_id, airline, price, flight_number, availability, duration_hours)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        [(ids[o], ids[d], a, p, fn, av, dh) for o, d, a, p, fn, av, dh in flights],
     )
 
     hotels = [
@@ -261,11 +279,71 @@ def seed_travel(conn: sqlite3.Connection) -> None:
         [(ids[c], s, t) for c, s, t in weather],
     )
 
-    print(f"  flights:           {len(flights)}")
-    print(f"  hotels:            {len(hotels)}")
-    print(f"  activities:        {len(activities)}")
-    print(f"  best_time_to_visit:{len(best_times)}")
-    print(f"  average_weather:   {len(weather)}")
+    # city_tags
+    tags = [
+        ("tel aviv",  "beach"),       ("tel aviv",  "mediterranean"), ("tel aviv",  "nightlife"),
+        ("tel aviv",  "foodie"),      ("tel aviv",  "sunny"),         ("tel aviv",  "modern"),
+        ("tel aviv",  "city-break"),
+        ("paris",     "romantic"),    ("paris",     "city-break"),    ("paris",     "cultural"),
+        ("paris",     "luxury"),      ("paris",     "foodie"),        ("paris",     "historic"),
+        ("paris",     "fashion"),     ("paris",     "walkable"),
+        ("london",    "city-break"),  ("london",    "cultural"),      ("london",    "historic"),
+        ("london",    "multicultural"),("london",   "theatre"),       ("london",    "foodie"),
+        ("london",    "rainy"),
+        ("tokyo",     "modern"),      ("tokyo",     "foodie"),        ("tokyo",     "unique"),
+        ("tokyo",     "technology"),  ("tokyo",     "historic"),      ("tokyo",     "safe"),
+        ("tokyo",     "city-break"),  ("tokyo",     "nature-nearby"),
+        ("new york",  "city-break"),  ("new york",  "shopping"),      ("new york",  "entertainment"),
+        ("new york",  "iconic"),      ("new york",  "multicultural"), ("new york",  "foodie"),
+        ("new york",  "expensive"),
+        ("berlin",    "nightlife"),   ("berlin",    "budget-friendly"),("berlin",   "cultural"),
+        ("berlin",    "historic"),    ("berlin",    "alternative"),   ("berlin",    "art"),
+        ("berlin",    "city-break"),  ("berlin",    "student-friendly"),
+        ("amsterdam", "cycling"),     ("amsterdam", "canals"),        ("amsterdam", "romantic"),
+        ("amsterdam", "city-break"),  ("amsterdam", "cultural"),      ("amsterdam", "historic"),
+        ("amsterdam", "liberal"),     ("amsterdam", "walkable"),
+    ]
+    conn.executemany(
+        "INSERT OR IGNORE INTO city_tags (city_id, tag) VALUES (?, ?)",
+        [(ids[c], t) for c, t in tags],
+    )
+
+    # recommended_duration
+    durations = [
+        ("tel aviv",  3, 5,
+         "3 days covers the beach, Jaffa Old City, and the main food markets. "
+         "Add 2 more days for day trips to Jerusalem or the Dead Sea."),
+        ("paris",     3, 7,
+         "3 days for the iconic sights (Eiffel Tower, Louvre, Notre-Dame). "
+         "5-7 days lets you explore neighborhoods like Montmartre and take a day trip to Versailles."),
+        ("london",    4, 7,
+         "4 days covers the top landmarks and a few museums. "
+         "7 days gives you time for day trips to Oxford, Stonehenge, or the Cotswolds."),
+        ("tokyo",     5, 10,
+         "5 days for the main districts (Shibuya, Shinjuku, Asakusa) and a day trip to Mt. Fuji. "
+         "8-10 days to also explore Kyoto, Osaka, or Hakone."),
+        ("new york",  5, 10,
+         "5 days to cover Manhattan highlights and Brooklyn. "
+         "7-10 days to explore all five boroughs and do a day trip to the Hamptons or Philadelphia."),
+        ("berlin",    3, 5,
+         "3 days is plenty for the main historical and cultural sites. "
+         "5 days lets you enjoy the nightlife scene and explore surrounding neighborhoods at a relaxed pace."),
+        ("amsterdam", 2, 4,
+         "2-3 days is ideal for this compact city - you can walk or cycle almost everywhere. "
+         "4 days lets you do a day trip to Keukenhof (tulip season) or Delft."),
+    ]
+    conn.executemany(
+        "INSERT INTO recommended_duration (city_id, min_days, max_days, notes) VALUES (?, ?, ?, ?)",
+        [(ids[c], mn, mx, n) for c, mn, mx, n in durations],
+    )
+
+    print(f"  flights:             {len(flights)}")
+    print(f"  hotels:              {len(hotels)}")
+    print(f"  activities:          {len(activities)}")
+    print(f"  best_time_to_visit:  {len(best_times)}")
+    print(f"  average_weather:     {len(weather)}")
+    print(f"  city_tags:           {len(tags)}")
+    print(f"  recommended_duration:{len(durations)}")
 
 
 def create_travel_db() -> None:
