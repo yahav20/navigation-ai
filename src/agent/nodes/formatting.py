@@ -247,6 +247,15 @@ class FormatterNode:
         * **Best Time to Visit:** {best_time_str}
         * **Average Weather:** {weather_str}
 
+        ---
+
+        ### 🎯 **Things To Do in [Destination City]**
+        [IF activities FOUND IN DATA: list up to 5 activities in this format]
+        **1. [Activity Name]** — [Category] — $[Price]
+        [Repeat for each activity, max 5]
+        [IF no activities in data: omit this section entirely]
+
+        ---
         [Appropriate closing sign-off]
         """
 
