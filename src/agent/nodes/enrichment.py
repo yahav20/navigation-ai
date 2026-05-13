@@ -312,7 +312,8 @@ def _extract_general_preferences(
             "content": (
                 "Extract any travel preferences the user has explicitly expressed in their latest message. "
                 "Look for dietary restrictions, preferred airlines, mobility/accessibility needs, or hotel vibes. "
-                "Return null for anything not mentioned."
+                "CRITICAL: Do NOT guess, split, or calculate flight/hotel budgets from the user's total budget. " # 🔴 שורה חדשה
+                "Return null for anything not explicitly mentioned." # 🔴 דגש על explicitly
             ),
         },
         {"role": "user", "content": last_user_message.content},
