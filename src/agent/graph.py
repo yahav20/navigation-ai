@@ -51,7 +51,7 @@ def build_graph(
 
     # 2. Create nodes for the recommendation path (uses its own model)
     rec_model_with_tools, rec_extraction_model = get_models(provider, mode="recommendation")
-    rec_agent_node = RecommendationAgentNode(rec_model_with_tools)
+    rec_agent_node = RecommendationAgentNode(rec_model_with_tools, rec_extraction_model)
     rec_formatter_node = RecommendationFormatterNode(rec_extraction_model)
 
     # 3. Build the graph

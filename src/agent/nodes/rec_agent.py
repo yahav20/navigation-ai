@@ -1,8 +1,41 @@
 """Core recommendation agent node — gathers data via tools to answer advisory questions."""
+from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import RemoveMessage
 from langchain_core.runnables import Runnable
+from pydantic import BaseModel
 
 from agent.state import AgentState
+
+
+class _RelevanceCheck(BaseModel):
+    is_followup: bool
+
+
+_RELEVANCE_PROMPT = """Determine if the new user question is a follow-up to the previous
+conversation, or a completely fresh, unrelated question.
+
+Follow-up (is_followup=True):
+- Asks for more detail about cities or topics already discussed
+- Uses references like "tell me more", "what about...", "also", "and what about X"
+- Continues the same travel scenario (same origin, same vibe, same trip)
+
+New question (is_followup=False):
+- Different origin city with no connection to the previous topic
+- Completely unrelated travel scenario
+- No reference back to anything discussed before
+
+When in doubt, return False."""
+
+
+def _is_followup(extraction_model: BaseChatModel, summary: str, new_question: str) -> bool:
+    """Return True only if the new question clearly continues the previous topic."""
+    if not summary:
+        return False
+    result: _RelevanceCheck = extraction_model.with_structured_output(_RelevanceCheck).invoke([
+        {"role": "system", "content": _RELEVANCE_PROMPT},
+        {"role": "user", "content": f"Previous conversation summary:\n{summary}\n\nNew question: {new_question}"},
+    ])
+    return result.is_followup
 
 
 def _strip_orphaned_tool_calls(
@@ -240,12 +273,35 @@ MAX_STEPS = 6
 class RecommendationAgentNode:
     """Drive the recommendation agent: calls tools to gather advisory data."""
 
-    def __init__(self, model_with_tools: Runnable) -> None:
+    def __init__(self, model_with_tools: Runnable, extraction_model: BaseChatModel) -> None:
         self.model = model_with_tools
+        self.extraction_model = extraction_model
 
     def __call__(self, state: AgentState) -> dict:
         summary = state.get("summary", "")
         current_step = state.get("step_count", 0) + 1
+
+        all_messages, remove_ops = _strip_orphaned_tool_calls(list(state.get("messages", [])))
+
+        # Find the latest human message for the relevance check
+        last_human = next(
+            (m for m in reversed(all_messages) if getattr(m, "type", "") == "human"), None
+        )
+
+        # Only run the relevance check on the FIRST invocation of rec_agent for this turn
+        # (i.e. when the last message is from the human). On subsequent calls within the
+        # tool loop the last message is a ToolMessage — always pass full history so the
+        # model can see the tool results it already collected.
+        last_msg = all_messages[-1] if all_messages else None
+        is_first_invocation = last_msg is None or getattr(last_msg, "type", "") == "human"
+
+        if is_first_invocation and last_human and not _is_followup(self.extraction_model, summary, last_human.content):
+            # Fresh question: strip message history to avoid data bleed from previous turns.
+            # Keep summary so the agent retains conversation theme (e.g. "user likes beach")
+            # and can cross-reference it against the new origin.
+            messages_for_model = [last_human]
+        else:
+            messages_for_model = all_messages
 
         system_prompt = _SYSTEM_PROMPT.format(
             summary=summary or "No previous context. This is a new conversation.",
@@ -254,11 +310,9 @@ class RecommendationAgentNode:
             vibe_mapping=_VIBE_MAPPING,
         )
 
-        messages, remove_ops = _strip_orphaned_tool_calls(list(state.get("messages", [])))
-
         response = self.model.invoke([
             {"role": "system", "content": system_prompt},
-            *messages,
+            *messages_for_model,
         ])
 
         return {
