@@ -2,7 +2,7 @@
 from langchain_core.messages import RemoveMessage
 from langchain_core.runnables import Runnable
 
-from recommendation.state import RecommendationState
+from agent.state import AgentState
 
 
 def _strip_orphaned_tool_calls(
@@ -243,7 +243,7 @@ class RecommendationAgentNode:
     def __init__(self, model_with_tools: Runnable) -> None:
         self.model = model_with_tools
 
-    def __call__(self, state: RecommendationState) -> dict:
+    def __call__(self, state: AgentState) -> dict:
         summary = state.get("summary", "")
         current_step = state.get("step_count", 0) + 1
 

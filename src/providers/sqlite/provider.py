@@ -6,6 +6,7 @@ from providers.sqlite.activity_queries import SQLiteActivityQueriesMixin
 from providers.sqlite.best_time_queries import SQLiteBestTimeQueriesMixin
 from providers.sqlite.flight_queries import SQLiteFlightQueriesMixin
 from providers.sqlite.hotel_queries import SQLiteHotelQueriesMixin
+from providers.sqlite.rec_queries import RecommendationQueriesMixin
 from providers.sqlite.weather_queries import SQLiteWeatherQueriesMixin
 
 DB_PATH = str(Path(__file__).parent / ".." / ".." / ".." / "data" / "travel_agency.db")
@@ -17,6 +18,7 @@ class SQLiteDataProvider(
     SQLiteActivityQueriesMixin,
     SQLiteBestTimeQueriesMixin,
     SQLiteWeatherQueriesMixin,
+    RecommendationQueriesMixin,
 ):
     """SQLite-backed data provider. Query logic lives in topic mixins."""
 

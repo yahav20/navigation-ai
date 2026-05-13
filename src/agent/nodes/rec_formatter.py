@@ -2,7 +2,7 @@
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import RemoveMessage
 
-from recommendation.state import RecommendationState
+from agent.state import AgentState
 
 _SYSTEM_PROMPT = """You are Atlas, a warm, enthusiastic, and knowledgeable travel advisor.
 Your job is to turn the raw data gathered in this conversation into a clear, personalized, conversational recommendation.
@@ -102,7 +102,7 @@ class RecommendationFormatterNode:
     def __init__(self, model: BaseChatModel) -> None:
         self.model = model
 
-    def __call__(self, state: RecommendationState) -> dict:
+    def __call__(self, state: AgentState) -> dict:
         messages = list(state.get("messages", []))
         remove_ops: list[RemoveMessage] = []
 

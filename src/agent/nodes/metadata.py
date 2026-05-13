@@ -30,6 +30,7 @@ class MetadataNode:
         extractor = self.extraction_model.with_structured_output(TravelMetadata)
 
         current_trip_days = state.get("trip_days")
+        existing_summary = state.get("summary", "")
 
         metadata: TravelMetadata = extractor.invoke([
             {
@@ -39,6 +40,13 @@ class MetadataNode:
                 Only fill a field if it is explicitly mentioned or very clear.
                 Do not guess. If a field is missing, return null.
                 Extract: current_city, destination_city, budget, trip_days.
+
+                CONVERSATION MEMORY (from previous turns):
+                {existing_summary or "No previous context."}
+
+                Use this memory to resolve references like "there", "that city", "the same place",
+                or "the first one" — e.g. if memory says the agent recommended Berlin and the user
+                says "let's go there", extract destination_city as "Berlin".
 
                 IMPORTANT — trip_days resolution:
                 The current trip duration in state is: {current_trip_days} days.

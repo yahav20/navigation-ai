@@ -2,7 +2,7 @@
 
 
 class RecommendationQueriesMixin:
-    """New queries needed by the recommendation agent that don't exist in the core provider."""
+    """Queries needed by the recommendation agent that don't exist in the core provider."""
 
     def search_by_activity_category(self, category: str) -> list[dict]:
         """Return cities that have at least one activity matching the given category."""

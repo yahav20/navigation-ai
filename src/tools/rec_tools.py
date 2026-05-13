@@ -1,11 +1,11 @@
 """LangChain tools for the recommendation agent."""
 from langchain_core.tools import tool
 
-from recommendation.provider import RecommendationDataProvider
+from providers.sqlite.provider import SQLiteDataProvider
 from tools.activities import fetch_activities
 from tools.weather_and_time import get_average_weather, get_best_time_to_visit
 
-_provider = RecommendationDataProvider()
+_provider = SQLiteDataProvider()
 
 
 @tool
