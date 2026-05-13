@@ -17,7 +17,9 @@ class AgentNode:
         dest = state.get("destination_city") or "NOT PROVIDED"
         trip_days = state.get("trip_days") or 3
         budget = state.get("total_budget") or "NOT PROVIDED"
-
+        user_prefs = state.get("user_preferences") or {}
+        prefs_string = "\n".join([f"- {k}: {v}" for k, v in user_prefs.items()]) if user_prefs else "None specified."
+        print(f"\n[DEBUG] Current State Preferences: {user_prefs}\n")
         executed_tools = [getattr(m, "name", "") for m in messages if getattr(m, "type", "") == "tool"]
 
         if "fetch_flights" not in executed_tools:
@@ -40,15 +42,18 @@ class AgentNode:
         - Budget: {budget}
         - Duration: {trip_days} days
 
+        USER PREFERENCES (CRITICAL: You MUST respect these when passing arguments to tools):
+        {prefs_string}
+
         CRITICAL INSTRUCTIONS & GUARDRAILS:
-        1. MISSING INFO: If ANY of the 'CURRENT TRIP STATUS' fields are 'NOT PROVIDED', ask the user politely for the missing information. Do not search until you have all three.
-        2. EXPLICIT TOOL EXECUTION: You MUST gather real data by calling ALL of the following tools in order:
-           a. `fetch_flights` — get available flights from origin to destination.
-           b. `fetch_hotels` — get available hotels at the destination.
-           c. `calculate_trip_cost` — call with the cheapest available flight price, cheapest available hotel price per night, and {trip_days} days. This gives the true total cost.
-           d. `fetch_activities` — get available activities at the destination.
-           e. `get_average_weather` — call with the destination city and the current or upcoming season (Spring/Summer/Autumn/Winter).
-           f. `get_best_time_to_visit` — call with the destination city.
+        1. MISSING INFO: If ANY of the 'CURRENT TRIP STATUS' fields are 'NOT PROVIDED', ask...
+        2. EXPLICIT TOOL EXECUTION: You MUST gather real data by calling ALL of the following tools:
+           a. `fetch_flights` (Consider airline preferences if provided).
+           b. `fetch_hotels`
+           c. `calculate_trip_cost`
+           d. `fetch_activities` (Must align with dietary/lifestyle preferences like Vegan, Accessible, etc.).
+           e. `get_average_weather`
+           f. `get_best_time_to_visit`
         3. NO HALLUCINATIONS: Check your conversation history. Have you received results from ALL six tools above? If NO, call the missing ones now.
         5. BOUNDARY ENFORCEMENT: Decline any non-travel questions and steer back to the trip.
 

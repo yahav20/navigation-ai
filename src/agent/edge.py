@@ -26,19 +26,11 @@ def _no_real_flights_in_history(state: AgentState) -> bool:
             continue
         if getattr(msg, "name", "") != "fetch_flights":
             continue
-        try:
-            data = json.loads(msg.content)
-        except (json.JSONDecodeError, TypeError):
-            continue
-        if isinstance(data, dict):
-            data = [data]
-        if not isinstance(data, list):
-            continue
-        for entry in data:
-            if isinstance(entry, dict) and ("flight_number" in entry or "route" in entry):
-                return False
+        
+        if "flight_number" in msg.content or "route" in msg.content:
+            return False
+            
     return True
-
 # ---------------------------------------------------------
 # Routing Function 2: From Agent Core
 # ---------------------------------------------------------
@@ -66,3 +58,25 @@ def should_continue(state: AgentState) -> str:
         return "alternative_destination"
 
     return "formatter"
+
+
+def after_adjustments(state: AgentState) -> str:
+    """Route directly to enrichment if an adjustment was made, skipping standard metadata extraction."""
+    if state.get("is_adjustment"):
+        return "enrichment"
+    return "extract_metadata"
+
+def after_router(state: AgentState) -> str:
+    """Route from the RouterNode based on the classified intent."""
+    intent = state.get("intent", "other")
+    
+    if intent == "new_travel_plan":
+        return "extract_metadata"      
+    elif intent == "update_travel_plan":
+        return "adjustments"           
+    elif intent == "recommendations":
+        return "recommendations"       
+    # elif intent == "general_interaction":
+    #     return "general_interaction"   
+    else:
+        return END
