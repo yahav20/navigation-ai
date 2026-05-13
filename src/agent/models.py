@@ -21,6 +21,10 @@ class UserPreferences(BaseModel):
     max_flight_price: float | None = Field(default=None, description="Maximum acceptable flight ticket price")
     preferred_airline: str | None = Field(default=None, description="Preferred airline name if mentioned")
 
+    dietary_restrictions: str | None = Field(default=None, description="Food or dietary preferences (e.g., vegan, vegetarian, kosher)")
+    hotel_amenities: str | None = Field(default=None, description="Specific amenities requested for the hotel (e.g., pool, gym, balcony)")
+    preferred_location: str | None = Field(default=None, description="Preferred location vibe or area (e.g., city center, near the beach)")
+
 
 class RefusalDetection(BaseModel):
     """Track whether the user has refused to share specific fields."""

@@ -5,4 +5,6 @@ google-generativeai
 langgraph
 langchain_ollama
 langchain-openai
-langgraph-checkpoint-sqlite 
+langgraph-checkpoint-sqlite
+rich
+prompt_toolkit 

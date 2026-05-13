@@ -175,22 +175,19 @@ class FormatterNode:
         hotels = travel_data.get("hotels", [])
 
         if not flights:
-            flight_section = "Based on our search, we unfortunately could not find any available flights from your origin to [Destination City] at this time."
+            flight_section = "Based on our search, we unfortunately could not find any available flights from your origin to the destination at this time."
         elif "route" in flights[0]:
-            # connecting flight template
             flight_section = """
             Based on our search, we have found the following connecting flight option:
             **Total Flight Price:** [total_price with correct currency symbol]
-            * **Leg 1:** [from] ➔ [to] | **Airline:** [airline] (**Flight:** [flight]) | **Dep:** [departure_time] **Arr:** [arrival_time]
-            * **Leg 2:** [from] ➔ [to] | **Airline:** [airline] (**Flight:** [flight]) | **Dep:** [departure_time] **Arr:** [arrival_time]
+            * **Leg 1:** [from] ➔ [to] | **Airline:** [airline] (**Flight:** [flight])
+            * **Leg 2:** [from] ➔ [to] | **Airline:** [airline] (**Flight:** [flight])
             """
         else:
-        #  direct flight template
             flight_section = """
             Based on our search, we have found the following flight option:
             * **Airline:** [Airline Name]
             * **Flight Number:** [Flight Number]
-            * **Departure:** [departure_time] | **Arrival:** [arrival_time]
             * **Price:** [Price with correct currency symbol]
             """
 
@@ -201,19 +198,24 @@ class FormatterNode:
             Based on our search, we've found excellent options to suit different preferences:
 
             **1. [Hotel Name]**
-                * [Star Emojis] ([Number] Stars) | **Type:** [hotel_type]
+                * [Star Emojis] ([Number] Stars)
                 * **Price Per Night:** [Price with correct currency symbol]
-                * **Distance from Center:** [distance_from_center_km] km
             
             [Repeat numbered list for additional hotels]
             """
 
+        weather_info = travel_data.get("weather", {})
+        best_time_info = travel_data.get("best_time", {})
+
+        weather_str = "\n".join([f"* **{season.capitalize()}:** {temp}" for season, temp in weather_info.items()]) if weather_info else "Data not available."
+        best_time_str = best_time_info.get("months", "Data not available.") if isinstance(best_time_info, dict) else "Data not available."
+        
         system_prompt = f"""
         You are a strict data formatter. Your ONLY job is to output the provided <data> into the EXACT Markdown template below.
 
         CRITICAL RULES:
         1. DO NOT add conversational filler.
-        2. FORCE CURRENCY: You MUST use the '$' symbol for ALL prices and budgets.
+        2. FORCE CURRENCY: You MUST use the '$' symbol for ALL prices and budgets. DO NOT use '€' or '£'.
         3. DO NOT ask the user any questions.
         4. If any section has no data, omit that section entirely — do not write placeholder text.
         5. Do not invent any data. Use ONLY what is in the <data>.
@@ -222,12 +224,10 @@ class FormatterNode:
            If trip_cost_calculations is empty, write "N/A".
         8. YOU MUST USE THIS EXACT TEMPLATE:
 
-        YOU MUST USE THIS EXACT TEMPLATE:
-
         {success_greeting}
-        ### ✨ **Your [{state.get("destination_city")}] Escape** ✨
+        ### ✨ **Your {state.get("destination_city")} Escape** ✨
 
-        **Destination:** [{state.get("destination_city")}]
+        **Destination:** {state.get("destination_city")}
         **Total Budget:** ${budget}
         **Trip Days:** {trip_days}
 
@@ -240,8 +240,12 @@ class FormatterNode:
 
         ---
 
-        ### 🏨 **Accommodation Options in [Destination City]**
+        ### 🏨 **Accommodation Options in {state.get("destination_city")}**
         {hotel_section}
+        
+        ### 🌤️ **Destination Insights**
+        * **Best Time to Visit:** {best_time_str}
+        * **Average Weather:** {weather_str}
 
         [Appropriate closing sign-off]
         """
