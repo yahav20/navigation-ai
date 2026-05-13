@@ -8,7 +8,7 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode
 
 from agent.edge import after_enrichment, after_router, rec_should_continue, should_continue
-from agent.llm import get_models, get_rec_models
+from agent.llm import get_models
 from agent.nodes.router import RouterNode
 from agent.nodes.agent_core import AgentNode
 from agent.nodes.enrichment import EnrichmentNode
@@ -50,7 +50,7 @@ def build_graph(
     router_node = RouterNode(extraction_model)
 
     # 2. Create nodes for the recommendation path (uses its own model)
-    rec_model_with_tools, rec_extraction_model = get_rec_models("openai")
+    rec_model_with_tools, rec_extraction_model = get_models(provider, mode="recommendation")
     rec_agent_node = RecommendationAgentNode(rec_model_with_tools)
     rec_formatter_node = RecommendationFormatterNode(rec_extraction_model)
 
