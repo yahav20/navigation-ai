@@ -16,6 +16,8 @@ __pycache__/
 .vscode/
 .idea/
 
-checkpoints.db
-checkpoint.db-shm
-checkpoint.db-wal
+# LangGraph checkpoints
+data/checkpoints.db
+data/checkpoints.db-journal
+data/checkpoints.db-wal
+data/checkpoints.db-shm

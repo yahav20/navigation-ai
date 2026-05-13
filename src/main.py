@@ -1,10 +1,15 @@
 """CLI entry point for the navigation AI agent."""
-import uuid
+import argparse
+import sqlite3
 import warnings
+from pathlib import Path
 
 from langchain_core._api.deprecation import LangChainPendingDeprecationWarning
 
 warnings.filterwarnings("ignore", category=LangChainPendingDeprecationWarning)
+
+from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer  # noqa: E402
+from langgraph.checkpoint.sqlite import SqliteSaver  # noqa: E402
 
 from agent.graph import build_graph  # noqa: E402
 from config.setting import CHOSEN_PROVIDER  # noqa: E402
@@ -17,18 +22,45 @@ BANNER = r"""
    /_/   \_\|_| |_____/_/   \_\____/
 """
 
+CHECKPOINT_DB = Path(__file__).resolve().parent.parent / "data" / "checkpoints.db"
 
-def run_agent() -> None:
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Autonomous Travel Agent")
+    parser.add_argument(
+        "--session",
+        default="default",
+        help="Session name (thread_id) to resume or create. Defaults to 'default'.",
+    )
+    return parser.parse_args()
+
+
+def run_agent(session_id: str = "default") -> None:
     """Run the interactive agent loop until the user exits."""
-    graph = build_graph(provider=CHOSEN_PROVIDER)
-    session_id = str(uuid.uuid4())
+    CHECKPOINT_DB.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(CHECKPOINT_DB), check_same_thread=False)
+    try:
+        _interactive_loop(conn, session_id)
+    finally:
+        conn.close()
+
+
+def _interactive_loop(conn: sqlite3.Connection, session_id: str) -> None:
+    checkpointer = SqliteSaver(conn=conn, serde=JsonPlusSerializer())
+    graph = build_graph(provider=CHOSEN_PROVIDER, checkpointer=checkpointer)
     config = {"configurable": {"thread_id": session_id}}
+
+    resuming = bool(graph.get_state(config).values)
 
     print(BANNER)
     print(f"--- Autonomous Travel Agent Started ({CHOSEN_PROVIDER.upper()}) ---")
+    print(f"Session: {session_id} (state persisted to {CHECKPOINT_DB})")
     print("Type 'exit' or 'quit' to end the session.")
     print("-" * 50)
-    print("Agent: Hello! I'm your travel assistant. Where are you starting from and where would you like to go?")
+    if resuming:
+        print(f"Agent: Welcome back! Resuming session '{session_id}'. How can I help you continue?")
+    else:
+        print("Agent: Hello! I'm your travel assistant. Where are you starting from and where would you like to go?")
     print("-" * 50)
 
     while True:
@@ -82,4 +114,5 @@ def run_agent() -> None:
 
 
 if __name__ == "__main__":
-    run_agent()
+    args = _parse_args()
+    run_agent(session_id=args.session)

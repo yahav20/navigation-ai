@@ -5,10 +5,25 @@ from providers import SQLiteDataProvider
 
 data_provider = SQLiteDataProvider()
 
+# @tool
+# def fetch_flights(origin: str, destination: str) -> list[dict]:
+#     """Fetch available flights between two cities with prices and availability status."""
+#     return data_provider.fetch_flights(origin, destination)
 @tool
 def fetch_flights(origin: str, destination: str) -> list[dict]:
-    """Fetch available flights between two cities with prices and availability status."""
-    return data_provider.fetch_flights(origin, destination)
+    """Fetch available flights between two cities. Automatically finds direct flights, and if none exist, finds connecting flights."""
+    
+    direct_flights = data_provider.fetch_flights(origin, destination)
+    
+    has_direct = any("flight_number" in f for f in direct_flights)
+    
+    if not has_direct:
+        connecting_flights = data_provider.find_connecting_flights(origin, destination)
+        
+        if connecting_flights and any("route" in f for f in connecting_flights):
+            return connecting_flights
+            
+    return direct_flights
 
 @tool
 def fetch_hotels(city: str, max_price: int | None = None) -> list[dict]:
@@ -49,5 +64,13 @@ def get_average_weather(city: str, season: str) -> dict:
     """Get the average temperature for a city in a given season ('Spring', 'Summer', 'Autumn', 'Winter')."""
     return data_provider.get_average_weather(city, season)
 
+@tool
+def find_connecting_flights(origin: str, destination: str) -> list[dict]:
+    """
+    Fetch connecting flights (1 or 2 stops) between an origin and destination.
+    Use this tool ONLY when direct flights (fetch_flights) are unavailable or exceed the user's budget.
+    Returns flight routes including total price, intermediate connecting cities, and operating airlines.
+    """
+    return data_provider.find_connecting_flights(origin, destination)
 
 tools = [fetch_flights, fetch_hotels, calculate_trip_cost, fetch_activities, get_best_time_to_visit, get_average_weather]
