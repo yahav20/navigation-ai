@@ -43,8 +43,14 @@ class RecSummaryNode:
         self.model = model
 
     def __call__(self, state: RecommendationState) -> dict:
-        messages = state.get("messages", [])
+        messages = list(state.get("messages", []))
         existing_summary = state.get("summary", "")
+
+        # Defensive: drop any trailing agent message with unresolved tool_calls.
+        # The formatter should have already emitted a RemoveMessage for it, but guard
+        # here in case the state hasn't been reduced yet when this node runs.
+        if messages and getattr(messages[-1], "tool_calls", None):
+            messages = messages[:-1]
 
         if len(messages) < MIN_MESSAGES_TO_SUMMARIZE:
             return {}
