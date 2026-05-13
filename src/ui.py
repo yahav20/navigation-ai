@@ -1,16 +1,25 @@
 """Terminal UI helpers: rendering panels and reading prompts."""
 from __future__ import annotations
 
+import time
+from contextlib import contextmanager
 from pathlib import Path
 
 from prompt_toolkit import PromptSession
+from prompt_toolkit.application import Application
+from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.history import InMemoryHistory
+from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.layout import HSplit, Layout, VSplit, Window
+from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
 from prompt_toolkit.styles import Style as PTStyle
-from rich.console import Console
+from rich.console import Console, Group
+from rich.live import Live
 from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.rule import Rule
+from rich.spinner import Spinner
 from rich.table import Table
 from rich.text import Text
 
@@ -27,6 +36,10 @@ console = Console()
 _PROMPT_STYLE = PTStyle.from_dict({
     "arrow": "ansibrightmagenta bold",
     "prompt": "ansicyan",
+    "state.corner": "ansibrightmagenta",
+    "state.label": "ansibrightblack",
+    "state.value": "ansiwhite bold",
+    "state.sep": "ansibrightblack",
 })
 
 
@@ -67,15 +80,27 @@ def render_agent_message(msg_type: str, content: str) -> None:
     console.print(Panel(body, title=msg_type.lower(), border_style="cyan", title_align="left"))
 
 
-def render_state(origin: str, destination: str, budget: str, trip_days: str) -> None:
-    table = Table.grid(padding=(0, 2))
-    table.add_column(style="dim")
-    table.add_column(style="bright_white")
-    table.add_row("origin", str(origin))
-    table.add_row("destination", str(destination))
-    table.add_row("budget", str(budget))
-    table.add_row("trip days", str(trip_days))
-    console.print(Panel(table, title="state", border_style="green", title_align="left", padding=(0, 1)))
+def _state_html(state: tuple[str, str, str, str]) -> HTML:
+    def fmt(v: str) -> str:
+        s = str(v)
+        return "—" if s in {"", "None"} else s
+
+    origin, destination, budget, trip_days = state
+    fields = [
+        ("origin", fmt(origin)),
+        ("destination", fmt(destination)),
+        ("budget", fmt(budget)),
+        ("trip days", fmt(trip_days)),
+    ]
+    parts = ["<state.corner>  ╰─ </state.corner>"]
+    for i, (label, value) in enumerate(fields):
+        if i:
+            parts.append("<state.sep>  ·  </state.sep>")
+        parts.append(
+            f"<state.label>{label} </state.label>"
+            f"<state.value>{value}</state.value>"
+        )
+    return HTML("".join(parts))
 
 
 def render_error(err: Exception) -> None:
@@ -95,19 +120,123 @@ def render_goodbye(newline: bool = False) -> None:
     console.print(Text(("\n" if newline else "") + "Goodbye!", style="bright_magenta"))
 
 
-def thinking():
-    """Context manager that shows a spinner while the agent works."""
-    return console.status("[bright_magenta]thinking...[/]", spinner="dots")
+class ThinkingDisplay:
+    """Live spinner + state line that types out updated values."""
+
+    _SECONDS_PER_CHAR = 0.04
+
+    def __init__(self, state: tuple[str, str, str, str]) -> None:
+        self._state = tuple(state)
+        self._changed_at: list[float] = [float("-inf")] * 4
+        self._spinner = Spinner(
+            "dots",
+            text=Text("thinking...", style="bright_magenta"),
+            style="bright_magenta",
+        )
+
+    def update(self, new_state: tuple[str, str, str, str]) -> None:
+        new_state = tuple(new_state)
+        now = time.monotonic()
+        for i in range(4):
+            if self._state[i] != new_state[i]:
+                self._changed_at[i] = now
+        self._state = new_state
+
+    def __rich__(self) -> Group:
+        return Group(self._spinner, self._render_state_line())
+
+    def _render_state_line(self) -> Text:
+        def fmt(v: str) -> str:
+            s = str(v)
+            return "—" if s in {"", "None"} else s
+
+        now = time.monotonic()
+        fields = [
+            ("origin", fmt(self._state[0])),
+            ("destination", fmt(self._state[1])),
+            ("budget", fmt(self._state[2])),
+            ("trip days", fmt(self._state[3])),
+        ]
+        line = Text("  ╰─ ", style="bright_magenta")
+        for i, (label, value) in enumerate(fields):
+            if i:
+                line.append("  ·  ", style="dim")
+            line.append(f"{label} ", style="dim")
+            line.append(self._typed(value, now - self._changed_at[i]), style="bright_white bold")
+        return line
+
+    def _typed(self, value: str, elapsed: float) -> str:
+        if elapsed >= len(value) * self._SECONDS_PER_CHAR:
+            return value
+        if elapsed < 0:
+            return " " * len(value)
+        chars = int(elapsed / self._SECONDS_PER_CHAR)
+        return value[:chars] + " " * (len(value) - chars)
+
+
+@contextmanager
+def thinking(state: tuple[str, str, str, str]):
+    """Show a spinner and the live state line while the agent works."""
+    display = ThinkingDisplay(state)
+    with Live(display, console=console, refresh_per_second=20, transient=True):
+        yield display
 
 
 def make_prompt_session() -> PromptSession:
     return PromptSession(history=InMemoryHistory())
 
 
-def ask_user(session: PromptSession) -> str | None:
-    """Prompt the user. Returns None on Ctrl-D / Ctrl-C."""
+def ask_user(
+    session: PromptSession,
+    state: tuple[str, str, str, str] | None = None,
+) -> str | None:
+    """Prompt the user. Renders [input row, state row] directly inline.
+
+    Returns None on Ctrl-D / Ctrl-C.
+    """
     console.print()
+
+    buffer = Buffer(multiline=False, history=session.history)
+
+    kb = KeyBindings()
+
+    @kb.add("enter")
+    def _(event):
+        event.app.exit(result=buffer.text)
+
+    @kb.add("c-c")
+    @kb.add("c-d")
+    def _(event):
+        event.app.exit(exception=KeyboardInterrupt())
+
+    @kb.add("up")
+    def _(event):
+        buffer.history_backward()
+
+    @kb.add("down")
+    def _(event):
+        buffer.history_forward()
+
+    label = Window(
+        FormattedTextControl(HTML("<arrow>❯</arrow> <prompt>you</prompt> ")),
+        dont_extend_width=True,
+        height=1,
+    )
+    input_win = Window(BufferControl(buffer=buffer), height=1, wrap_lines=False)
+    state_win = Window(
+        FormattedTextControl(_state_html(state) if state is not None else ""),
+        height=1,
+        always_hide_cursor=True,
+    )
+
+    app: Application = Application(
+        layout=Layout(HSplit([VSplit([label, input_win]), state_win])),
+        key_bindings=kb,
+        style=_PROMPT_STYLE,
+        full_screen=False,
+    )
+
     try:
-        return session.prompt(HTML("<arrow>❯</arrow> <prompt>you</prompt> "), style=_PROMPT_STYLE)
+        return app.run()
     except (EOFError, KeyboardInterrupt):
         return None

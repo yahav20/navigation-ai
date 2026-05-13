@@ -44,13 +44,20 @@ def _interactive_loop(conn: sqlite3.Connection, session_id: str) -> None:
     graph = build_graph(provider=CHOSEN_PROVIDER, checkpointer=checkpointer)
     config = {"configurable": {"thread_id": session_id}}
 
-    resuming = bool(graph.get_state(config).values)
+    saved = graph.get_state(config).values
+    resuming = bool(saved)
     ui.render_banner(CHOSEN_PROVIDER, session_id, CHECKPOINT_DB, resuming)
 
     prompt_session = ui.make_prompt_session()
+    current_state: tuple[str, str, str, str] = (
+        saved.get("current_city", "None") if saved else "None",
+        saved.get("destination_city", "None") if saved else "None",
+        saved.get("total_budget", "None") if saved else "None",
+        saved.get("trip_days", "None") if saved else "None",
+    )
 
     while True:
-        user_input = ui.ask_user(prompt_session)
+        user_input = ui.ask_user(prompt_session, state=current_state)
         if user_input is None:
             ui.render_goodbye(newline=True)
             break
@@ -61,18 +68,22 @@ def _interactive_loop(conn: sqlite3.Connection, session_id: str) -> None:
             continue
 
         try:
-            _run_turn(graph, config, user_input)
+            current_state = _run_turn(graph, config, user_input, current_state)
         except Exception as e:  # noqa: BLE001  # top-level handler: report connection/runtime errors to user
             ui.render_error(e)
             break
 
 
-def _run_turn(graph, config: dict, user_input: str) -> None:
+def _run_turn(
+    graph,
+    config: dict,
+    user_input: str,
+    current_state: tuple[str, str, str, str],
+) -> tuple[str, str, str, str]:
     initial_state = {"messages": [("user", user_input)], "step_count": 0}
     last_content = ""
-    last_state: tuple = ()
 
-    with ui.thinking():
+    with ui.thinking(current_state) as display:
         for mode, data in graph.stream(initial_state, config, stream_mode=["values", "updates"]):
             if mode == "updates":
                 ui.render_node(next(iter(data)))
@@ -84,20 +95,20 @@ def _run_turn(graph, config: dict, user_input: str) -> None:
 
             last_msg = messages[-1]
             content = str(last_msg.content) if hasattr(last_msg, "content") else "No content"
-            state_tuple = (
+            current_state = (
                 data.get("current_city", "None"),
                 data.get("destination_city", "None"),
                 data.get("total_budget", "None"),
                 data.get("trip_days", "None"),
             )
+            display.update(current_state)
 
-            if content == last_content and state_tuple == last_state:
+            if content == last_content:
                 continue
-            if content != last_content:
-                ui.render_agent_message(last_msg.__class__.__name__, content)
-                last_content = content
-            ui.render_state(*state_tuple)
-            last_state = state_tuple
+            ui.render_agent_message(last_msg.__class__.__name__, content)
+            last_content = content
+
+    return current_state
 
 
 if __name__ == "__main__":
