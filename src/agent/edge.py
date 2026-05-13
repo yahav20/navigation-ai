@@ -21,16 +21,25 @@ def after_enrichment(state: AgentState) -> str:
 # ---------------------------------------------------------
 def _no_real_flights_in_history(state: AgentState) -> bool:
     """Return True when the message history contains no usable flight records."""
+    has_searched = False
+    has_flights = False
+
     for msg in state.get("messages", []):
         if getattr(msg, "type", "") != "tool":
             continue
         if getattr(msg, "name", "") != "fetch_flights":
             continue
+
+        has_searched = True
         
         if "flight_number" in msg.content or "route" in msg.content:
-            return False
-            
-    return True
+            has_flights = True
+            break
+        
+    if not has_searched:
+        return False
+
+    return not has_flights
 # ---------------------------------------------------------
 # Routing Function 2: From Agent Core
 # ---------------------------------------------------------
