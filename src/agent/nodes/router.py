@@ -22,11 +22,19 @@ class RouterNode:
 
         # Provide existing context to the router so it knows if we are mid-planning
         has_active_trip = bool(state.get("destination_city") or state.get("current_city"))
-        trip_status = "ACTIVE TRIP IN PROGRESS" if has_active_trip else "NO ACTIVE TRIP (Start from scratch)"
+        last_intent = state.get("intent", "")
+        is_rec_flow = last_intent == "recommendations" and not has_active_trip
+
+        if has_active_trip:
+            trip_status = "ACTIVE TRIP IN PROGRESS"
+        elif is_rec_flow:
+            trip_status = "ACTIVE RECOMMENDATION FLOW (user is browsing destination options — budget/day changes refine the search)"
+        else:
+            trip_status = "NO ACTIVE TRIP (Start from scratch)"
 
         prompt = f"""
         Analyze the user's latest message and classify their core intent.
-        
+
         Current System Context: {trip_status}
         - Origin: {state.get("current_city", "None")}
         - Destination: {state.get("destination_city", "None")}
@@ -38,8 +46,12 @@ class RouterNode:
         classification: IntentClassification = self.classification_model.invoke(prompt)
 
         # Guardrail: If user tries to update but no active trip exists, convert to new plan
+        # Exception: if we were in a recommendations flow, keep it as recommendations
         final_intent = classification.intent
         if final_intent == "update_travel_plan" and not has_active_trip:
-            final_intent = "new_travel_plan"
+            if state.get("intent") == "recommendations":
+                final_intent = "recommendations"
+            else:
+                final_intent = "new_travel_plan"
 
         return {"intent": final_intent}

@@ -57,7 +57,7 @@ class IntentClassification(BaseModel):
             "Classify the user's intent:\n"
             "- 'new_travel_plan': Starting a brand new trip from scratch.\n"
             "- 'update_travel_plan': Changing parameters (budget, days, destination) of an EXISTING trip.\n"
-            "- 'recommendations': Asking for what to do, attractions, food, or weather at a destination.\n"
+            "- 'recommendations': Asking where to go, what to do, attractions, food, weather, OR refining search parameters (budget, days) within an ACTIVE RECOMMENDATION FLOW.\n"
             # "- 'general_interaction': Saying hello, thanks, or casual chat.\n"
             # "- 'other': Out of scope."
         )

@@ -30,6 +30,7 @@ class MetadataNode:
         extractor = self.extraction_model.with_structured_output(TravelMetadata)
 
         current_trip_days = state.get("trip_days")
+        existing_summary = state.get("summary", "")
 
         metadata: TravelMetadata = extractor.invoke([
             {
@@ -39,6 +40,23 @@ class MetadataNode:
                 Only fill a field if it is explicitly mentioned or very clear.
                 Do not guess. If a field is missing, return null.
                 Extract: current_city, destination_city, budget, trip_days.
+
+                IMPORTANT — current_city and destination_city must be CITIES, not countries.
+                If the user names a country, resolve it to the primary departure/arrival city:
+                  "Israel" / "Israeli" → "Tel Aviv"
+                  "France" → "Paris"
+                  "UK" / "England" / "Britain" → "London"
+                  "USA" / "United States" / "America" → "New York City" (or whatever city they imply)
+                  "Japan" → "Tokyo"
+                  "Germany" → "Berlin"
+                  "Netherlands" / "Holland" → "Amsterdam"
+
+                CONVERSATION MEMORY (from previous turns):
+                {existing_summary or "No previous context."}
+
+                Use this memory to resolve references like "there", "that city", "the same place",
+                or "the first one" — e.g. if memory says the agent recommended Berlin and the user
+                says "let's go there", extract destination_city as "Berlin".
 
                 IMPORTANT — trip_days resolution:
                 The current trip duration in state is: {current_trip_days} days.
@@ -54,9 +72,9 @@ class MetadataNode:
         ])
 
         if metadata.current_city is not None:
-            updates["current_city"] = metadata.current_city
+            updates["current_city"] = metadata.current_city.split(",")[0].strip()
         if metadata.destination_city is not None:
-            updates["destination_city"] = metadata.destination_city
+            updates["destination_city"] = metadata.destination_city.split(",")[0].strip()
         if metadata.budget is not None:
             updates["total_budget"] = metadata.budget
         if metadata.trip_days is not None:

@@ -21,3 +21,6 @@ data/checkpoints.db
 data/checkpoints.db-journal
 data/checkpoints.db-wal
 data/checkpoints.db-shm
+
+package-lock.json
+settings.local.json

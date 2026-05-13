@@ -7,7 +7,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode
 
-from agent.edge import after_enrichment, should_continue, after_router
+from agent.edge import after_enrichment, after_router, rec_should_continue, should_continue
 from agent.llm import get_models
 from agent.nodes.router import RouterNode
 from agent.nodes.agent_core import AgentNode
@@ -18,14 +18,12 @@ from agent.nodes.node_alternative import (
     AlternativeDestinationNode,
     FormatterAlternativeNode,
 )
+from agent.nodes.rec_agent import RecommendationAgentNode
+from agent.nodes.rec_formatter import RecommendationFormatterNode
 from agent.nodes.summary import SummaryNode
 from agent.state import AgentState
 from tools import core_tools
-
-# TODO: Replace with actual recommendations node
-def dummy_recommendations_node(state: AgentState):
-    from langchain_core.messages import AIMessage
-    return {"messages": [AIMessage(content="I am the recommendations agent! My code is coming soon.")]}
+from tools.rec_tools import rec_tools
 
 
 def build_graph(
@@ -38,7 +36,7 @@ def build_graph(
     graph still works for tests and one-shot invocations. Persistent runs
     should pass a durable checkpointer (e.g. `SqliteSaver`).
     """
-    # 1. Create the nodes with the chosen model provider
+    # 1. Create nodes for the travel planning path
     model_with_tools, extraction_model = get_models(provider)
 
     extract_metadata_node = MetadataNode(extraction_model)
@@ -51,11 +49,16 @@ def build_graph(
     formatter_alternative = FormatterAlternativeNode(extraction_model)
     router_node = RouterNode(extraction_model)
 
-    # 2. Build the standard graph
+    # 2. Create nodes for the recommendation path (uses its own model)
+    rec_model_with_tools, rec_extraction_model = get_models(provider, mode="recommendation")
+    rec_agent_node = RecommendationAgentNode(rec_model_with_tools, rec_extraction_model)
+    rec_formatter_node = RecommendationFormatterNode(rec_extraction_model)
+
+    # 3. Build the graph
     builder = StateGraph(AgentState)
 
+    # Travel planning nodes
     builder.add_node("router", router_node)
-    builder.add_node("recommendations", dummy_recommendations_node)
     builder.add_node("extract_metadata", extract_metadata_node)
     builder.add_node("adjustments", adjustments_node)
     builder.add_node("enrichment", enrichment_node)
@@ -66,24 +69,27 @@ def build_graph(
     builder.add_node("formatter_alternative", formatter_alternative)
     builder.add_node("summary", summary_node)
 
-    # 3. Define the workflow edges
+    # Recommendation nodes
+    builder.add_node("rec_agent", rec_agent_node)
+    builder.add_node("rec_tools", ToolNode(rec_tools))
+    builder.add_node("rec_formatter", rec_formatter_node)
+
+    # 4. Define edges — travel planning path
     builder.add_edge(START, "router")
-    
+
     builder.add_conditional_edges(
-        "router", 
-        after_router, 
+        "router",
+        after_router,
         {
-            "extract_metadata": "extract_metadata", 
+            "extract_metadata": "extract_metadata",
             "adjustments": "adjustments",
-            "recommendations": "recommendations",
-            END: END
-        }
+            "rec_agent": "rec_agent",
+            END: END,
+        },
     )
-    
+
     builder.add_edge("extract_metadata", "enrichment")
     builder.add_edge("adjustments", "enrichment")
-
-    builder.add_edge("recommendations", "summary")
     builder.add_conditional_edges("enrichment", after_enrichment, {"agent": "agent", END: END})
     builder.add_conditional_edges(
         "agent",
@@ -98,9 +104,17 @@ def build_graph(
     builder.add_edge("alternative_destination", "formatter_alternative")
     builder.add_edge("formatter_alternative", "summary")
     builder.add_edge("formatter", "summary")
-    # The summary node marks the end of the processing cycle for the current turn
     builder.add_edge("summary", END)
-    # Adding a checkpointer to save the agent's state across turns
+
+    # 5. Define edges — recommendation path
+    builder.add_conditional_edges(
+        "rec_agent",
+        rec_should_continue,
+        {"rec_tools": "rec_tools", "rec_formatter": "rec_formatter"},
+    )
+    builder.add_edge("rec_tools", "rec_agent")
+    builder.add_edge("rec_formatter", "summary")
+
     if checkpointer is None:
         checkpointer = MemorySaver(serde=JsonPlusSerializer())
     return builder.compile(checkpointer=checkpointer)
