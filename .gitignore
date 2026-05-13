@@ -21,6 +21,7 @@ data/checkpoints.db
 data/checkpoints.db-journal
 data/checkpoints.db-wal
 data/checkpoints.db-shm
+data/travel_agency.db
 
 package-lock.json
 settings.local.json

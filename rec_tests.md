@@ -550,3 +550,79 @@
 
         Let me know if you'd like more details on any of these destinations or need help with planning!
     }
+
+
+## test number 4:
+
+4. I want a romantic destination — where should I go? 
+    - response: {
+        Oh, I love this one! For a romantic getaway, you have two fantastic options: Amsterdam and Paris.
+
+        In Amsterdam, you can enjoy a charming Canal Boat Tour, which is perfect for taking in the beautiful scenery together. The Rijksmuseum is also a cultural gem worth visiting. The best time to go is during April, May, or September, when the tulips are in bloom and the weather is mild, around 13-22 degrees C.
+
+        On the other hand, Paris is always a classic choice for romance! You can visit the iconic Eiffel Tower and explore the Louvre Museum for a touch of culture. Like Amsterdam, the ideal months to visit are April, May, and September, with pleasant temperatures around 15-25 degrees C.
+
+        Both cities offer a magical atmosphere for couples, so you can't go wrong with either! Let me know if you'd like more details on any of these destinations!
+    }
+
+10. I'm planning a family trip with kids aged 7 and 10. Where should we go, what activities would suit them, and when is the best time to visit? 
+    - response: {
+        What a fun trip to plan! For a family adventure with kids aged 7 and 10, I have some fantastic destinations in mind: Paris, London, Amsterdam, and New York City.
+
+        Starting with Paris, it's a top pick for families! You can enjoy Disneyland Paris, which is sure to be a hit with the kids. Plus, visiting the Eiffel Tower and the Louvre Museum can be exciting for the whole family. The best times to visit Paris are in April, May, or September when the weather is pleasant and the crowds are smaller.
+
+        Next up is London, where the London Eye offers stunning views of the city, and the British Museum is a great educational stop. The ideal months to visit London are May, June, and July, giving you the best chance for sunny weather and outdoor fun.
+
+        Amsterdam is another wonderful option, especially with a Canal Boat Tour that the kids will love, along with a visit to the Rijksmuseum. April, May, and September are perfect for visiting, especially during tulip season in spring.
+
+        Lastly, New York City has the iconic Statue of Liberty, which is a must-see. The best time to explore NYC is also in April, May, or September for mild temperatures and fewer tourists.
+
+        Let me know if you'd like more details on any of these destinations or activities!
+    }
+
+15. I'm flying from New York. What are my options and what would you recommend? (New York has only 2 outbound routes in the DB — tests graceful handling of a small result set) 
+    - response: {
+        Oh, I love this one! From New York City, you have some fantastic options to consider: London and Paris.
+
+        Starting with London, it's a vibrant city with plenty to see and do. You can enjoy the iconic London Eye for a stunning view of the city, or explore the British Museum, which is free to enter! The best time to visit is during May, June, or July when you can expect lovely weather around 22°C and plenty of outdoor events.
+
+        On the other hand, Paris is always a great choice! You can visit the Eiffel Tower for breathtaking views, or immerse yourself in art at the Louvre Museum. If you're traveling with family, Disneyland Paris is a fun option too! The ideal months to visit are April, May, or September, when the weather is pleasant at around 15-25°C and the crowds are a bit lighter.
+
+        Both cities have their unique charm, so it really depends on what kind of experience you're looking for! Let me know if you'd like more details on any of these destinations!
+    }
+
+
+## test number 5:
+
+4. I want a romantic destination — where should I go? 
+    - response: {
+        Oh, I love this one! For a romantic getaway, you have two fantastic options: Amsterdam and Paris.
+
+        Starting with Amsterdam, it's especially lovely in April, May, and September when you can enjoy the beautiful tulip season and mild weather perfect for cycling. You can take a charming canal boat tour to soak in the picturesque views or visit the Rijksmuseum for a touch of culture.
+
+        Then there's Paris, which is always a classic choice for romance! The best times to visit are also in April, May, and September, when the weather is pleasant and the crowds are lighter. You can marvel at the Eiffel Tower or explore the Louvre Museum, both iconic experiences that add to the romantic atmosphere.
+
+        Let me know if you'd like more details on any of these destinations or help with planning your trip!
+    }
+
+10. I'm planning a family trip with kids aged 7 and 10. Where should we go, what activities would suit them, and when is the best time to visit? 
+    - response: {
+        What a fun trip to plan! For a family adventure with kids aged 7 and 10, I have two fantastic destinations in mind: Paris and Tokyo.
+
+        In Paris, I'd recommend visiting during April, May, or September when the weather is lovely and the crowds are manageable. A must-do activity is Disneyland Paris, which is perfect for kids and offers a magical experience. You could also check out the Eiffel Tower for some sightseeing and the Louvre Museum for a bit of culture.
+
+        On the other hand, Tokyo is another exciting option, especially in March, April, or November. During spring, you can enjoy the beautiful cherry blossoms, and in autumn, the foliage is stunning. Kids would love the Robot Cafe for a unique dining experience, and a day trip to Mount Fuji could be a memorable adventure for the whole family.
+
+        Let me know if you'd like more details on any of these destinations or activities!
+    }
+
+15. I'm flying from New York. What are my options and what would you recommend? (New York has only 2 outbound routes in the DB — tests graceful handling of a small result set) 
+    - response: {
+        Oh, I love this one! From New York, you have some fantastic options for your travels. You can fly directly to London or Paris, both of which are rich in culture and history. 
+
+        London offers a vibrant mix of cultural experiences and historic sites, while Paris is known for its romantic ambiance and artistic heritage. Flights to London are around $550 and take about 7 hours, while Paris flights are approximately $480 with a duration of about 7.5 hours.
+
+        If you're looking for more cultural experiences, Amsterdam and Berlin are also great choices, though they would require a connection. Berlin is particularly famous for its nightlife, so if that's something you're interested in, it could be a fun option!
+
+        Let me know if you'd like more details on any of these destinations or help with planning your trip!
+    }
