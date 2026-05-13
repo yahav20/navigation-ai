@@ -54,12 +54,12 @@ class AdjustmentsNode:
             updates["current_city"] = adjustment.new_origin
             summary_parts.append(f"Origin changed to {adjustment.new_origin}")
         
-        if adjustment.new_budget:
+        if adjustment.new_budget is not None:
             updates["total_budget"] = adjustment.new_budget
             updates["budget_optional"] = False
             summary_parts.append(f"Budget changed to {adjustment.new_budget}")
             
-        if adjustment.new_trip_days:
+        if adjustment.new_trip_days is not None:
             updates["trip_days"] = adjustment.new_trip_days
             summary_parts.append(f"Trip days changed to {adjustment.new_trip_days}")
 
