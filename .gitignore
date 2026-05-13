@@ -15,3 +15,7 @@ __pycache__/
 # IDEs
 .vscode/
 .idea/
+
+checkpoints.db
+checkpoint.db-shm
+checkpoint.db-wal
