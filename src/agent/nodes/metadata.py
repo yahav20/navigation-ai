@@ -41,6 +41,16 @@ class MetadataNode:
                 Do not guess. If a field is missing, return null.
                 Extract: current_city, destination_city, budget, trip_days.
 
+                IMPORTANT — current_city and destination_city must be CITIES, not countries.
+                If the user names a country, resolve it to the primary departure/arrival city:
+                  "Israel" / "Israeli" → "Tel Aviv"
+                  "France" → "Paris"
+                  "UK" / "England" / "Britain" → "London"
+                  "USA" / "United States" / "America" → "New York City" (or whatever city they imply)
+                  "Japan" → "Tokyo"
+                  "Germany" → "Berlin"
+                  "Netherlands" / "Holland" → "Amsterdam"
+
                 CONVERSATION MEMORY (from previous turns):
                 {existing_summary or "No previous context."}
 
