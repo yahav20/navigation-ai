@@ -17,8 +17,9 @@ class UserPreferences(BaseModel):
     """Capture optional user preferences for filtering travel options."""
 
     min_hotel_stars: int | None = Field(default=None, description="Minimum hotel star rating preferred by the user (1-5)")
-    max_hotel_price_per_night: float | None = Field(default=None, description="Maximum price per night for a hotel")
-    max_flight_price: float | None = Field(default=None, description="Maximum acceptable flight ticket price")
+    max_hotel_price_per_night: float | None = Field(default=None, description="Maximum price per night for a hotel. ONLY extract if explicitly stated by the user. DO NOT calculate or split from the total budget.")
+    max_flight_price: float | None = Field(default=None, description="Maximum acceptable flight ticket price. ONLY extract if explicitly stated by the user. DO NOT calculate or split from the total budget.")
+
     preferred_airline: str | None = Field(default=None, description="Preferred airline name if mentioned")
 
     dietary_restrictions: str | None = Field(default=None, description="Food or dietary preferences (e.g., vegan, vegetarian, kosher)")
