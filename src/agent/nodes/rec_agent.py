@@ -142,6 +142,7 @@ YOUR TOOLS AND WHEN TO USE THEM:
 - get_reachable_destinations(origin, max_flight_hours)
     → Use ONLY when the user explicitly states an origin city/country AND has no budget
     → DO NOT call this if the user has not mentioned where they are flying from
+    → DO NOT call this if the user mentioned a budget — use find_destinations_within_budget_auto instead
     → The origin MUST come directly from the user's message — never use a tool result
       (e.g. a city returned by find_destinations_by_tag) as the origin parameter
     → Use max_flight_hours to filter by actual flight duration:
@@ -172,23 +173,29 @@ YOUR TOOLS AND WHEN TO USE THEM:
 
 COMBINING TOOLS — KEY STRATEGIES:
 1. User mentions origin + budget, NO trip_days given:
-   → Call find_destinations_within_budget_auto(origin, budget)
+   → Call find_destinations_within_budget_auto(origin, budget) — this is the ONLY destination tool to call.
+   → Do NOT also call get_reachable_destinations, find_destinations_by_tag, or find_destinations_by_vibe.
+     The budget tool already filters by reachability. Adding other tools introduces cities that are
+     outside the budget, which will confuse the formatter into presenting unaffordable options.
    → Each result includes recommended_days — always report it in DATA COLLECTED as:
      "City: flight $X, hotel $Y/night, est. total $Z (based on recommended X-day stay)"
-   → Then optionally call get_city_overview on matching cities for richer data
+   → If the conversation context mentions a vibe/tag preference (e.g. beach), note which returned
+     cities match that vibe and which don't — but only based on cities the budget tool returned.
+   → Then optionally call get_city_overview on the returned cities for richer data.
 
 1b. User mentions origin + budget + explicit trip_days:
-   → Call find_destinations_within_budget(origin, budget, trip_days)
-   → Then optionally call get_city_overview on matching cities for richer data
+   → Call find_destinations_within_budget(origin, budget, trip_days) — this is the ONLY destination tool to call.
+   → Same restrictions as strategy 1 above.
+   → Then optionally call get_city_overview on the returned cities for richer data.
 
 2. User mentions vibe/tag only, NO origin:
-   → Call find_destinations_by_tag or find_destinations_by_vibe
+   → Call find_destinations_by_tag or find_destinations_by_vibe.
    → Present the matching cities. Do NOT call get_reachable_destinations — you have no origin.
    → Do NOT use a tool-returned city as the origin for get_reachable_destinations.
 
 2b. User mentions origin + vibe/tag (no budget):
-   → Call get_reachable_destinations(origin) AND find_destinations_by_tag / find_destinations_by_vibe
-   → Cross-reference: lead with destinations that appear in BOTH lists; mention others separately
+   → Call get_reachable_destinations(origin) AND find_destinations_by_tag / find_destinations_by_vibe.
+   → Cross-reference: lead with destinations that appear in BOTH lists; mention others separately.
 
 3. User mentions origin + "short/long flight" (no budget):
    → Call get_reachable_destinations(origin, max_flight_hours=X) with an appropriate limit
