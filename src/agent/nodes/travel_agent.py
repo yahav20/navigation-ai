@@ -14,7 +14,7 @@ SEASONS = ("Spring", "Summer", "Autumn", "Winter")
 
 _CURATION_PROMPT = """You are Atlas, a deterministic travel agent.
 
-You receive a JSON payload inside <travel_payload> containing flights, hotels, activities, weather, best_time, and costs. Your job is to curate the trip and return a structured plan.
+You receive a JSON payload inside <travel_payload> containing flights, hotels, activities, weather, best_time, costs, and an `is_adjustment` flag. Your job is to curate the trip and return a structured plan.
 
 Rules:
 1. Use ONLY items present in the payload. Never invent flights, hotels, activities, prices, or dates.
@@ -23,7 +23,27 @@ Rules:
 4. For each pick, write a short one-line description of why it fits.
 5. `intro` and `sign_off` should be one short sentence each, friendly but concise.
 6. All prices in USD. Use the values from the payload as-is.
+7. Framing based on is_adjustment:
+   - is_adjustment=true: the user is updating an existing plan. `intro` MUST start with "✅ Trip Updated Successfully!" and acknowledge the changes. `sign_off` should reassure them the new plan reflects their requested updates.
+   - is_adjustment=false: this is a brand-new plan. `intro` should welcome them to their plan (no "updated" framing). `sign_off` should encourage them to confirm or refine.
 """
+
+_NO_FLIGHTS_NEW = (
+    "Based on our search, we could not find available flights from "
+    "{origin} to {destination} at this time."
+)
+_NO_FLIGHTS_ADJUSTMENT = (
+    "⚠️ **Update Failed:** I tried to update your trip, but I couldn't find any "
+    "available flights from {origin} to {destination} for the new request."
+)
+_NO_HOTELS_NEW = (
+    "I found flights for this route, but no hotels that match the available "
+    "inventory and budget constraints."
+)
+_NO_HOTELS_ADJUSTMENT = (
+    "⚠️ **Update Failed:** I found flights for your updated request, but no "
+    "hotels fit the newly adjusted budget or preferences."
+)
 
 
 def _is_message(item: object) -> bool:
@@ -214,6 +234,7 @@ def build_travel_prompt_payload(state: AgentState) -> dict:
         "weather": weather,
         "best_time": best_time,
         "costs": costs,
+        "is_adjustment": bool(state.get("is_adjustment", False)),
     }
 
 
@@ -232,19 +253,15 @@ class TravelAgentNode:
         payload = build_travel_prompt_payload(state)
         origin = payload.get("origin") or "your origin"
         destination = payload.get("destination") or "your destination"
+        is_adjustment = payload["is_adjustment"]
 
         if not payload["flights"]:
-            text = (
-                f"Based on our search, we could not find available flights from "
-                f"{origin} to {destination} at this time."
-            )
+            template = _NO_FLIGHTS_ADJUSTMENT if is_adjustment else _NO_FLIGHTS_NEW
+            text = template.format(origin=origin, destination=destination)
             return {"messages": [AIMessage(content=text, name="travel_agent")]}
 
         if not payload["hotels"]:
-            text = (
-                "I found flights for this route, but no hotels that match the "
-                "available inventory and budget constraints."
-            )
+            text = _NO_HOTELS_ADJUSTMENT if is_adjustment else _NO_HOTELS_NEW
             return {"messages": [AIMessage(content=text, name="travel_agent")]}
 
         curation: TravelPlanCuration = self.curation_model.invoke([
