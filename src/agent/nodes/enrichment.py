@@ -2,7 +2,6 @@
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import ToolMessage
 from langchain_core.runnables import Runnable
-from langgraph.graph import END
 
 from agent.models import RefusalDetection, UserPreferences
 from agent.state import AgentState
@@ -381,10 +380,6 @@ def _phase5_ask_question(
 # ---------------------------------------------------------------------------
 # Node class — replaces the make_check_enrichment factory + nested function
 # ---------------------------------------------------------------------------
-
-def after_enrichment(state: AgentState) -> str:
-    """Conditional edge: route to flight search when enrichment is complete."""
-    return "flight_search" if state.get("enrichment_complete", False) else END
 
 
 class EnrichmentNode:
