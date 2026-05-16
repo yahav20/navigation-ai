@@ -18,7 +18,7 @@ You receive a JSON payload inside <travel_payload> containing flights, hotels, a
 
 Rules:
 1. Use ONLY items present in the payload. Never invent flights, hotels, activities, prices, or dates.
-2. Pick 1-3 best flights and 1-3 best hotels from the payload. Prefer lower total cost when the budget is applied (costs.budget_applied=true).
+2. Pick 1-3 flights and 1-3 hotels from the payload. For each candidate, check whether it is a good match for the budget (when costs.budget_applied=true). "Good match" is NOT just "cheaper than budget" — when the budget is generous relative to the option's cost, premium/higher-priced options are also a good fit. Example: a $600/night hotel for 4 nights ($2400) is a good fit for a $5000 budget, even if cheaper hotels exist. Don't drop an option just because a cheaper one exists — drop it only if it genuinely doesn't fit the budget.
 3. Pick up to 5 activities that respect user_preferences (e.g. dietary_restrictions, preferred_location).
 4. For each pick, write a short one-line description of why it fits.
 4a. For each flight pick: if the source flight has a `route` array (connecting flight), copy each leg into `legs` as {from_city, to_city, airline, flight_number}. For direct flights (no `route`), leave `legs` empty.
