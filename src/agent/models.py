@@ -1,6 +1,7 @@
 """Pydantic models for structured extraction by the travel agent."""
 
-from typing import Literal
+from typing import Any, Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -42,6 +43,58 @@ class TravelAdjustments(BaseModel):
     new_origin: str | None = Field(default=None, description="The new origin city, if updated.")
     new_budget: float | None = Field(default=None, description="The new total budget, if updated.")
     new_trip_days: int | None = Field(default=None, description="The new trip duration in days, if updated.")
+
+class FlightPick(BaseModel):
+    """A curated flight option highlighted to the traveller."""
+
+    label: str = Field(description="Flight number(s) from the payload, e.g. 'DL1' or 'AA123 + BA456'")
+    airline: str = Field(description="Primary airline name from the payload")
+    price: float = Field(description="Total flight price in USD from the payload")
+    description: str = Field(description="One short line explaining why this flight is recommended")
+
+
+class HotelPick(BaseModel):
+    """A curated hotel option highlighted to the traveller."""
+
+    name: str = Field(description="Hotel name from the payload")
+    stars: int | None = Field(default=None, description="Hotel star rating from the payload, if known")
+    price_per_night: float = Field(description="Nightly rate in USD from the payload")
+    description: str = Field(description="One short line explaining why this hotel is recommended")
+
+
+class ActivityPick(BaseModel):
+    """A curated activity suggested to the traveller."""
+
+    name: str = Field(description="Activity name from the payload")
+    description: str = Field(description="One short line on why this activity fits the trip and the user preferences")
+
+
+class TravelPlanCuration(BaseModel):
+    """LLM-produced curation of a deterministic travel payload."""
+
+    intro: str = Field(description="One-sentence opening that confirms the trip plan")
+    flights: list[FlightPick] = Field(default_factory=list, description="1-3 flight options chosen from the payload, best first")
+    hotels: list[HotelPick] = Field(default_factory=list, description="1-3 hotel options chosen from the payload, best first")
+    activities: list[ActivityPick] = Field(default_factory=list, description="Up to 5 activities chosen from the payload, respecting user preferences")
+    sign_off: str = Field(description="One brief closing sentence")
+
+
+class TravelPlan(BaseModel):
+    """Final structured travel plan handed to the formatter."""
+
+    intro: str
+    sign_off: str
+    flights: list[FlightPick]
+    hotels: list[HotelPick]
+    activities: list[ActivityPick]
+    origin: str | None
+    destination: str | None
+    trip_days: int
+    total_budget: float | None
+    weather: dict[str, str]
+    best_time: dict[str, Any]
+    lowest_total_estimate: float | None
+
 
 class IntentClassification(BaseModel):
     """Classify the user's primary intent to route them to the correct agent."""

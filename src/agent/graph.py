@@ -1,5 +1,4 @@
 """Build the LangGraph state graph for the travel agent."""
-from agent.nodes.adjustments import AdjustmentsNode
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
@@ -7,11 +6,17 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode
 
-from agent.edge import after_enrichment, after_router, rec_should_continue, should_continue
+from agent.edge import (
+    after_enrichment,
+    after_flight_search,
+    after_router,
+    after_travel_agent,
+    rec_should_continue,
+)
 from agent.llm import get_models
-from agent.nodes.router import RouterNode
-from agent.nodes.agent_core import AgentNode
+from agent.nodes.adjustments import AdjustmentsNode
 from agent.nodes.enrichment import EnrichmentNode
+from agent.nodes.flight_search import FlightSearchNode
 from agent.nodes.formatting import FormatterNode
 from agent.nodes.metadata import MetadataNode
 from agent.nodes.node_alternative import (
@@ -20,9 +25,10 @@ from agent.nodes.node_alternative import (
 )
 from agent.nodes.rec_agent import RecommendationAgentNode
 from agent.nodes.rec_formatter import RecommendationFormatterNode
+from agent.nodes.router import RouterNode
 from agent.nodes.summary import SummaryNode
+from agent.nodes.travel_agent import TravelAgentNode
 from agent.state import AgentState
-from tools import core_tools
 from tools.rec_tools import rec_tools
 
 
@@ -37,14 +43,15 @@ def build_graph(
     should pass a durable checkpointer (e.g. `SqliteSaver`).
     """
     # 1. Create nodes for the travel planning path
-    model_with_tools, extraction_model = get_models(provider)
+    response_model, extraction_model = get_models(provider)
 
     extract_metadata_node = MetadataNode(extraction_model)
     adjustments_node = AdjustmentsNode(extraction_model)
     enrichment_node = EnrichmentNode(extraction_model)
-    call_model_node = AgentNode(model_with_tools)
+    flight_search_node = FlightSearchNode()
+    travel_agent_node = TravelAgentNode(response_model)
     summary_node = SummaryNode(extraction_model)
-    formatter = FormatterNode(extraction_model)
+    formatter = FormatterNode(response_model)
     alternative_destination_node = AlternativeDestinationNode(extraction_model)
     formatter_alternative = FormatterAlternativeNode(extraction_model)
     router_node = RouterNode(extraction_model)
@@ -62,8 +69,8 @@ def build_graph(
     builder.add_node("extract_metadata", extract_metadata_node)
     builder.add_node("adjustments", adjustments_node)
     builder.add_node("enrichment", enrichment_node)
-    builder.add_node("agent", call_model_node)
-    builder.add_node("tools", ToolNode(core_tools))
+    builder.add_node("flight_search", flight_search_node)
+    builder.add_node("travel_agent", travel_agent_node)
     builder.add_node("formatter", formatter)
     builder.add_node("alternative_destination", alternative_destination_node)
     builder.add_node("formatter_alternative", formatter_alternative)
@@ -90,17 +97,23 @@ def build_graph(
 
     builder.add_edge("extract_metadata", "enrichment")
     builder.add_edge("adjustments", "enrichment")
-    builder.add_conditional_edges("enrichment", after_enrichment, {"agent": "agent", END: END})
+    builder.add_conditional_edges("enrichment", after_enrichment, {"flight_search": "flight_search", END: END})
     builder.add_conditional_edges(
-        "agent",
-        should_continue,
+        "flight_search",
+        after_flight_search,
         {
-            "tools": "tools",
-            "formatter": "formatter",
+            "travel_agent": "travel_agent",
             "alternative_destination": "alternative_destination",
         },
     )
-    builder.add_edge("tools", "agent")
+    builder.add_conditional_edges(
+        "travel_agent",
+        after_travel_agent,
+        {
+            "formatter": "formatter",
+            "summary": "summary",
+        },
+    )
     builder.add_edge("alternative_destination", "formatter_alternative")
     builder.add_edge("formatter_alternative", "summary")
     builder.add_edge("formatter", "summary")

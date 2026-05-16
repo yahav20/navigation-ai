@@ -14,6 +14,7 @@ class AdjustmentsNode:
         self.extraction_model = extraction_model.with_structured_output(TravelAdjustments)
 
     def __call__(self, state: AgentState) -> dict:
+        """Return state updates for explicit trip-parameter changes."""
         messages = state.get("messages", [])
         if not messages:
             return {}
@@ -49,16 +50,16 @@ class AdjustmentsNode:
         if adjustment.new_destination:
             updates["destination_city"] = adjustment.new_destination
             summary_parts.append(f"Destination changed to {adjustment.new_destination}")
-        
+
         if adjustment.new_origin:
             updates["current_city"] = adjustment.new_origin
             summary_parts.append(f"Origin changed to {adjustment.new_origin}")
-        
+
         if adjustment.new_budget is not None:
             updates["total_budget"] = adjustment.new_budget
             updates["budget_optional"] = False
             summary_parts.append(f"Budget changed to {adjustment.new_budget}")
-            
+
         if adjustment.new_trip_days is not None:
             updates["trip_days"] = adjustment.new_trip_days
             summary_parts.append(f"Trip days changed to {adjustment.new_trip_days}")
@@ -68,8 +69,8 @@ class AdjustmentsNode:
 
         # 1. Clear old messages except the latest user message
         messages_to_delete = [
-            RemoveMessage(id=m.id) 
-            for m in messages[:-1] 
+            RemoveMessage(id=m.id)
+            for m in messages[:-1]
             if m.id is not None
         ]
         updates["messages"] = messages_to_delete
@@ -86,5 +87,8 @@ class AdjustmentsNode:
 
         # Clear alternative destinations since parameters changed
         updates["alternative_destinations"] = []
+        updates["flight_options"] = []
+        updates["has_flights"] = False
+        updates["travel_plan"] = {}
 
         return updates

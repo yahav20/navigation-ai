@@ -24,3 +24,4 @@ data/checkpoints.db-shm
 
 package-lock.json
 settings.local.json
+temp/**
