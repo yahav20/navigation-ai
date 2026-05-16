@@ -18,8 +18,9 @@ class UserPreferences(BaseModel):
     """Capture optional user preferences for filtering travel options."""
 
     min_hotel_stars: int | None = Field(default=None, description="Minimum hotel star rating preferred by the user (1-5)")
-    max_hotel_price_per_night: float | None = Field(default=None, description="Maximum price per night for a hotel")
-    max_flight_price: float | None = Field(default=None, description="Maximum acceptable flight ticket price")
+    max_hotel_price_per_night: float | None = Field(default=None, description="Maximum price per night for a hotel. ONLY extract if explicitly stated by the user. DO NOT calculate or split from the total budget.")
+    max_flight_price: float | None = Field(default=None, description="Maximum acceptable flight ticket price. ONLY extract if explicitly stated by the user. DO NOT calculate or split from the total budget.")
+
     preferred_airline: str | None = Field(default=None, description="Preferred airline name if mentioned")
 
     dietary_restrictions: str | None = Field(default=None, description="Food or dietary preferences (e.g., vegan, vegetarian, kosher)")
@@ -44,6 +45,15 @@ class TravelAdjustments(BaseModel):
     new_budget: float | None = Field(default=None, description="The new total budget, if updated.")
     new_trip_days: int | None = Field(default=None, description="The new trip duration in days, if updated.")
 
+class FlightLeg(BaseModel):
+    """A single leg of a connecting-flight route."""
+
+    from_city: str = Field(description="Origin city for this leg (from `route[i].from`)")
+    to_city: str = Field(description="Destination city for this leg (from `route[i].to`)")
+    airline: str = Field(description="Operating airline for this leg")
+    flight_number: str = Field(description="Flight number for this leg (from `route[i].flight`)")
+
+
 class FlightPick(BaseModel):
     """A curated flight option highlighted to the traveller."""
 
@@ -51,6 +61,10 @@ class FlightPick(BaseModel):
     airline: str = Field(description="Primary airline name from the payload")
     price: float = Field(description="Total flight price in USD from the payload")
     description: str = Field(description="One short line explaining why this flight is recommended")
+    legs: list[FlightLeg] = Field(
+        default_factory=list,
+        description="One entry per leg ONLY when the source flight has a `route`. Leave empty for direct flights.",
+    )
 
 
 class HotelPick(BaseModel):

@@ -21,6 +21,7 @@ Rules:
 2. Pick 1-3 best flights and 1-3 best hotels from the payload. Prefer lower total cost when the budget is applied (costs.budget_applied=true).
 3. Pick up to 5 activities that respect user_preferences (e.g. dietary_restrictions, preferred_location).
 4. For each pick, write a short one-line description of why it fits.
+4a. For each flight pick: if the source flight has a `route` array (connecting flight), copy each leg into `legs` as {from_city, to_city, airline, flight_number}. For direct flights (no `route`), leave `legs` empty.
 5. `intro` and `sign_off` should be one short sentence each, friendly but concise.
 6. All prices in USD. Use the values from the payload as-is.
 7. Framing based on is_adjustment:

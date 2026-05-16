@@ -33,6 +33,10 @@ TEMPLATE:
 For each flight pick:
 * **{airline} — {label}** | **Price:** ${price}
   * {description}
+  * If `legs` is non-empty, render each leg on its own indented line (numbered starting at 1):
+    * **Leg 1:** {from_city} ➔ {to_city} | **Airline:** {airline} (**Flight:** {flight_number})
+    * **Leg 2:** {from_city} ➔ {to_city} | **Airline:** {airline} (**Flight:** {flight_number})
+  * If `legs` is empty, do NOT print any leg lines.
 
 ---
 
