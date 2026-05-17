@@ -1,8 +1,24 @@
 """General chat node — handles greetings, travel tips, and city-specific questions."""
 from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import AIMessage
 from langchain_core.runnables import Runnable
 
 from agent.state import AgentState
+
+
+def _clean_content(content) -> str:
+    """Extract plain text from any content format Gemini might return."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict) and "text" in item:
+                parts.append(item["text"])
+        return " ".join(p for p in parts if p.strip())
+    return str(content)
 
 _SYSTEM_PROMPT = """You are Atlas, a friendly and knowledgeable AI travel assistant.
 
@@ -66,6 +82,11 @@ class GeneralChatNode:
             {"role": "system", "content": system_prompt},
             *messages,
         ])
+
+        # Normalize content — Gemini with tools bound can return complex list structures
+        if not getattr(response, "tool_calls", None):
+            clean = _clean_content(response.content)
+            response = AIMessage(content=clean)
 
         return {
             "messages": [response],
