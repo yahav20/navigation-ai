@@ -85,8 +85,27 @@ def after_router(state: AgentState) -> str:
         return "adjustments"
     elif intent == "recommendations":
         return "rec_agent"
+    elif intent == "general_chat":
+        return "general_chat"
     else:
         return END
+
+
+CHAT_MAX_STEPS = 2
+
+
+def chat_should_continue(state: AgentState) -> str:
+    """Route to chat_tools if the agent issued tool calls, otherwise send to general_chat_formatter."""
+    last_message = state["messages"][-1]
+    step_count = state.get("step_count", 0)
+
+    if step_count >= CHAT_MAX_STEPS:
+        return "general_chat_formatter"
+
+    if getattr(last_message, "tool_calls", None):
+        return "chat_tools"
+
+    return "general_chat_formatter"
 
 
 REC_MAX_STEPS = 4

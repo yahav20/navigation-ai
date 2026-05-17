@@ -7,7 +7,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode
 
-from agent.edge import after_enrichment, after_router, rec_should_continue, should_continue
+from agent.edge import after_enrichment, after_router, chat_should_continue, rec_should_continue, should_continue
 from agent.llm import get_models
 from agent.nodes.router import RouterNode
 from agent.nodes.agent_core import AgentNode
@@ -18,6 +18,8 @@ from agent.nodes.node_alternative import (
     AlternativeDestinationNode,
     FormatterAlternativeNode,
 )
+from agent.nodes.general_chat import GeneralChatNode
+from agent.nodes.general_chat_formatter import GeneralChatFormatterNode
 from agent.nodes.rec_agent import RecommendationAgentNode
 from agent.nodes.rec_formatter import RecommendationFormatterNode
 from agent.nodes.summary import SummaryNode
@@ -54,6 +56,11 @@ def build_graph(
     rec_agent_node = RecommendationAgentNode(rec_model_with_tools, rec_extraction_model)
     rec_formatter_node = RecommendationFormatterNode(rec_extraction_model)
 
+    # 3a. Create nodes for the general chat path (reuses rec tools)
+    chat_model_with_tools, _ = get_models(provider, mode="recommendation")
+    general_chat_node = GeneralChatNode(chat_model_with_tools, extraction_model)
+    general_chat_formatter_node = GeneralChatFormatterNode(extraction_model)
+
     # 3. Build the graph
     builder = StateGraph(AgentState)
 
@@ -74,6 +81,11 @@ def build_graph(
     builder.add_node("rec_tools", ToolNode(rec_tools))
     builder.add_node("rec_formatter", rec_formatter_node)
 
+    # General chat nodes
+    builder.add_node("general_chat", general_chat_node)
+    builder.add_node("chat_tools", ToolNode(rec_tools))
+    builder.add_node("general_chat_formatter", general_chat_formatter_node)
+
     # 4. Define edges — travel planning path
     builder.add_edge(START, "router")
 
@@ -84,6 +96,7 @@ def build_graph(
             "extract_metadata": "extract_metadata",
             "adjustments": "adjustments",
             "rec_agent": "rec_agent",
+            "general_chat": "general_chat",
             END: END,
         },
     )
@@ -114,6 +127,15 @@ def build_graph(
     )
     builder.add_edge("rec_tools", "rec_agent")
     builder.add_edge("rec_formatter", "summary")
+
+    # 6. Define edges — general chat path
+    builder.add_conditional_edges(
+        "general_chat",
+        chat_should_continue,
+        {"chat_tools": "chat_tools", "general_chat_formatter": "general_chat_formatter"},
+    )
+    builder.add_edge("chat_tools", "general_chat")
+    builder.add_edge("general_chat_formatter", "summary")
 
     if checkpointer is None:
         checkpointer = MemorySaver(serde=JsonPlusSerializer())
