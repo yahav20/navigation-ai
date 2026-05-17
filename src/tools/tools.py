@@ -2,6 +2,7 @@
 from langchain_core.tools import tool
 
 from providers import SQLiteDataProvider
+from security import validate_city, validate_positive_number, validate_season
 
 data_provider = SQLiteDataProvider()
 
@@ -12,28 +13,31 @@ data_provider = SQLiteDataProvider()
 @tool
 def fetch_flights(origin: str, destination: str) -> list[dict]:
     """Fetch available flights between two cities. Automatically finds direct flights, and if none exist, finds connecting flights."""
-    
+    origin = validate_city(origin)
+    destination = validate_city(destination)
     direct_flights = data_provider.fetch_flights(origin, destination)
-    
     has_direct = any("flight_number" in f for f in direct_flights)
-    
     if not has_direct:
         connecting_flights = data_provider.find_connecting_flights(origin, destination)
-        
         if connecting_flights and any("route" in f for f in connecting_flights):
             return connecting_flights
-            
     return direct_flights
 
 @tool
 def fetch_hotels(city: str, max_price: int | None = None) -> list[dict]:
     """Fetch available hotels in a city with prices and availability, optionally filtered by maximum price per night."""
+    city = validate_city(city)
+    if max_price is not None:
+        validate_positive_number(max_price, "max_price")
     return data_provider.fetch_hotels(city, max_price)
 
 @tool
 def calculate_trip_cost(flight_price: float, hotel_price_per_night: float, duration_days: int) -> dict | str:
     """Calculate the total trip cost from flight price, hotel price per night, and duration in days."""
     try:
+        validate_positive_number(flight_price, "flight_price")
+        validate_positive_number(hotel_price_per_night, "hotel_price_per_night")
+        validate_positive_number(duration_days, "duration_days")
         total_hotel = float(hotel_price_per_night) * int(duration_days)
         total_grand = float(flight_price) + total_hotel
     except (ValueError, TypeError):
@@ -52,16 +56,20 @@ def calculate_trip_cost(flight_price: float, hotel_price_per_night: float, durat
 @tool
 def fetch_activities(city: str) -> list[dict]:
     """Fetch activities, museums, tours, and attractions for a city, including category, price, duration, and operating days."""
+    city = validate_city(city)
     return data_provider.fetch_activities(city)
 
 @tool
 def get_best_time_to_visit(city: str) -> dict:
     """Find the recommended months to visit a city and the reasons such as weather or festivals."""
+    city = validate_city(city)
     return data_provider.get_best_time_to_visit(city)
 
 @tool
 def get_average_weather(city: str, season: str) -> dict:
     """Get the average temperature for a city in a given season ('Spring', 'Summer', 'Autumn', 'Winter')."""
+    city = validate_city(city)
+    season = validate_season(season)
     return data_provider.get_average_weather(city, season)
 
 @tool

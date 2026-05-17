@@ -3,8 +3,10 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.runnables import Runnable
 
 from agent.state import AgentState
+from security import SECURITY_RULES
 
-_SYSTEM_PROMPT = """You are Atlas, a friendly and knowledgeable AI travel assistant.
+_SYSTEM_PROMPT = """{security_rules}
+You are Atlas, a friendly and knowledgeable AI travel assistant.
 
 The user is NOT planning a specific trip right now. They may be:
 - Greeting you or asking what you can do
@@ -57,6 +59,7 @@ class GeneralChatNode:
         state_context = ", ".join(ctx_parts) if ctx_parts else "No trip context yet."
 
         system_prompt = _SYSTEM_PROMPT.format(
+            security_rules=SECURITY_RULES,
             state_context=state_context,
             summary=state.get("summary") or "No previous conversation.",
         )
