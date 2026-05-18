@@ -95,17 +95,17 @@ CHAT_MAX_STEPS = 2
 
 
 def chat_should_continue(state: AgentState) -> str:
-    """Route to chat_tools if the agent issued tool calls, otherwise send to general_chat_formatter."""
+    """Route to chat_tools if the agent issued tool calls, otherwise go to summary."""
     last_message = state["messages"][-1]
     step_count = state.get("step_count", 0)
 
     if step_count >= CHAT_MAX_STEPS:
-        return "general_chat_formatter"
+        return "summary"
 
     if getattr(last_message, "tool_calls", None):
         return "chat_tools"
 
-    return "general_chat_formatter"
+    return "summary"
 
 
 REC_MAX_STEPS = 4
