@@ -4,6 +4,7 @@ from langchain_core.messages import AIMessage
 from langchain_core.runnables import Runnable
 
 from agent.state import AgentState
+from security import SECURITY_RULES
 
 
 def _clean_content(content) -> str:
@@ -73,6 +74,7 @@ class GeneralChatNode:
         state_context = ", ".join(ctx_parts) if ctx_parts else "No trip context yet."
 
         system_prompt = _SYSTEM_PROMPT.format(
+            security_rules=SECURITY_RULES,
             state_context=state_context,
             summary=state.get("summary") or "No previous conversation.",
         )

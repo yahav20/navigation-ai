@@ -5,6 +5,7 @@ from langchain_core.runnables import Runnable
 from pydantic import BaseModel
 
 from agent.state import AgentState
+from security import SECURITY_RULES
 
 
 class _RelevanceCheck(BaseModel):
@@ -104,7 +105,8 @@ Examples:
   "nightlife"              → both find_destinations_by_tag("nightlife") AND find_destinations_by_vibe("Nightlife")
 """
 
-_SYSTEM_PROMPT = """You are Atlas, a friendly and knowledgeable travel advisor.
+_SYSTEM_PROMPT = """{security_rules}
+You are Atlas, a friendly and knowledgeable travel advisor.
 Your role is to help users *discover* where to go, when to go, and what to do — not to book or plan a full trip.
 
 KNOWN USER CONTEXT (established from prior state — treat as confirmed facts, use directly in tool calls):
@@ -357,6 +359,7 @@ class RecommendationAgentNode:
         state_context = ", ".join(ctx_parts) if ctx_parts else "None established yet."
 
         system_prompt = _SYSTEM_PROMPT.format(
+            security_rules=SECURITY_RULES,
             state_context=state_context,
             summary=summary or "No previous context. This is a new conversation.",
             categories=_AVAILABLE_CATEGORIES,
