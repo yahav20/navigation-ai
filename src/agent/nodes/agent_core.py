@@ -1,6 +1,7 @@
 # src/agent/nodes/agent_core.py
 from langchain_core.runnables import Runnable
 from agent.state import AgentState
+from security import SECURITY_RULES
 
 class AgentNode:
     def __init__(self, model_with_tools: Runnable) -> None:
@@ -31,7 +32,8 @@ class AgentNode:
         else:
             action = "You have all the data. Just say 'I have finished gathering the travel data.' DO NOT call any tools."
 
-        system_prompt = f"""You are Atlas, a strict robotic travel agent.
+        system_prompt = f"""{SECURITY_RULES}
+        You are Atlas, a strict robotic travel agent.
         
         CONTEXT FROM PREVIOUS EXCHANGES:
         {summary or "No previous context. This is a new conversation."}

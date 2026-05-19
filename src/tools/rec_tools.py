@@ -2,6 +2,7 @@
 from langchain_core.tools import tool
 
 from providers.sqlite.provider import SQLiteDataProvider
+from security import validate_city, validate_positive_number, validate_season
 from tools.activities import fetch_activities
 from tools.weather_and_time import get_average_weather, get_best_time_to_visit
 
@@ -16,6 +17,7 @@ def find_destinations_by_vibe(category: str) -> list[dict]:
     Use this to answer vibe-based questions like 'where should I go for nightlife?'
     or 'I want a nature-focused trip, where should I go?'
     """
+    category = category.strip()
     return _provider.search_by_activity_category(category)
 
 
@@ -30,6 +32,9 @@ def get_reachable_destinations(origin: str, max_flight_hours: float | None = Non
     Leave max_flight_hours as None to return all reachable destinations.
     Returns city, country, price range, and shortest available flight duration.
     """
+    origin = validate_city(origin)
+    if max_flight_hours is not None:
+        validate_positive_number(max_flight_hours, "max_flight_hours")
     return _provider.get_all_destinations_from_origin(origin, max_flight_hours)
 
 
@@ -48,6 +53,7 @@ def find_destinations_by_tag(tag: str) -> list[dict]:
     Prefer find_destinations_by_tag over find_destinations_by_vibe for style/atmosphere queries;
     use find_destinations_by_vibe for activity-category queries (Nature, Culture, Family, etc.).
     """
+    tag = tag.strip().lower()
     return _provider.search_by_tag(tag)
 
 
@@ -62,6 +68,8 @@ def find_destinations_within_budget_auto(origin: str, total_budget: float) -> li
 
     Use this when the user mentions a budget and an origin but does NOT specify trip duration.
     """
+    origin = validate_city(origin)
+    validate_positive_number(total_budget, "total_budget")
     return _provider.find_within_budget_auto_duration(origin, total_budget)
 
 
@@ -77,6 +85,9 @@ def find_destinations_within_budget(origin: str, total_budget: float, trip_days:
     Use this whenever the user mentions a budget alongside an origin, e.g.:
     'I have $1000 and I'm flying from Tel Aviv for 5 days — where can I go?'
     """
+    origin = validate_city(origin)
+    validate_positive_number(total_budget, "total_budget")
+    validate_positive_number(trip_days, "trip_days")
     return _provider.find_within_budget(origin, total_budget, trip_days)
 
 
@@ -89,6 +100,7 @@ def get_trip_duration_recommendation(city: str) -> dict:
     Use this when the user asks 'how many days should I spend in X?'
     or 'is N days enough for X?' or wants help splitting time across multiple cities.
     """
+    city = validate_city(city)
     return _provider.get_recommended_duration(city)
 
 
@@ -104,6 +116,7 @@ def get_city_overview(city: str) -> dict:
     Use this to answer questions like 'what kind of trip is Tokyo?',
     'when should I visit Paris?', or 'what is there to do in Amsterdam?'
     """
+    city = validate_city(city)
     return _provider.get_city_profile(city)
 
 

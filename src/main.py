@@ -15,6 +15,7 @@ import ui  # noqa: E402
 from agent.graph import build_graph  # noqa: E402
 from config.session_name import generate_session_name  # noqa: E402
 from config.setting import CHOSEN_PROVIDER  # noqa: E402
+from security import MAX_TURNS_PER_SESSION, generate_session_id, log_turn, scan_output, validate_input  # noqa: E402
 
 CHECKPOINT_DB = Path(__file__).resolve().parent.parent / "data" / "checkpoints.db"
 
@@ -29,9 +30,20 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _restrict_db_permissions(path: Path) -> None:
+    """Restrict DB file to current user only (Windows via icacls, Unix via chmod)."""
+    import os, platform
+    if path.exists():
+        if platform.system() == "Windows":
+            os.system(f'icacls "{path}" /inheritance:r /grant:r "%USERNAME%":(F) >nul 2>&1')
+        else:
+            os.chmod(path, 0o600)
+
+
 def run_agent(session_id: str = "default") -> None:
     """Run the interactive agent loop until the user exits."""
     CHECKPOINT_DB.parent.mkdir(parents=True, exist_ok=True)
+    _restrict_db_permissions(CHECKPOINT_DB)
     conn = sqlite3.connect(str(CHECKPOINT_DB), check_same_thread=False)
     try:
         _interactive_loop(conn, session_id)
@@ -55,8 +67,13 @@ def _interactive_loop(conn: sqlite3.Connection, session_id: str) -> None:
         saved.get("total_budget", "None") if saved else "None",
         saved.get("trip_days", "None") if saved else "None",
     )
+    turn_count = 0
 
     while True:
+        if turn_count >= MAX_TURNS_PER_SESSION:
+            ui.render_error(Exception("Session limit reached. Please restart the agent."))
+            break
+
         user_input = ui.ask_user(prompt_session, state=current_state)
         if user_input is None:
             ui.render_goodbye(newline=True)
@@ -68,7 +85,16 @@ def _interactive_loop(conn: sqlite3.Connection, session_id: str) -> None:
             continue
 
         try:
-            current_state = _run_turn(graph, config, user_input, current_state)
+            validate_input(user_input, session_id=session_id)
+        except ValueError as e:
+            ui.render_error(e)
+            continue
+
+        log_turn(session_id, user_input, turn=turn_count + 1)
+        turn_count += 1
+
+        try:
+            current_state = _run_turn(graph, config, user_input, current_state, session_id)
         except Exception as e:  # noqa: BLE001  # top-level handler: report connection/runtime errors to user
             ui.render_error(e)
             break
@@ -79,6 +105,7 @@ def _run_turn(
     config: dict,
     user_input: str,
     current_state: tuple[str, str, str, str],
+    session_id: str = "unknown",
 ) -> tuple[str, str, str, str]:
     initial_state = {"messages": [("user", user_input)], "step_count": 0}
     last_content = ""
@@ -95,6 +122,7 @@ def _run_turn(
 
             last_msg = messages[-1]
             content = str(last_msg.content) if hasattr(last_msg, "content") else "No content"
+            content = scan_output(content, session_id=session_id)
             current_state = (
                 data.get("current_city", "None"),
                 data.get("destination_city", "None"),
@@ -113,4 +141,4 @@ def _run_turn(
 
 if __name__ == "__main__":
     args = _parse_args()
-    run_agent(session_id=args.session or generate_session_name())
+    run_agent(session_id=args.session or f"{generate_session_name()}-{generate_session_id()[:8]}")
