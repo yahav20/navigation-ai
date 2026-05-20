@@ -31,6 +31,16 @@ def after_adjustments(state: AgentState) -> str:
         return "enrichment"
     return "extract_metadata"
 
+def after_security_gate(state: AgentState) -> str:
+    """Route to router if safe, or skip directly to summary if blocked."""
+    last_message = state["messages"][-1]
+    
+    if getattr(last_message, "name", "") == "security_gate":
+        return "summary"
+        
+    return "router"
+
+
 def after_router(state: AgentState) -> str:
     """Route from the RouterNode based on the classified intent."""
     intent = state.get("intent", "other")
