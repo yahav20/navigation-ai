@@ -25,4 +25,7 @@ class AgentState(TypedDict):
     alternative_destinations: list # populated when fetch_flights returns no results for the route
     plan : list[str]               # list of steps the agent plans to take, updated by the agent_core node
     intent: str                    # intent classification
+    rec_plan: list                 # list of {tool_name, args} dicts produced by rec_planner
+    rec_last_tool_results: list    # [{tool_name, args, result}] from the most recent executor run
+    rec_shown_cities: list         # accumulates every city name presented to the user across rec turns
 

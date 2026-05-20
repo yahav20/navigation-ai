@@ -1,8 +1,16 @@
 """Formatter node — turns raw tool data into a warm, conversational recommendation."""
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import RemoveMessage
+from pydantic import BaseModel, Field
 
 from agent.state import AgentState
+
+
+class _CityExtraction(BaseModel):
+    cities: list[str] = Field(
+        description="All destination city names explicitly mentioned in this travel response. "
+                    "Only real city names — no countries, regions, or generic phrases."
+    )
 
 _SYSTEM_PROMPT = """You are Atlas, a warm, enthusiastic, and knowledgeable travel advisor.
 Your job is to turn the raw data gathered in this conversation into a clear, personalized, conversational recommendation.
@@ -122,9 +130,13 @@ Tone-matching instructions:
 
 5. NO-ORIGIN RULE — If the user has NOT mentioned where they are flying from:
    → Do NOT mention flights, airlines, prices, or flight availability — that data does not exist.
-   → Present the matching destinations naturally.
+   → Present the matching destinations naturally, as interesting places to consider.
    → End your response by asking: "Would you like me to check for flights from your location?"
-   → Never say "unfortunately there are no flights" or imply flight unavailability — you simply don't know.
+   → FORBIDDEN PHRASES (never write any of these, even paraphrased):
+       "no flights", "no flights available", "no flight data", "flight information unavailable",
+       "unfortunately there are no flights", "I couldn't find flights", "no flight options".
+     You have no flight data at all — not "no flights". The destinations exist; you just don't know
+     the flights yet. Omit any flight mention entirely and ask for the origin at the end.
 
 5a. ORIGIN AWARENESS — If the user mentioned their home city or origin:
    → Only mention destinations that DATA COLLECTED explicitly lists as reachable from that city.
@@ -187,6 +199,7 @@ class RecommendationFormatterNode:
 
     def __init__(self, model: BaseChatModel) -> None:
         self.model = model
+        self._city_extractor = model.with_structured_output(_CityExtraction)
 
     def __call__(self, state: AgentState) -> dict:
         messages = list(state.get("messages", []))
@@ -217,4 +230,32 @@ class RecommendationFormatterNode:
             *current_turn_messages,
         ])
 
-        return {"messages": remove_ops + [response]}
+        # Extract city names from the formatted response and accumulate in state.
+        # Using a structured extraction call is more reliable than parsing text.
+        shown_cities = self._extract_cities(response.content, state)
+
+        return {
+            "messages": remove_ops + [response],
+            "rec_shown_cities": shown_cities,
+        }
+
+    def _extract_cities(self, response_text: str, state: AgentState) -> list[str]:
+        """Return the merged, deduplicated list of all cities ever shown to the user."""
+        try:
+            extraction: _CityExtraction = self._city_extractor.invoke([
+                {
+                    "role": "system",
+                    "content": (
+                        "Extract every destination city name explicitly mentioned in this "
+                        "travel recommendation response. Return only real city names — "
+                        "no countries, regions, or generic phrases."
+                    ),
+                },
+                {"role": "user", "content": response_text},
+            ])
+            new_cities = set(extraction.cities)
+        except Exception:  # noqa: BLE001
+            new_cities = set()
+
+        existing = set(state.get("rec_shown_cities") or [])
+        return sorted(existing | new_cities)

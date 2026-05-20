@@ -84,27 +84,8 @@ def after_router(state: AgentState) -> str:
     elif intent == "update_travel_plan":
         return "adjustments"
     elif intent == "recommendations":
-        return "rec_agent"
+        return "rec_planner"
     else:
         return END
 
 
-REC_MAX_STEPS = 4
-
-
-def rec_should_continue(state: AgentState) -> str:
-    """Route to rec_tools if the agent issued tool calls, otherwise send to rec_formatter.
-
-    REC_MAX_STEPS is intentionally low — recommendation queries should rarely need more
-    than 3 tool turns. A high step count is a symptom of the agent over-tooling.
-    """
-    last_message = state["messages"][-1]
-    step_count = state.get("step_count", 0)
-
-    if step_count >= REC_MAX_STEPS:
-        return "rec_formatter"
-
-    if getattr(last_message, "tool_calls", None):
-        return "rec_tools"
-
-    return "rec_formatter"

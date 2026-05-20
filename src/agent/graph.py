@@ -7,7 +7,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode
 
-from agent.edge import after_enrichment, after_router, rec_should_continue, should_continue
+from agent.edge import after_enrichment, after_router, should_continue
 from agent.llm import get_models
 from agent.nodes.router import RouterNode
 from agent.nodes.agent_core import AgentNode
@@ -18,12 +18,12 @@ from agent.nodes.node_alternative import (
     AlternativeDestinationNode,
     FormatterAlternativeNode,
 )
-from agent.nodes.rec_agent import RecommendationAgentNode
+from agent.nodes.rec_planner import RecPlannerNode
+from agent.nodes.rec_executor import RecExecutorNode
 from agent.nodes.rec_formatter import RecommendationFormatterNode
 from agent.nodes.summary import SummaryNode
 from agent.state import AgentState
 from tools import core_tools
-from tools.rec_tools import rec_tools
 
 
 def build_graph(
@@ -50,8 +50,9 @@ def build_graph(
     router_node = RouterNode(extraction_model)
 
     # 2. Create nodes for the recommendation path (uses its own model)
-    rec_model_with_tools, rec_extraction_model = get_models(provider, mode="recommendation")
-    rec_agent_node = RecommendationAgentNode(rec_model_with_tools, rec_extraction_model)
+    _, rec_extraction_model = get_models(provider, mode="recommendation")
+    rec_planner_node = RecPlannerNode(rec_extraction_model)
+    rec_executor_node = RecExecutorNode()
     rec_formatter_node = RecommendationFormatterNode(rec_extraction_model)
 
     # 3. Build the graph
@@ -70,8 +71,8 @@ def build_graph(
     builder.add_node("summary", summary_node)
 
     # Recommendation nodes
-    builder.add_node("rec_agent", rec_agent_node)
-    builder.add_node("rec_tools", ToolNode(rec_tools))
+    builder.add_node("rec_planner", rec_planner_node)
+    builder.add_node("rec_executor", rec_executor_node)
     builder.add_node("rec_formatter", rec_formatter_node)
 
     # 4. Define edges — travel planning path
@@ -83,7 +84,7 @@ def build_graph(
         {
             "extract_metadata": "extract_metadata",
             "adjustments": "adjustments",
-            "rec_agent": "rec_agent",
+            "rec_planner": "rec_planner",
             END: END,
         },
     )
@@ -107,12 +108,8 @@ def build_graph(
     builder.add_edge("summary", END)
 
     # 5. Define edges — recommendation path
-    builder.add_conditional_edges(
-        "rec_agent",
-        rec_should_continue,
-        {"rec_tools": "rec_tools", "rec_formatter": "rec_formatter"},
-    )
-    builder.add_edge("rec_tools", "rec_agent")
+    builder.add_edge("rec_planner", "rec_executor")
+    builder.add_edge("rec_executor", "rec_formatter")
     builder.add_edge("rec_formatter", "summary")
 
     if checkpointer is None:
