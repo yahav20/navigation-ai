@@ -41,6 +41,8 @@ def after_router(state: AgentState) -> str:
         return "adjustments"
     elif intent == "recommendations":
         return "rec_agent"
+    elif intent == "build_itinerary":
+        return "itinerary_agent"
     elif intent == "general_chat":
         return "general_chat"
     else:

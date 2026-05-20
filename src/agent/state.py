@@ -26,4 +26,5 @@ class AgentState(TypedDict):
     flight_options: NotRequired[list[dict]]  # deterministic flight results used only for branching/response context
     has_flights: NotRequired[bool]           # True when flight_options contains usable route data
     travel_plan: NotRequired[dict]           # curated TravelPlan dump produced by TravelAgentNode for the formatter
+    itinerary_plan: NotRequired[dict]        # curated day-by-day itinerary produced by itinerary agent
     intent: str                    # intent classification

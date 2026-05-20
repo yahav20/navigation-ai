@@ -27,6 +27,10 @@ from agent.state import AgentState
 from tools.rec_tools import rec_tools
 
 
+def itinerary_agent_stub(state: AgentState) -> dict:
+    return {"messages": [("ai", "Itinerary agent is under construction!")]}
+
+
 def build_graph(
     provider: str = "google",
     checkpointer: BaseCheckpointSaver | None = None,
@@ -74,6 +78,7 @@ def build_graph(
     builder.add_node("alternative_destination", alternative_destination_node)
     builder.add_node("formatter_alternative", formatter_alternative)
     builder.add_node("summary", summary_node)
+    builder.add_node("itinerary_agent", itinerary_agent_stub)
 
     # Recommendation nodes
     builder.add_node("rec_agent", rec_agent_node)
@@ -94,6 +99,7 @@ def build_graph(
             "extract_metadata": "extract_metadata",
             "adjustments": "adjustments",
             "rec_agent": "rec_agent",
+            "itinerary_agent": "itinerary_agent",
             "general_chat": "general_chat",
             END: END,
         },
@@ -121,6 +127,7 @@ def build_graph(
     builder.add_edge("alternative_destination", "formatter_alternative")
     builder.add_edge("formatter_alternative", "summary")
     builder.add_edge("formatter", "summary")
+    builder.add_edge("itinerary_agent", "summary")
     builder.add_edge("summary", END)
 
     # 5. Define edges — recommendation path
