@@ -2,7 +2,6 @@
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import ToolMessage
 from langchain_core.runnables import Runnable
-from langgraph.graph import END
 
 from agent.models import RefusalDetection, UserPreferences
 from agent.state import AgentState
@@ -302,7 +301,7 @@ def _extract_general_preferences(
     messages = state.get("messages", [])
 
     last_user_message = next((m for m in reversed(messages) if getattr(m, "type", "") == "human"), None)
-    
+
     if not last_user_message:
         return {}
 
@@ -321,14 +320,14 @@ def _extract_general_preferences(
 
 
     new_prefs = {k: v for k, v in extracted.model_dump().items() if v is not None}
-    
+
     if not new_prefs:
-        return {} 
-        
+        return {}
+
 
     current_prefs = state.get("user_preferences") or {}
     updated_prefs = {**current_prefs, **new_prefs}
-    
+
     return {"user_preferences": updated_prefs}
 
 
@@ -382,10 +381,6 @@ def _phase5_ask_question(
 # ---------------------------------------------------------------------------
 # Node class — replaces the make_check_enrichment factory + nested function
 # ---------------------------------------------------------------------------
-
-def after_enrichment(state: AgentState) -> str:
-    """Conditional edge: route to agent when enrichment is complete, else surface question to user."""
-    return "agent" if state.get("enrichment_complete", False) else END
 
 
 class EnrichmentNode:

@@ -1,4 +1,4 @@
-"""Construct chat models bound to travel-agent tools."""
+"""Construct chat models for travel and recommendation paths."""
 from langchain_core.language_models import BaseChatModel
 from langchain_core.runnables import Runnable
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -6,23 +6,21 @@ from langchain_groq import ChatGroq
 from langchain_ollama import ChatOllama
 from langchain_openai import ChatOpenAI
 
-from tools import core_tools
 from tools.rec_tools import rec_tools
 
-_TOOL_SETS = {
-    "travel": core_tools,
-    "recommendation": rec_tools,
-}
 
 def get_models(provider: str = "google", mode: str = "travel") -> tuple[Runnable, BaseChatModel]:
-    """Return (model_with_tools, extraction_model) for the chosen provider and mode.
+    """Return (response_or_agent_model, extraction_model) for provider/mode.
 
-    mode="travel"         — binds core planning tools, no token cap
+    mode="travel"         — returns an unbound response model, no token cap
     mode="recommendation" — binds rec discovery tools, caps tokens at 1500 to prevent
                             runaway loops when tool results repeat across multiple calls
     """
     provider = provider.lower()
-    bound_tools = _TOOL_SETS[mode]
+    if mode not in {"travel", "recommendation"}:
+        msg = f"Unknown model mode: {mode}"
+        raise ValueError(msg)
+
     # Token cap only needed for the rec agent
     cap = 1500 if mode == "recommendation" else None
 
@@ -35,4 +33,7 @@ def get_models(provider: str = "google", mode: str = "travel") -> tuple[Runnable
     else:
         base = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0, **({"max_output_tokens": cap} if cap else {}))
 
-    return base.bind_tools(bound_tools), base
+    if mode == "recommendation":
+        return base.bind_tools(rec_tools), base
+
+    return base, base

@@ -1,5 +1,5 @@
 """Typed state shared across nodes of the travel-agent graph."""
-from typing import Annotated, TypedDict
+from typing import Annotated, NotRequired, TypedDict
 
 from langgraph.graph.message import add_messages
 
@@ -23,6 +23,7 @@ class AgentState(TypedDict):
     trip_days: int                 # number of trip days; defaults to 3 if user skips after being asked
     summary: str                   # rolling conversation summary maintained by summary_node
     alternative_destinations: list # populated when fetch_flights returns no results for the route
-    plan : list[str]               # list of steps the agent plans to take, updated by the agent_core node
+    flight_options: NotRequired[list[dict]]  # deterministic flight results used only for branching/response context
+    has_flights: NotRequired[bool]           # True when flight_options contains usable route data
+    travel_plan: NotRequired[dict]           # curated TravelPlan dump produced by TravelAgentNode for the formatter
     intent: str                    # intent classification
-

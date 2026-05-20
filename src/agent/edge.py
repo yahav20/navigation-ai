@@ -1,72 +1,28 @@
 """Routing edges for the LangGraph travel agent."""
 # src/agent/edge.py
-import json
-
 from langgraph.graph import END
 
 from agent.state import AgentState
-
-MAX_STEPS = 5
 
 
 # ---------------------------------------------------------
 # Routing Function 1: From Enrichment
 # ---------------------------------------------------------
 def after_enrichment(state: AgentState) -> str:
-    """Conditional edge: route to agent when enrichment is complete, else surface question to user."""
-    return "agent" if state.get("enrichment_complete", False) else END
+    """Route to deterministic flight search when enrichment is complete."""
+    return "flight_search" if state.get("enrichment_complete", False) else END
 
-# ---------------------------------------------------------
-# Helper for the Main Agent Edge
-# ---------------------------------------------------------
-def _no_real_flights_in_history(state: AgentState) -> bool:
-    """Return True when the message history contains no usable flight records."""
-    has_searched = False
-    has_flights = False
 
-    for msg in state.get("messages", []):
-        if getattr(msg, "type", "") != "tool":
-            continue
-        if getattr(msg, "name", "") != "fetch_flights":
-            continue
+def after_flight_search(state: AgentState) -> str:
+    """Route to the travel agent when flights exist, else to the alternatives path."""
+    if state.get("has_flights") and state.get("flight_options"):
+        return "travel_agent"
+    return "alternative_destination"
 
-        has_searched = True
-        
-        if "flight_number" in msg.content or "route" in msg.content:
-            has_flights = True
-            break
-        
-    if not has_searched:
-        return False
 
-    return not has_flights
-# ---------------------------------------------------------
-# Routing Function 2: From Agent Core
-# ---------------------------------------------------------
-def should_continue(state: AgentState) -> str:
-    """Return the next graph path based on the model's output.
-
-    Returns 'tools' if the model wants to call a function, 'alternative_destination'
-    when fetch_flights came back empty for a known origin/destination, otherwise 'formatter'.
-    """
-    last_message = state["messages"][-1]
-    step_count = state.get("step_count", 0)
-    origin = state.get("current_city")
-    dest = state.get("destination_city")
-
-    # Safety Check: Stop after 5 tool invocations in a single turn
-    if step_count >= MAX_STEPS:
-        if origin and dest and _no_real_flights_in_history(state):
-            return "alternative_destination"
-        return "formatter"
-
-    if getattr(last_message, "tool_calls", None):
-        return "tools"
-
-    if origin and dest and _no_real_flights_in_history(state):
-        return "alternative_destination"
-
-    return "formatter"
+def after_travel_agent(state: AgentState) -> str:
+    """Render the curated plan when the travel agent produced one, else skip the formatter."""
+    return "formatter" if state.get("travel_plan") else "summary"
 
 
 def after_adjustments(state: AgentState) -> str:

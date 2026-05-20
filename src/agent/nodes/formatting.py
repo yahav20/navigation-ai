@@ -1,270 +1,95 @@
-"""Format the agent's gathered travel data into a Markdown response."""
+"""Render the curated TravelPlan as a Markdown message for the user."""
+
 import json
 
-from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import BaseMessage
-from langchain_core.messages import AIMessage
+from langchain_core.runnables import Runnable
 
 from agent.state import AgentState
 
+_FORMATTER_PROMPT = """You are a strict travel-plan formatter. Render the structured `<travel_plan>` JSON below as Markdown using the EXACT template.
 
-def _parse_tool_payload(msg: BaseMessage) -> object | None:
-    try:
-        return json.loads(msg.content)
-    except json.JSONDecodeError:
-        return None
+CRITICAL RULES:
+1. Use ONLY data inside <travel_plan>. Do not invent flights, hotels, activities, prices, weather, or best-time months.
+2. All prices use the '$' symbol (USD).
+3. If a list is empty, omit that whole section — do NOT print placeholder text.
+4. Do not ask the user any questions and do not add extra commentary outside the template.
+5. Do not output the raw JSON. Render the fields.
 
+TEMPLATE:
 
-def _ingest_flights(data: object, flights_dict: dict) -> None:
-    if isinstance(data, dict):
-        data = [data]
-    if not isinstance(data, list):
-        return
-    for f in data:
-        if "route" in f:
-            flight_num = "-".join([leg.get("flight", "unk") for leg in f["route"]])
-        else:
-            flight_num = f.get("flight_number", "unknown")
-            
-        flights_dict[flight_num] = f
+{intro}
 
+### ✨ **Your {destination} Escape** ✨
 
-def _ingest_hotels(data: object, hotels_dict: dict) -> None:
-    if isinstance(data, dict):
-        data = [data]
-    if not isinstance(data, list):
-        return
-    for h in data:
-        hotel_name = h.get("name", "unknown")
-        hotels_dict[hotel_name] = h
+**Origin:** {origin}
+**Destination:** {destination}
+**Trip Days:** {trip_days} days
+**Total Budget:** ${total_budget} (omit this line if total_budget is null)
+**Lowest Total Estimate:** ${lowest_total_estimate} (omit this line if lowest_total_estimate is null)
 
+---
 
-def _ingest_trip_cost(data: object, trip_cost_calculations: list) -> None:
-    if isinstance(data, dict) and "total_estimate" in data:
-        trip_cost_calculations.append(data)
+### ✈️ **Flights**
+For each flight pick:
+* **{airline} — {label}** | **Price:** ${price}
+  * {description}
+  * If `legs` is non-empty, render each leg on its own indented line (numbered starting at 1):
+    * **Leg 1:** {from_city} ➔ {to_city} | **Airline:** {airline} (**Flight:** {flight_number})
+    * **Leg 2:** {from_city} ➔ {to_city} | **Airline:** {airline} (**Flight:** {flight_number})
+  * If `legs` is empty, do NOT print any leg lines.
 
+---
 
-def _ingest_activities(data: object, activities_list: list) -> None:
-    """Merge fetch_activities tool output into the activities list."""
-    if isinstance(data, dict):
-        data = [data]
-    if not isinstance(data, list):
-        return
-    seen = {a.get("name") for a in activities_list}
-    for a in data:
-        if a.get("name") not in seen and "message" not in a:
-            activities_list.append(a)
-            seen.add(a.get("name"))
+### 🏨 **Hotels**
+For each hotel pick (number them 1., 2., 3.):
+**N. {name}** ({stars} ⭐ if stars is not null)
+* **Price Per Night:** ${price_per_night}
+* {description}
 
+---
 
-def _ingest_weather(data: object, weather_dict: dict) -> None:
-    """Merge get_average_weather tool output into the weather dict."""
-    if isinstance(data, dict) and "season" in data and "temperature" in data:
-        weather_dict[data["season"]] = data["temperature"]
+### 🎯 **Activities** (omit this whole section if activities is empty)
+For each activity:
+* **{name}** — {description}
 
+---
 
-def _ingest_best_time(data: object, container: list) -> None:
-    """Store get_best_time_to_visit result."""
-    if isinstance(data, dict) and "months" in data:
-        if not container:
-            container.append(data)
+### 🌤️ **Destination Insights** (omit this section if both weather and best_time are empty)
+* **Best Time to Visit:** join best_time.months with commas; if best_time.reason is present append ' — {reason}'
+* **Average Weather:** (omit any season not in the weather dict)
+  * **Spring:** {weather.Spring}
+  * **Summer:** {weather.Summer}
+  * **Autumn:** {weather.Autumn}
+  * **Winter:** {weather.Winter}
 
-
-
-def extract_travel_data(state: AgentState) -> dict:
-    """Parse tool executions and deduplicate all travel data for the formatter."""
-    flights_dict: dict = {}
-    hotels_dict: dict = {}
-    trip_cost_calculations: list = []
-    activities_list: list = []
-    weather_dict: dict = {}
-    best_time_list: list = []
-
-    for msg in state.get("messages", []):
-        if msg.type != "tool":
-            continue
-        tool_name = getattr(msg, "name", "")
-        data = _parse_tool_payload(msg)
-        if data is None:
-            continue
-        if tool_name in ["fetch_flights", "find_connecting_flights"]:
-            _ingest_flights(data, flights_dict)
-        elif tool_name == "fetch_hotels":
-            _ingest_hotels(data, hotels_dict)
-        elif tool_name == "calculate_trip_cost":
-            _ingest_trip_cost(data, trip_cost_calculations)
-        elif tool_name == "fetch_activities":
-            _ingest_activities(data, activities_list)
-        elif tool_name == "get_average_weather":
-            _ingest_weather(data, weather_dict)
-        elif tool_name == "get_best_time_to_visit":
-            _ingest_best_time(data, best_time_list)
-
-    exclude_keys = {"messages", "step_count"}
-    travel_data = {
-        key: value for key, value in state.items() if key not in exclude_keys
-    }
-
-    travel_data["flights"] = list(flights_dict.values())
-    travel_data["hotels"] = list(hotels_dict.values())
-    travel_data["trip_cost_calculations"] = trip_cost_calculations
-    travel_data["activities"] = activities_list
-    travel_data["weather"] = weather_dict
-    travel_data["best_time"] = best_time_list[0] if best_time_list else {}
-
-    return travel_data
+{sign_off}
+"""
 
 
 class FormatterNode:
-    def __init__(self, extraction_model: BaseChatModel) -> None:
-        self.extraction_model = extraction_model
+    """Convert the structured TravelPlan in state into a Markdown AIMessage."""
+
+    def __init__(self, response_model: Runnable) -> None:
+        """Store the unbound chat model used for Markdown rendering."""
+        self.response_model = response_model
 
     def __call__(self, state: AgentState) -> dict:
-        if not state.get("messages"):
+        """Render the travel_plan as Markdown. Returns {} if no plan is set."""
+        plan = state.get("travel_plan")
+        if not plan:
             return {}
 
-        has_origin = bool(state.get("current_city"))
-        has_dest = bool(state.get("destination_city"))
-        budget = state.get("total_budget")
-        trip_days = state.get("trip_days")
-
-        is_adjustment = state.get("is_adjustment", False)
-
-        if not (has_origin and has_dest and bool(budget) and bool(trip_days)):
-            return {}   
-
-        travel_data = extract_travel_data(state)
-
-        budget = state.get("total_budget")
-        trip_days = state.get("trip_days") or 3
-        
-        if budget and travel_data.get("flights") and travel_data.get("hotels"):
-            affordable = []
-            for h in travel_data["hotels"]:
-                hotel_total = h.get("price_per_night", float("inf")) * trip_days
-                for f in travel_data["flights"]:
-                    flight_price = f.get("total_price") if "total_price" in f else f.get("price", float("inf"))
-                    if flight_price + hotel_total <= budget:
-                        affordable.append(h)
-                        break 
-            travel_data["hotels"] = affordable
-
-        # Check in the code if we have the necessary data
-        has_flights = bool(travel_data.get("flights"))
-        has_hotels = bool(travel_data.get("hotels"))
-
-        # Determine the texts based on the state (adjustment or initial search)
-        if is_adjustment:
-            success_greeting = "✅ **Trip Updated Successfully!** Here are the new details based on your requested changes:"
-            no_flights_text = "⚠️ **Update Failed:** I tried to update your trip, but unfortunately, I couldn't find any available flights matching your new request."
-            no_hotels_text = "⚠️ **Update Failed:** I found flights for your new request, but I couldn't find any hotels that fit your newly adjusted budget constraints."
-        else:
-            success_greeting = "Here is your perfect travel plan!"
-            no_flights_text = f"Based on our search, we unfortunately could not find any available flights from {state.get('current_city')} to {state.get('destination_city')} at this time."
-            no_hotels_text = "Based on our search, we found flights but could not find any hotels within your specified budget."
-
-        # --- Solution: Handle failure cases directly in code, without LLM ---
-        if not has_flights:
-            return {"messages": [AIMessage(content=no_flights_text, name="formatter_output")]}
-        
-        if not has_hotels:
-            return {"messages": [AIMessage(content=no_hotels_text, name="formatter_output")]}
-
-        # --- Call LLM only in case of success with a clean prompt ---
-        flights = travel_data.get("flights", [])
-        hotels = travel_data.get("hotels", [])
-
-        if not flights:
-            flight_section = "Based on our search, we unfortunately could not find any available flights from your origin to the destination at this time."
-        elif "route" in flights[0]:
-            flight_section = """
-            Based on our search, we have found the following connecting flight option:
-            **Total Flight Price:** [total_price with correct currency symbol]
-            * **Leg 1:** [from] ➔ [to] | **Airline:** [airline] (**Flight:** [flight])
-            * **Leg 2:** [from] ➔ [to] | **Airline:** [airline] (**Flight:** [flight])
-            """
-        else:
-            flight_section = """
-            Based on our search, we have found the following flight option:
-            * **Airline:** [Airline Name]
-            * **Flight Number:** [Flight Number]
-            * **Price:** [Price with correct currency symbol]
-            """
-
-        if not hotels:
-            hotel_section = "No affordable hotels were found within your budget."
-        else:
-            hotel_section = """
-            Based on our search, we've found excellent options to suit different preferences:
-
-            **1. [Hotel Name]**
-                * [Star Emojis] ([Number] Stars)
-                * **Price Per Night:** [Price with correct currency symbol]
-            
-            [Repeat numbered list for additional hotels]
-            """
-
-        weather_info = travel_data.get("weather", {})
-        best_time_info = travel_data.get("best_time", {})
-
-        weather_str = "\n".join([f"* **{season.capitalize()}:** {temp}" for season, temp in weather_info.items()]) if weather_info else "Data not available."
-        best_time_str = best_time_info.get("months", "Data not available.") if isinstance(best_time_info, dict) else "Data not available."
-        
-        system_prompt = f"""
-        You are a strict data formatter. Your ONLY job is to output the provided <data> into the EXACT Markdown template below.
-
-        CRITICAL RULES:
-        1. DO NOT add conversational filler.
-        2. FORCE CURRENCY: You MUST use the '$' symbol for ALL prices and budgets. DO NOT use '€' or '£'.
-        3. DO NOT ask the user any questions.
-        4. If any section has no data, omit that section entirely — do not write placeholder text.
-        5. Do not invent any data. Use ONLY what is in the <data>.
-        6. STRICT CONDITIONAL LOGIC: Follow the IF/ELSE logic in the template perfectly.
-        7. TOTAL PRICE RULE: Use the lowest total_estimate from trip_cost_calculations as "Total Price". DO NOT recompute.
-           If trip_cost_calculations is empty, write "N/A".
-        8. YOU MUST USE THIS EXACT TEMPLATE:
-
-        {success_greeting}
-        ### ✨ **Your {state.get("destination_city")} Escape** ✨
-
-        **Destination:** {state.get("destination_city")}
-        **Total Budget:** ${budget}
-        **Trip Days:** {trip_days}
-
-        **Total Price:** [Use the lowest total_estimate, with $ symbol]
-
-        ---
-
-        ### ✈️ **Your Flight Details**
-        {flight_section}
-
-        ---
-
-        ### 🏨 **Accommodation Options in {state.get("destination_city")}**
-        {hotel_section}
-        
-        ### 🌤️ **Destination Insights**
-        * **Best Time to Visit:** {best_time_str}
-        * **Average Weather:** {weather_str}
-
-        ---
-
-        ### 🎯 **Things To Do in [Destination City]**
-        [IF activities FOUND IN DATA: list up to 5 activities in this format]
-        **1. [Activity Name]** — [Category] — $[Price]
-        [Repeat for each activity, max 5]
-        [IF no activities in data: omit this section entirely]
-
-        ---
-        [Appropriate closing sign-off]
-        """
-
-        messages_to_pass = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"<data>\n{travel_data}\n</data>"},
-        ]
-
-        response = self.extraction_model.invoke(messages_to_pass)
+        response = self.response_model.invoke([
+            {"role": "system", "content": _FORMATTER_PROMPT},
+            {
+                "role": "user",
+                "content": (
+                    "<travel_plan>\n"
+                    f"{json.dumps(plan, indent=2, sort_keys=True)}\n"
+                    "</travel_plan>"
+                ),
+            },
+        ])
         response.name = "formatter_output"
 
         return {"messages": [response]}
