@@ -114,18 +114,17 @@ class IntentClassification(BaseModel):
     """Classify the user's primary intent to route them to the correct agent."""
     
     intent: Literal[
-        "new_travel_plan", 
-        "update_travel_plan", 
-        "recommendations" #, 
-        # "general_interaction", 
-        # "other"
+        "new_travel_plan",
+        "update_travel_plan",
+        "recommendations",
+        "general_chat",
     ] = Field(
         description=(
             "Classify the user's intent:\n"
             "- 'new_travel_plan': Starting a brand new trip from scratch.\n"
             "- 'update_travel_plan': Changing parameters (budget, days, destination) of an EXISTING trip.\n"
-            "- 'recommendations': Asking where to go, what to do, attractions, food, weather, OR refining search parameters (budget, days) within an ACTIVE RECOMMENDATION FLOW.\n"
-            # "- 'general_interaction': Saying hello, thanks, or casual chat.\n"
-            # "- 'other': Out of scope."
+            "- 'recommendations': Asking where to go, what destinations exist, OR refining search parameters (budget, days) within an ACTIVE RECOMMENDATION FLOW.\n"
+            "- 'general_chat': Greetings, thanks, casual chat, general travel tips (packing, visas, etiquette), "
+            "questions about a specific city's weather/activities/culture, or asking what the agent can do.\n"
         )
     )

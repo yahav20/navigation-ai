@@ -34,13 +34,34 @@ def after_adjustments(state: AgentState) -> str:
 def after_router(state: AgentState) -> str:
     """Route from the RouterNode based on the classified intent."""
     intent = state.get("intent", "other")
-    routes = {
-        "new_travel_plan": "extract_metadata",
-        "update_travel_plan": "adjustments",
-        "recommendations": "rec_agent",
-    }
 
-    return routes.get(intent, END)
+    if intent == "new_travel_plan":
+        return "extract_metadata"
+    elif intent == "update_travel_plan":
+        return "adjustments"
+    elif intent == "recommendations":
+        return "rec_agent"
+    elif intent == "general_chat":
+        return "general_chat"
+    else:
+        return END
+
+
+CHAT_MAX_STEPS = 2
+
+
+def chat_should_continue(state: AgentState) -> str:
+    """Route to chat_tools if the agent issued tool calls, otherwise go to summary."""
+    last_message = state["messages"][-1]
+    step_count = state.get("step_count", 0)
+
+    if step_count >= CHAT_MAX_STEPS:
+        return "summary"
+
+    if getattr(last_message, "tool_calls", None):
+        return "chat_tools"
+
+    return "summary"
 
 
 REC_MAX_STEPS = 4

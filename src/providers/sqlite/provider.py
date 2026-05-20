@@ -1,6 +1,9 @@
 """SQLite-backed data provider."""
+import logging
 import sqlite3
 from pathlib import Path
+
+_logger = logging.getLogger(__name__)
 
 from providers.sqlite.activity_queries import SQLiteActivityQueriesMixin
 from providers.sqlite.best_time_queries import SQLiteBestTimeQueriesMixin
@@ -28,10 +31,8 @@ class SQLiteDataProvider(
 
     def _query(self, sql: str, params: tuple = ()) -> list[dict]:
         if not Path(self.db_path).exists():
-            msg = f"Database not found at {self.db_path}. Run data/init_db.py first."
-            raise FileNotFoundError(
-                msg,
-            )
+            _logger.error("Database not found at %s. Run data/init_db.py first.", self.db_path)
+            raise FileNotFoundError("Travel database is unavailable. Please contact support.")
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         try:

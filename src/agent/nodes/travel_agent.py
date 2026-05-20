@@ -9,6 +9,8 @@ from langchain_core.runnables import Runnable
 from agent.models import TravelPlan, TravelPlanCuration
 from agent.state import AgentState
 from tools.dependencies import data_provider
+from security import SECURITY_RULES
+
 
 SEASONS = ("Spring", "Summer", "Autumn", "Winter")
 
