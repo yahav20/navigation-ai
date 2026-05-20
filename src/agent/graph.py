@@ -6,7 +6,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode
 
-from agent.edge import after_enrichment, after_router, chat_should_continue, rec_should_continue, should_continue
+from agent.edge import after_flight_search, after_enrichment, after_router, chat_should_continue, rec_should_continue , after_travel_agent
 from agent.llm import get_models
 from agent.nodes.adjustments import AdjustmentsNode
 from agent.nodes.enrichment import EnrichmentNode
