@@ -1,8 +1,8 @@
-"""SQL mixin for recommendation-specific destination queries."""
+"""SQL mixin for advisor-specific destination queries."""
 
 
-class RecommendationQueriesMixin:
-    """Queries needed by the recommendation agent that don't exist in the core provider."""
+class AdvisorQueriesMixin:
+    """Queries needed by the advisor agent that don't exist in the core provider."""
 
     def search_by_activity_category(self, category: str) -> list[dict]:
         """Return cities that have at least one activity matching the given category."""
@@ -164,7 +164,7 @@ class RecommendationQueriesMixin:
             (city.strip().lower(),),
         )
         if not rows:
-            return {"message": f"No duration recommendation found for '{city}'."}
+            return {"message": f"No duration advisor found for '{city}'."}
         return {
             "city": city,
             "min_days": rows[0]["min_days"],

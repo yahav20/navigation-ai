@@ -23,12 +23,12 @@ class RouterNode:
         # Provide existing context to the router so it knows if we are mid-planning
         has_active_trip = bool(state.get("destination_city") or state.get("current_city"))
         last_intent = state.get("intent", "")
-        is_rec_flow = last_intent == "recommendations" and not has_active_trip
+        is_advisor_flow = last_intent == "advisor" and not has_active_trip
 
         if has_active_trip:
             trip_status = "ACTIVE TRIP IN PROGRESS"
-        elif is_rec_flow:
-            trip_status = "ACTIVE RECOMMENDATION FLOW (user is browsing destination options — budget/day changes refine the search)"
+        elif is_advisor_flow:
+            trip_status = "ACTIVE ADVISOR FLOW (user is browsing destination options — budget/day changes refine the search)"
         else:
             trip_status = "NO ACTIVE TRIP (Start from scratch)"
 
@@ -40,10 +40,10 @@ class RouterNode:
         - Destination: {state.get("destination_city", "None")}
         - Budget: {state.get("total_budget", "None")}
 
-        TRANSITION RULE (critical): If the system is in ACTIVE RECOMMENDATION FLOW and the user
+        TRANSITION RULE (critical): If the system is in ACTIVE ADVISOR FLOW and the user
         says something like "plan this trip", "let's go", "book this", "sounds good let's do it",
         "I want to go there", or any phrase that signals they are ready to commit to a trip —
-        classify as 'new_travel_plan', NOT 'recommendations'. The user is transitioning from
+        classify as 'new_travel_plan', NOT 'advisor'. The user is transitioning from
         browsing destinations to starting actual trip planning.
 
         User message: "{last_msg.content}"
@@ -52,11 +52,11 @@ class RouterNode:
         classification: IntentClassification = self.classification_model.invoke(prompt)
 
         # Guardrail: If user tries to update but no active trip exists, convert to new plan
-        # Exception: if we were in a recommendations flow, keep it as recommendations
+        # Exception: if we were in an advisor flow, keep it as advisor
         final_intent = classification.intent
         if final_intent == "update_travel_plan" and not has_active_trip:
-            if state.get("intent") == "recommendations":
-                final_intent = "recommendations"
+            if state.get("intent") == "advisor":
+                final_intent = "advisor"
             else:
                 final_intent = "new_travel_plan"
 

@@ -83,8 +83,8 @@ def after_router(state: AgentState) -> str:
         return "extract_metadata"
     elif intent == "update_travel_plan":
         return "adjustments"
-    elif intent == "recommendations":
-        return "rec_planner"
+    elif intent == "advisor":
+        return "advisor_planner"
     else:
         return END
 

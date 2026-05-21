@@ -1,4 +1,4 @@
-"""LangChain tools for the recommendation agent."""
+"""LangChain tools for the advisor agent."""
 from langchain_core.tools import tool
 
 from providers.sqlite.provider import SQLiteDataProvider
@@ -81,8 +81,8 @@ def find_destinations_within_budget(origin: str, total_budget: float, trip_days:
 
 
 @tool
-def get_trip_duration_recommendation(city: str) -> dict:
-    """Get a recommendation for how many days to spend in a city.
+def get_trip_duration_advisor(city: str) -> dict:
+    """Get advisor info on how many days to spend in a city.
 
     Returns the suggested minimum and maximum number of days, with an explanation
     of what each range covers.
@@ -107,14 +107,14 @@ def get_city_overview(city: str) -> dict:
     return _provider.get_city_profile(city)
 
 
-rec_tools = [
+advisor_tools = [
     find_destinations_by_vibe,
     find_destinations_by_tag,
     get_reachable_destinations,
     find_destinations_within_budget_auto,
     find_destinations_within_budget,
     get_city_overview,
-    get_trip_duration_recommendation,
+    get_trip_duration_advisor,
     fetch_activities,
     get_best_time_to_visit,
     get_average_weather,

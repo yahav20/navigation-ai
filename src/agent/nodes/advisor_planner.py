@@ -1,4 +1,4 @@
-"""Planner node — decides which tools to call and in what order for a recommendation query."""
+"""Planner node — decides which tools to call and in what order for an advisor query."""
 from typing import Literal
 
 from langchain_core.language_models import BaseChatModel
@@ -53,7 +53,7 @@ ToolName = Literal[
     "find_destinations_within_budget_auto",
     "find_destinations_within_budget",
     "get_city_overview",
-    "get_trip_duration_recommendation",
+    "get_trip_duration_advisor",
     "fetch_activities",
     "get_best_time_to_visit",
     "get_average_weather",
@@ -63,7 +63,7 @@ ToolName = Literal[
 class PlannedToolCall(BaseModel):
     tool_name: ToolName = Field(description="Exact name of the tool to call")
     city: str | None = Field(default=None, description=(
-        "City name — required for get_city_overview, get_trip_duration_recommendation, "
+        "City name — required for get_city_overview, get_trip_duration_advisor, "
         "fetch_activities, get_best_time_to_visit, get_average_weather"
     ))
     tag: str | None = Field(default=None, description=(
@@ -94,7 +94,7 @@ class PlannedToolCall(BaseModel):
     ))
 
 
-class RecPlan(BaseModel):
+class AdvisorPlan(BaseModel):
     steps: list[PlannedToolCall] = Field(description="Ordered list of tool calls to execute, maximum 3")
 
 
@@ -163,7 +163,7 @@ Examples:
 # ---------------------------------------------------------------------------
 
 def _format_last_results(results: list[dict]) -> str:
-    """Summarise rec_last_tool_results into a compact, human-readable string."""
+    """Summarise advisor_last_tool_results into a compact, human-readable string."""
     lines = []
     for r in results:
         tool_name = r.get("tool_name", "?")
@@ -196,7 +196,7 @@ def _format_last_results(results: list[dict]) -> str:
 # System prompt
 # ---------------------------------------------------------------------------
 
-_PLANNER_SYSTEM_PROMPT = """You are a travel recommendation planning assistant.
+_PLANNER_SYSTEM_PROMPT = """You are a travel advisor planning assistant.
 Your ONLY job is to decide which tools to call — and in what order — to answer the user's travel question.
 You do NOT answer the question yourself. An executor will run the tools and a formatter will write the response.
 
@@ -253,7 +253,7 @@ TOOL REFERENCE — WHEN TO USE EACH AND WHICH FIELDS TO SET:
     -> When the user asks about a specific destination in general ("what is Tokyo like?", "when to visit Paris?")
     -> Returns activity types, best visit months, and seasonal temperatures in one call
 
-- get_trip_duration_recommendation
+- get_trip_duration_advisor
     Set: city = <city>
     -> When the user asks "how many days should I spend in X?" or "is N days enough for X?"
 
@@ -318,7 +318,7 @@ RULE 0 — BUDGET WITHOUT ORIGIN (check this FIRST before any other rule):
    -> Maximum 2 tools total for city-overview questions
 
 9. User asks how many days for a city:
-   -> Plan: get_trip_duration_recommendation (city=<city>) for each city mentioned, no other tools
+   -> Plan: get_trip_duration_advisor (city=<city>) for each city mentioned, no other tools
 
 10. User asks "what budget do I need?" or "how much would it cost?":
     -> If trip_days is known: find_destinations_within_budget (origin=<city>, total_budget=99999, trip_days=<d>)
@@ -339,7 +339,7 @@ Apply this mapping to both KNOWN USER CONTEXT and the user's message:
 PLANNING DISCIPLINE — CRITICAL:
 - Maximum 3 tool calls. Usually 1-2 is enough.
 - A simple question (weather, duration, single-city overview) needs exactly 1 tool call.
-- Do NOT plan fetch_activities for destination recommendation questions.
+- Do NOT plan fetch_activities for destination advisor questions.
 - Do NOT plan get_reachable_destinations if you have no origin city to use.
 - Do NOT plan tools whose required fields (origin, city) are completely unknown — except when a
   sensible default exists (e.g. find_destinations_by_tag with tag="city-break" needs no origin).
@@ -352,11 +352,11 @@ PLANNING DISCIPLINE — CRITICAL:
 # Node
 # ---------------------------------------------------------------------------
 
-class RecPlannerNode:
+class AdvisorPlannerNode:
     """Generate an ordered tool-call plan from the user's advisory question."""
 
     def __init__(self, extraction_model: BaseChatModel) -> None:
-        self.planner = extraction_model.with_structured_output(RecPlan, method="function_calling")
+        self.planner = extraction_model.with_structured_output(AdvisorPlan, method="function_calling")
         self.extraction_model = extraction_model
 
     def __call__(self, state: AgentState) -> dict:
@@ -367,7 +367,7 @@ class RecPlannerNode:
             (m for m in reversed(messages) if getattr(m, "type", "") == "human"), None
         )
         if not last_human:
-            return {"rec_plan": []}
+            return {"advisor_plan": []}
 
         # Fresh questions should not bleed context from previous tool turns
         is_fresh = not _is_followup(self.extraction_model, summary, last_human.content)
@@ -381,10 +381,10 @@ class RecPlannerNode:
             ctx_parts.append(f"Trip duration: {state['trip_days']} days")
         state_context = ", ".join(ctx_parts) if ctx_parts else "None established yet."
 
-        shown_cities = state.get("rec_shown_cities") or []
+        shown_cities = state.get("advisor_shown_cities") or []
         shown_cities_str = ", ".join(shown_cities) if shown_cities else "None yet."
 
-        last_results = state.get("rec_last_tool_results") or []
+        last_results = state.get("advisor_last_tool_results") or []
         last_results_str = _format_last_results(last_results) if last_results else "None."
 
         system_prompt = _PLANNER_SYSTEM_PROMPT.format(
@@ -397,14 +397,14 @@ class RecPlannerNode:
             vibe_mapping=_VIBE_MAPPING,
         )
 
-        plan: RecPlan = self.planner.invoke([
+        plan: AdvisorPlan = self.planner.invoke([
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": last_human.content},
         ])
 
         sanitized = _sanitize_plan(plan.steps)
         return {
-            "rec_plan": [
+            "advisor_plan": [
                 {"tool_name": step.tool_name, "args": _step_to_args(step)}
                 for step in sanitized
             ]

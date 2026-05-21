@@ -1,4 +1,4 @@
-"""Formatter node — turns raw tool data into a warm, conversational recommendation."""
+"""Formatter node — turns raw tool data into a warm, conversational advisor response."""
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import RemoveMessage
 from pydantic import BaseModel, Field
@@ -194,8 +194,8 @@ Tone-matching instructions:
 """
 
 
-class RecommendationFormatterNode:
-    """Generate the final conversational recommendation response from gathered tool data."""
+class AdvisorFormatterNode:
+    """Generate the final conversational advisor response from gathered tool data."""
 
     def __init__(self, model: BaseChatModel) -> None:
         self.model = model
@@ -236,7 +236,7 @@ class RecommendationFormatterNode:
 
         return {
             "messages": remove_ops + [response],
-            "rec_shown_cities": shown_cities,
+            "advisor_shown_cities": shown_cities,
         }
 
     def _extract_cities(self, response_text: str, state: AgentState) -> list[str]:
@@ -247,7 +247,7 @@ class RecommendationFormatterNode:
                     "role": "system",
                     "content": (
                         "Extract every destination city name explicitly mentioned in this "
-                        "travel recommendation response. Return only real city names — "
+                        "travel advisor response. Return only real city names — "
                         "no countries, regions, or generic phrases."
                     ),
                 },
@@ -257,5 +257,5 @@ class RecommendationFormatterNode:
         except Exception:  # noqa: BLE001
             new_cities = set()
 
-        existing = set(state.get("rec_shown_cities") or [])
+        existing = set(state.get("advisor_shown_cities") or [])
         return sorted(existing | new_cities)

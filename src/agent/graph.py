@@ -18,9 +18,9 @@ from agent.nodes.node_alternative import (
     AlternativeDestinationNode,
     FormatterAlternativeNode,
 )
-from agent.nodes.rec_planner import RecPlannerNode
-from agent.nodes.rec_executor import RecExecutorNode
-from agent.nodes.rec_formatter import RecommendationFormatterNode
+from agent.nodes.advisor_planner import AdvisorPlannerNode
+from agent.nodes.advisor_executor import AdvisorExecutorNode
+from agent.nodes.advisor_formatter import AdvisorFormatterNode
 from agent.nodes.summary import SummaryNode
 from agent.state import AgentState
 from tools import core_tools
@@ -49,11 +49,11 @@ def build_graph(
     formatter_alternative = FormatterAlternativeNode(extraction_model)
     router_node = RouterNode(extraction_model)
 
-    # 2. Create nodes for the recommendation path (uses its own model)
-    _, rec_extraction_model = get_models(provider, mode="recommendation")
-    rec_planner_node = RecPlannerNode(rec_extraction_model)
-    rec_executor_node = RecExecutorNode()
-    rec_formatter_node = RecommendationFormatterNode(rec_extraction_model)
+    # 2. Create nodes for the advisor path (uses its own model)
+    _, advisor_extraction_model = get_models(provider, mode="advisor")
+    advisor_planner_node = AdvisorPlannerNode(advisor_extraction_model)
+    advisor_executor_node = AdvisorExecutorNode()
+    advisor_formatter_node = AdvisorFormatterNode(advisor_extraction_model)
 
     # 3. Build the graph
     builder = StateGraph(AgentState)
@@ -70,10 +70,10 @@ def build_graph(
     builder.add_node("formatter_alternative", formatter_alternative)
     builder.add_node("summary", summary_node)
 
-    # Recommendation nodes
-    builder.add_node("rec_planner", rec_planner_node)
-    builder.add_node("rec_executor", rec_executor_node)
-    builder.add_node("rec_formatter", rec_formatter_node)
+    # Advisor nodes
+    builder.add_node("advisor_planner", advisor_planner_node)
+    builder.add_node("advisor_executor", advisor_executor_node)
+    builder.add_node("advisor_formatter", advisor_formatter_node)
 
     # 4. Define edges — travel planning path
     builder.add_edge(START, "router")
@@ -84,7 +84,7 @@ def build_graph(
         {
             "extract_metadata": "extract_metadata",
             "adjustments": "adjustments",
-            "rec_planner": "rec_planner",
+            "advisor_planner": "advisor_planner",
             END: END,
         },
     )
@@ -107,10 +107,10 @@ def build_graph(
     builder.add_edge("formatter", "summary")
     builder.add_edge("summary", END)
 
-    # 5. Define edges — recommendation path
-    builder.add_edge("rec_planner", "rec_executor")
-    builder.add_edge("rec_executor", "rec_formatter")
-    builder.add_edge("rec_formatter", "summary")
+    # 5. Define edges — advisor path
+    builder.add_edge("advisor_planner", "advisor_executor")
+    builder.add_edge("advisor_executor", "advisor_formatter")
+    builder.add_edge("advisor_formatter", "summary")
 
     if checkpointer is None:
         checkpointer = MemorySaver(serde=JsonPlusSerializer())

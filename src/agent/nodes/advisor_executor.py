@@ -6,9 +6,9 @@ from typing import Any
 from langchain_core.messages import AIMessage
 
 from agent.state import AgentState
-from tools.rec_tools import rec_tools
+from tools.advisor_tools import advisor_tools
 
-_tool_map = {t.name: t for t in rec_tools}
+_tool_map = {t.name: t for t in advisor_tools}
 
 # Tools where an empty result warrants a fallback attempt
 _DISCOVERY_TOOLS = frozenset({"find_destinations_by_tag", "find_destinations_by_vibe"})
@@ -94,17 +94,17 @@ def _format_result(tool_name: str, args: dict, result: Any) -> str:
 # Node
 # ---------------------------------------------------------------------------
 
-class RecExecutorNode:
+class AdvisorExecutorNode:
     """Execute planned tool calls in parallel and emit a DATA COLLECTED block."""
 
     def __call__(self, state: AgentState) -> dict:
-        plan = state.get("rec_plan") or []
+        plan = state.get("advisor_plan") or []
 
         if not plan:
             content = "DATA COLLECTED:\n- No data gathered (plan was empty).\nREADY FOR FORMATTING."
             return {
                 "messages": [AIMessage(content=content)],
-                "rec_last_tool_results": [],
+                "advisor_last_tool_results": [],
             }
 
         # --- Run all steps in parallel (all are independent DB reads) ---
@@ -146,7 +146,7 @@ class RecExecutorNode:
                         content = f"DATA COLLECTED:\n{body}\nREADY FOR FORMATTING."
                         return {
                             "messages": [AIMessage(content=content)],
-                            "rec_last_tool_results": tool_results,
+                            "advisor_last_tool_results": tool_results,
                         }
                     break  # only try one fallback
 
@@ -164,5 +164,5 @@ class RecExecutorNode:
         content = f"DATA COLLECTED:\n{body}\nREADY FOR FORMATTING."
         return {
             "messages": [AIMessage(content=content)],
-            "rec_last_tool_results": tool_results,
+            "advisor_last_tool_results": tool_results,
         }

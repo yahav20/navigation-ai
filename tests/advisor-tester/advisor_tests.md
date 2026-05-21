@@ -1,6 +1,6 @@
-# Recommendation Agent Test Suite
+# Advisor Agent Test Suite
 
-Tests for the Plan-and-Execute recommendation agent (`rec_planner → rec_executor → rec_formatter`).
+Tests for the Plan-and-Execute advisor agent (`advisor_planner → advisor_executor → advisor_formatter`).
 
 Each test specifies:
 - **Input** — the user message(s)
@@ -24,19 +24,19 @@ Each test specifies:
 - Exactly 1 tool in plan
 - Response includes months and a reason
 - No invented landmarks or activities
-- `rec_shown_cities` contains "Tokyo"
+- `advisor_shown_cities` contains "Tokyo"
 **Status:** T
 
 ---
 
 ### A2 — Trip duration for a single city
 **Input:** `How many days should I spend in London?`
-**Expected plan:** `get_trip_duration_recommendation(city="London")` — 1 tool
+**Expected plan:** `get_trip_duration_advisor(city="London")` — 1 tool
 **Expected behavior:** Response gives a min–max day range with an explanation of what each covers.
 **Pass criteria:**
 - Exactly 1 tool in plan
 - Response includes a day range (e.g. "5–7 days")
-- `rec_shown_cities` contains "London"
+- `advisor_shown_cities` contains "London"
 **Status:** T
 
 ---
@@ -60,7 +60,7 @@ Each test specifies:
 **Pass criteria:**
 - Exactly 1 tool; tag="romantic"
 - `get_reachable_destinations` NOT called (no origin given)
-- All mentioned cities appear in `rec_shown_cities`
+- All mentioned cities appear in `advisor_shown_cities`
 - Response ends with a question about the user's origin or a closer
 **Status:** T
 
@@ -84,8 +84,8 @@ Each test specifies:
 **Expected behavior:** Lists activities by category. Does not suggest alternative destinations.
 **Pass criteria:**
 - Exactly 1 tool; no destination-discovery tools called
-- Response is activity-focused, not destination-recommendation-focused
-- `rec_shown_cities` contains "Tokyo"
+- Response is activity-focused, not destination-advisor-focused
+- `advisor_shown_cities` contains "Tokyo"
 **Status:** T
 
 ---
@@ -98,7 +98,7 @@ Each test specifies:
 - Exactly 1 tool; `find_destinations_within_budget` NOT used (no days given)
 - `get_reachable_destinations` NOT called alongside the budget tool
 - Response includes cost figures
-- All cities in `rec_shown_cities`
+- All cities in `advisor_shown_cities`
 **Status:** T
 
 ---
@@ -139,7 +139,7 @@ Each test specifies:
 **Pass criteria:**
 - Exactly 2 tools; both target "Berlin"
 - No invented attractions (only tool-returned ones)
-- `rec_shown_cities` contains "Berlin"
+- `advisor_shown_cities` contains "Berlin"
 **Status:** T
 
 ---
@@ -152,7 +152,7 @@ Each test specifies:
 - Exactly 2 tools
 - Budget tool NOT called
 - Cross-referencing visible in response (reachable + matching tag highlighted first)
-- All mentioned cities in `rec_shown_cities`
+- All mentioned cities in `advisor_shown_cities`
 **Status:** T
 
 ---
@@ -164,19 +164,19 @@ Each test specifies:
 **Pass criteria:**
 - Both tools called with the nightlife/Nightlife arg
 - No origin-based filtering (no origin given)
-- All mentioned cities in `rec_shown_cities`
+- All mentioned cities in `advisor_shown_cities`
 **Status:** T
 
 ---
 
 ### B4 — Multi-city duration split
 **Input:** `I want to visit both Rome and Amsterdam. How should I split my time?`
-**Expected plan:** `get_trip_duration_recommendation(city="Rome")` + `get_trip_duration_recommendation(city="Amsterdam")` — 2 tools
+**Expected plan:** `get_trip_duration_advisor(city="Rome")` + `get_trip_duration_advisor(city="Amsterdam")` — 2 tools
 **Expected behavior:** Gives a day range for each city and a suggested split.
 **Pass criteria:**
 - Exactly 2 tools, one per city
 - Response suggests specific day ranges for both
-- `rec_shown_cities` contains both "Rome" and "Amsterdam"
+- `advisor_shown_cities` contains both "Rome" and "Amsterdam"
 **Status:** T
 
 ---
@@ -188,7 +188,7 @@ Each test specifies:
 **Pass criteria:**
 - At most 2 tools; no destination-discovery tools called
 - Both questions answered from tool data only
-- `rec_shown_cities` contains "Tokyo"
+- `advisor_shown_cities` contains "Tokyo"
 **Status:** T
 
 ---
@@ -201,7 +201,7 @@ Each test specifies:
 - At least 1 tool is find_destinations_by_vibe(category="Family")
 - `fetch_activities` NOT called (user didn't name a specific city)
 - Response filters out adult-oriented activities
-- All mentioned cities in `rec_shown_cities`
+- All mentioned cities in `advisor_shown_cities`
 **Status:** T
 
 ---
@@ -228,11 +228,11 @@ Each test specifies:
 **Turn 2:** `Tell me more about Paris — when should I visit and how many days?`
 
 **Expected Turn 1 plan:** `find_destinations_by_tag(tag="romantic")`
-**Expected Turn 2 plan:** `get_city_overview(city="Paris")` — classified as follow-up; `rec_shown_cities` from Turn 1 provides context
+**Expected Turn 2 plan:** `get_city_overview(city="Paris")` — classified as follow-up; `advisor_shown_cities` from Turn 1 provides context
 **Pass criteria:**
 - Turn 2 is detected as a follow-up (summary passed to planner)
 - Turn 2 plan does NOT re-call `find_destinations_by_tag`
-- `rec_shown_cities` after Turn 2 contains cities from both turns
+- `advisor_shown_cities` after Turn 2 contains cities from both turns
 - Turn 2 response answers only the Paris question
 **Status:** ?
 
@@ -248,7 +248,7 @@ Each test specifies:
 - Turn 2 detected as fresh (is_followup=False)
 - Turn 2 response makes no reference to Tokyo
 - `find_destinations_by_vibe` called without any Tokyo filter
-- `rec_shown_cities` accumulates cities from both turns
+- `advisor_shown_cities` accumulates cities from both turns
 **Status:** ?
 
 ---
@@ -273,25 +273,25 @@ Each test specifies:
 **Turn 2:** `And what about Amsterdam in winter?`
 
 **Expected Turn 1 plan:** `get_average_weather(city="Amsterdam", season="Summer")`
-**Expected Turn 2 plan:** `get_average_weather(city="Amsterdam", season="Winter")` — follow-up; planner sees `rec_last_tool_results` showing summer already fetched; does NOT re-fetch summer
+**Expected Turn 2 plan:** `get_average_weather(city="Amsterdam", season="Winter")` — follow-up; planner sees `advisor_last_tool_results` showing summer already fetched; does NOT re-fetch summer
 **Pass criteria:**
 - Turn 2 plan has exactly 1 tool with season="Winter"
 - Turn 2 response answers winter only (no duplication of summer data)
-- `rec_shown_cities` contains "Amsterdam" after both turns
+- `advisor_shown_cities` contains "Amsterdam" after both turns
 **Status:** ?
 
 ---
 
-### C5 — Transition from rec to planning (rec_shown_cities handoff)
+### C5 — Transition from rec to planning (advisor_shown_cities handoff)
 **Turn 1:** `I'm from Tel Aviv with $800. Where can I go?`
 **Turn 2:** `Sounds great, let's plan a trip to [first city returned]!`
 
 **Expected Turn 1 plan:** `find_destinations_within_budget_auto(origin="Tel Aviv", total_budget=800)`
-**Expected Turn 2 routing:** Router classifies as `new_travel_plan` (transition intent); `rec_shown_cities` from Turn 1 is available so the planning path can resolve the city reference
+**Expected Turn 2 routing:** Router classifies as `new_travel_plan` (transition intent); `advisor_shown_cities` from Turn 1 is available so the planning path can resolve the city reference
 **Pass criteria:**
-- Turn 2 intent = "new_travel_plan" (not "recommendations")
+- Turn 2 intent = "new_travel_plan" (not "advisor")
 - Planning path activated (enrichment node, not rec_planner)
-- `rec_shown_cities` persists so destination can be resolved
+- `advisor_shown_cities` persists so destination can be resolved
 **Status:** ?
 
 ---
@@ -307,7 +307,7 @@ Each test specifies:
 **Pass criteria:**
 - Fallback fires if the original tag returns empty
 - Response is transparent ("no exact match — here are some general options")
-- Fallback cities appear in `rec_shown_cities`
+- Fallback cities appear in `advisor_shown_cities`
 - No invented jungle destinations
 **Status:** ?
 
@@ -332,7 +332,7 @@ Each test specifies:
 - `get_reachable_destinations` NOT in plan
 - No "no flights" language (user hasn't shared origin)
 - Response invites user to share origin
-- `rec_shown_cities` populated with beach cities
+- `advisor_shown_cities` populated with beach cities
 **Status:** T
 
 ---
@@ -360,12 +360,12 @@ Each test specifies:
 
 ---
 
-### D6 — rec_last_tool_results prevents redundant re-fetch
+### D6 — advisor_last_tool_results prevents redundant re-fetch
 **Turn 1:** `What can I do in Amsterdam?`
 **Turn 2:** `What about nightlife there specifically?`
 
 **Expected Turn 1 plan:** `fetch_activities(city="Amsterdam")`
-**Expected Turn 2 plan:** *(no new tool call needed — activities already in rec_last_tool_results)* — planner should note activities were already fetched and filter the existing data rather than re-fetching
+**Expected Turn 2 plan:** *(no new tool call needed — activities already in advisor_last_tool_results)* — planner should note activities were already fetched and filter the existing data rather than re-fetching
 **Pass criteria:**
 - Turn 2 plan either has 0 tool calls (uses cached data) OR calls a targeted tool like `find_destinations_by_tag(tag="nightlife")` for cross-reference — but does NOT re-call `fetch_activities("Amsterdam")`
 - Turn 2 response is narrowed to nightlife activities from the previous result
@@ -403,4 +403,4 @@ Each test specifies:
 | D3  | No reachability tool without origin        | 1     | N          | T      |
 | D4  | No-hallucination: NYC options              | 1     | N          | T      |
 | D5  | Budget stated, no origin                   | 1     | N          | ?      |
-| D6  | rec_last_tool_results prevents re-fetch    | 0–1   | Y          | ?      |
+| D6  | advisor_last_tool_results prevents re-fetch    | 0–1   | Y          | ?      |

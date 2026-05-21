@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Automated test runner for the Plan-and-Execute recommendation agent.
+Automated test runner for the Plan-and-Execute advisor agent.
 
 Each test drives the agent through one or more turns, then checks:
   - Which tools the planner chose (rec_plan state field)
@@ -106,8 +106,8 @@ TESTS: list[TestCase] = [
     TestCase("A2", "A", "Trip duration for London", [
         TurnSpec(
             "How many days should I spend in London?",
-            must_have_tools=["get_trip_duration_recommendation"],
-            must_have_tool_args=[{"tool_name": "get_trip_duration_recommendation",
+            must_have_tools=["get_trip_duration_advisor"],
+            must_have_tool_args=[{"tool_name": "get_trip_duration_advisor",
                                   "arg_key": "city", "arg_value": "London"}],
             must_not_have_tools=["find_destinations_by_tag", "find_destinations_by_vibe",
                                  "get_reachable_destinations"],
@@ -244,7 +244,7 @@ TESTS: list[TestCase] = [
     TestCase("B4", "B", "Multi-city duration: Rome and Amsterdam", [
         TurnSpec(
             "I want to visit both Rome and Amsterdam. How should I split my time?",
-            must_have_tools=["get_trip_duration_recommendation"],
+            must_have_tools=["get_trip_duration_advisor"],
             min_tools=2,
             max_tools=2,
             must_show_cities=["Rome", "Amsterdam"],
@@ -296,7 +296,7 @@ TESTS: list[TestCase] = [
         TurnSpec(
             "Tell me more about Paris — when should I visit and how many days?",
             must_have_one_of=["get_city_overview", "get_best_time_to_visit",
-                              "get_trip_duration_recommendation"],
+                              "get_trip_duration_advisor"],
             must_not_have_tools=["find_destinations_by_tag"],
             must_show_cities=["Paris"],
             note="Turn 2: follow-up — must not re-run the discovery tool",
@@ -466,9 +466,9 @@ def check_turn(
     skip_response_checks: bool = False,
 ) -> list[Check]:
     checks: list[Check] = []
-    plan = state.get("rec_plan") or []
+    plan = state.get("advisor_plan") or []
     tools_in_plan = [step.get("tool_name", "") for step in plan]
-    shown_cities = [c.lower() for c in (state.get("rec_shown_cities") or [])]
+    shown_cities = [c.lower() for c in (state.get("advisor_shown_cities") or [])]
 
     # --- must_have_tools: every tool in list must appear ---
     for tool in spec.must_have_tools:
@@ -535,9 +535,9 @@ def check_turn(
     for city in spec.must_show_cities:
         in_state = city.lower() in shown_cities
         checks.append(Check(
-            f"'{city}' in rec_shown_cities",
+            f"'{city}' in advisor_shown_cities",
             in_state,
-            f"rec_shown_cities: {state.get('rec_shown_cities', [])}",
+            f"advisor_shown_cities: {state.get('advisor_shown_cities', [])}",
         ))
 
     if skip_response_checks:
@@ -675,7 +675,7 @@ def print_summary(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Run recommendation agent tests",
+        description="Run advisor agent tests",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
@@ -712,7 +712,7 @@ def main() -> None:
     skip_resp = args.no_response_checks
     total = len(tests_to_run)
 
-    print(f"\n{BOLD}Recommendation Agent Test Runner{RESET}")
+    print(f"\n{BOLD}Advisor Agent Test Runner{RESET}")
     print(f"Provider: {CYAN}{CHOSEN_PROVIDER}{RESET}  |  Tests: {total}"
           + (f"  |  {YELLOW}response checks skipped{RESET}" if skip_resp else ""))
 
