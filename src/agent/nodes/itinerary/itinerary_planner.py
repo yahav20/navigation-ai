@@ -134,39 +134,40 @@ OUTPUT SCHEMA:
 """
 
     def __init__(self, response_model: BaseChatModel) -> None:
-        """Store the model used to reason and generate the structured itinerary."""
+        """Store the response model used to format the fallback text."""
         self.response_model = response_model
+
     # ------------------------------------------------------------------
     # Main entry
     # ------------------------------------------------------------------
 
     def __call__(self, state: AgentState) -> dict:
-        print("=== ITINERARY PLANNER START ===")
-        print(f"bundle exists: {bool(state.get('itinerary_data_bundle'))}")
-        print(f"bundle keys: {list(state.get('itinerary_data_bundle', {}).keys())}")
         destination = state.get("destination_city", "")
         origin = state.get("current_city", "")
         budget = state.get("total_budget", 0)
         trip_days = state.get("trip_days", 3)
         prefs = state.get("user_preferences", {})
-        
-        print(
-            "ItineraryPlannerNode: destination=%s origin=%s days=%d budget=%.0f",
-            destination, origin, trip_days, budget,
-        )
+        flight_options = state.get("flight_options", [])
 
-        # 1. משיכת הנתונים מוכנים מתוך ה-State (במקום לשלוף מה-DB)
-        # ה-DataPrepNode שעשינו קודם כבר ארז את זה בשבילנו!
-        data_bundle = state.get("itinerary_data_bundle", {})
-        
-        # נוודא שהחבילה לא ריקה לחלוטין (למקרה של תקלה קודמת)
-        if not data_bundle:
-             print("❌ EMPTY ITINERARY DATA BUNDLE - PLANNER EXIT")
-             return {
-                 "itinerary_plan": {},
-                 "itinerary_feasible": False,
-                 "itinerary_fallback_reason": "missing_data",
-             }
+        raw_bundle = state.get("itinerary_data_bundle", {})
+        print("\n================ ITINERARY PLANNER START ================")
+        print(f"📍 Route: {origin} → {destination}")
+        print(f"💰 Budget: {budget}")
+        print(f"📆 Days: {trip_days}")
+        print(f"🎯 Preferences: {prefs}")
+        print(f"✈️ Flights in state: {len(flight_options)}")
+
+        raw_bundle = state.get("itinerary_data_bundle", {})
+        print(f"📦 Raw bundle exists: {bool(raw_bundle)}")
+        print(f"📦 Raw bundle keys: {list(raw_bundle.keys()) if raw_bundle else 'EMPTY'}")
+            # 1. Collect & Filter data deterministically from the raw bundle
+        data_bundle = self._collect_data(
+            raw_bundle=raw_bundle,
+            prefs=prefs,
+            budget=budget,
+            trip_days=trip_days,
+            flight_options=flight_options,
+        )
 
         # 2. Feasibility check BEFORE calling LLM
         feasibility = self._check_feasibility(data_bundle, budget, trip_days)
@@ -193,7 +194,51 @@ OUTPUT SCHEMA:
             "itinerary_fallback_reason": None,
             "itinerary_data_bundle": data_bundle,
         }
-   
+
+    # ------------------------------------------------------------------
+    # Data collection (deterministic — no LLM)
+    # ------------------------------------------------------------------
+
+    def _collect_data(
+        self,
+        raw_bundle: dict,
+        prefs: dict,
+        budget: float,
+        trip_days: int,
+        flight_options: list[dict],
+    ) -> dict:
+        """Filter raw hotels and activities from the existing bundle by preferences."""
+
+        # Hotels
+        raw_hotels = raw_bundle.get("hotels", [])
+        hotels = [h for h in raw_hotels if _matches_preferences(h, prefs)]
+        hotels_sorted = sorted(hotels, key=lambda h: (-h.get("stars", 0), h.get("price_per_night", 9999)))
+
+        # Activities
+        raw_activities = raw_bundle.get("activities", [])
+        activities = [a for a in raw_activities if _matches_preferences(a, prefs)]
+        activities_sorted = sorted(activities, key=lambda a: -a.get("rating", 0))
+
+        weather = raw_bundle.get("weather", [])
+        best_time = raw_bundle.get("best_time", {})
+
+        # Flights already fetched — pick cheapest available
+        available_flights = [
+            f for f in flight_options
+            if str(f.get("availability", "")).lower() == "available"
+        ]
+        available_flights_sorted = sorted(available_flights, key=lambda f: f.get("price", 9999))
+
+        return {
+            "hotels": hotels_sorted[:5],          # top-5 after filtering
+            "activities": activities_sorted[:20],  # top-20 for LLM to choose from
+            "weather": weather,
+            "best_time": best_time,
+            "flights": available_flights_sorted[:3],
+            "budget": budget,
+            "trip_days": trip_days,
+            "preferences": prefs,
+        }
     # ------------------------------------------------------------------
     # Feasibility check
     # ------------------------------------------------------------------
