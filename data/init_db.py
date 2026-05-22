@@ -2,6 +2,7 @@
 
 import csv
 import io
+import json
 import os
 import sqlite3
 import urllib.request
@@ -55,19 +56,55 @@ CREATE TABLE hotels (
     stars           INTEGER NOT NULL,
     min_age         INTEGER DEFAULT 0,
     hotel_type      TEXT CHECK (hotel_type IN ('Luxury', 'Family', 'Romantic', 'Backpacker', 'Business')),
-    distance_from_center_km REAL
+    distance_from_center_km REAL,
+    breakfast_available BOOLEAN DEFAULT FALSE,
+    breakfast_price REAL,
+    amenities TEXT, 
+    is_kosher BOOLEAN DEFAULT FALSE,
+    latitude REAL,
+    longitude REAL
 );
 CREATE INDEX idx_hotels_city ON hotels(city_id);
 
+-- הטבלאות הקיימות של האטרקציות (ללא שינוי, כפי שהגדרנו קודם)
 CREATE TABLE activities (
-    id       INTEGER PRIMARY KEY AUTOINCREMENT,
-    city_id  INTEGER NOT NULL REFERENCES cities(id),
-    name     TEXT    NOT NULL,
-    category TEXT    NOT NULL,
-    price    INTEGER NOT NULL,
-    min_age  INTEGER DEFAULT 0
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    city_id INTEGER NOT NULL REFERENCES cities(id),
+    name TEXT NOT NULL,
+    categories TEXT NOT NULL, 
+    price INTEGER NOT NULL,
+    min_age INTEGER DEFAULT 0,
+    latitude REAL,
+    longitude REAL,
+    avg_duration_minutes INTEGER,
+    opening_time TEXT,
+    closing_time TEXT,
+    operating_days TEXT, 
+    best_time_of_day TEXT, 
+    food_available BOOLEAN DEFAULT FALSE,
+    requires_booking BOOLEAN DEFAULT FALSE,
+    rating REAL
 );
 CREATE INDEX idx_activities_city ON activities(city_id);
+
+-- =========================================================
+-- טבלאות חדשות: מאפייני העדפות לאטרקציות ומסעדות
+-- =========================================================
+
+-- טבלת המילון של המאפיינים האפשריים (כשר, טבעוני, נגיש וכו')
+CREATE TABLE activity_features (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT UNIQUE NOT NULL
+);
+
+-- טבלת הגישור: מקשרת בין אטרקציה ספציפית למאפיינים שלה
+CREATE TABLE activity_feature_mapping (
+    activity_id INTEGER NOT NULL,
+    feature_id INTEGER NOT NULL,
+    PRIMARY KEY (activity_id, feature_id),
+    FOREIGN KEY (activity_id) REFERENCES activities(id) ON DELETE CASCADE,
+    FOREIGN KEY (feature_id) REFERENCES activity_features(id) ON DELETE CASCADE
+);
 
 CREATE TABLE best_time_to_visit (
     id      INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -294,82 +331,119 @@ def seed_travel(conn: sqlite3.Connection) -> None:
         ],
     )
 
-    # (city, name, price_per_night, stars, min_age, hotel_type, distance_from_center_km)
     hotels = [
-        ("paris", "Hotel de Ville", 150, 3, 0, "Family", 1.0),
-        ("paris", "Luxury Ritz", 600, 5, 18, "Luxury", 0.2),
-        ("paris", "Ibis Budget Paris", 85, 2, 0, "Backpacker", 3.0),
-
-        ("london", "The Savoy", 450, 5, 18, "Luxury", 0.5),
-        ("london", "Premier Inn London", 120, 3, 0, "Business", 2.5),
-
-        ("tokyo", "Shibuya Capsule", 50, 2, 18, "Backpacker", 1.0),
-        ("tokyo", "Park Hyatt Tokyo", 700, 5, 18, "Luxury", 1.5),
-
-        ("new york", "The Plaza", 850, 5, 21, "Luxury", 0.1),
-        ("new york", "Broadway Hotel", 190, 3, 18, "Family", 1.2),
-
-        ("berlin", "Berlin Central Hostel", 40, 1, 18, "Backpacker", 2.0),
-        ("berlin", "Hilton Berlin", 220, 4, 18, "Business", 0.5),
-
-        ("amsterdam", "Canal Boutique Hotel", 180, 4, 18, "Romantic", 0.7),
-
-        ("tel aviv", "The Norman", 500, 5, 21, "Luxury", 0.8),
+        ("paris", "Hotel de Ville", 150, 3, 0, "Family", 1.0, True, 15.0, json.dumps(["WiFi", "Family Rooms"]), False, 48.8566, 2.3522),
+        ("paris", "Luxury Ritz", 600, 5, 18, "Luxury", 0.2, True, 45.0, json.dumps(["Pool", "Spa", "Gym", "Bar"]), False, 48.8680, 2.3280),
+        
+        ("london", "The Savoy", 450, 5, 18, "Luxury", 0.5, True, 35.0, json.dumps(["Pool", "Gym", "River View"]), False, 51.5100, -0.1200),
+        ("london", "Premier Inn London", 120, 3, 0, "Business", 2.5, True, 10.0, json.dumps(["WiFi", "Restaurant"]), False, 51.5300, -0.1250),
+        
+        ("tokyo", "Park Hyatt Tokyo", 700, 5, 18, "Luxury", 1.5, True, 50.0, json.dumps(["Pool", "Spa", "City View"]), False, 35.6853, 139.6912),
+        
+        ("new york", "The Plaza", 850, 5, 21, "Luxury", 0.1, True, 40.0, json.dumps(["Spa", "Gym", "Room Service"]), False, 40.7644, -73.9745),
+        
+        ("berlin", "Hilton Berlin", 220, 4, 18, "Business", 0.5, True, 25.0, json.dumps(["Pool", "Gym", "Executive Lounge"]), False, 52.5126, 13.3916),
+        
+        ("amsterdam", "Canal Boutique Hotel", 180, 4, 18, "Romantic", 0.7, True, 20.0, json.dumps(["WiFi", "Bicycle Rental"]), False, 52.3670, 4.8870),
+        
+        # מלונות בישראל עם אופציה לכשרות!
+        ("tel aviv", "The Norman", 500, 5, 21, "Luxury", 0.8, True, 30.0, json.dumps(["Rooftop Pool", "Spa", "Fine Dining"]), False, 32.0645, 34.7744),
+        ("tel aviv", "Dan Tel Aviv", 350, 5, 0, "Family", 0.1, True, 25.0, json.dumps(["Pool", "Beachfront", "Kids Club"]), True, 32.0792, 34.7672),
     ]
+    
     conn.executemany(
         """
         INSERT INTO hotels (
-            city_id,
-            name,
-            price_per_night,
-            stars,
-            min_age,
-            hotel_type,
-            distance_from_center_km
+            city_id, name, price_per_night, stars, min_age, hotel_type, 
+            distance_from_center_km, breakfast_available, breakfast_price,
+            amenities, is_kosher, latitude, longitude
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        [
-            (ids[c], n, p, s, ma, t, dist)
-            for c, n, p, s, ma, t, dist in hotels
-        ],
+        [(ids[c], n, p, s, ma, t, dist, ba, bp, am, kos, lat, lng) for c, n, p, s, ma, t, dist, ba, bp, am, kos, lat, lng in hotels],
     )
 
     activities = [
-        ("paris", "Louvre Museum", "Culture", 20, 0),
-        ("paris", "Eiffel Tower", "Sightseeing", 35, 0),
-        ("paris", "Disneyland Paris", "Family", 95, 0),
+        ("paris", "Louvre Museum", json.dumps(["Culture", "Museum", "Indoor"]), 20, 0, 48.8606, 2.3376, 180, "09:00", "18:00", "1,3,4,5,6,7", "MORNING", True, True, 4.8),
+        ("paris", "Eiffel Tower", json.dumps(["Sightseeing", "Landmark", "Outdoor"]), 35, 0, 48.8584, 2.2945, 120, "09:30", "23:45", "1,2,3,4,5,6,7", "SUNSET", True, True, 4.7),
+        ("paris", "Disneyland Paris", json.dumps(["Family", "Theme Park", "Outdoor"]), 95, 0, 48.8722, 2.7758, 480, "09:30", "21:00", "1,2,3,4,5,6,7", "MORNING", True, True, 4.5),
 
-        ("london", "London Eye", "Sightseeing", 30, 0),
-        ("london", "British Museum", "Culture", 0, 0),
-        ("london", "Pub Crawl", "Nightlife", 30, 18),
+        ("london", "London Eye", json.dumps(["Sightseeing", "Viewpoint"]), 30, 0, 51.5033, -0.1195, 60, "10:00", "20:30", "1,2,3,4,5,6,7", "SUNSET", False, True, 4.5),
+        ("london", "British Museum", json.dumps(["Culture", "Museum", "Indoor"]), 0, 0, 51.5194, -0.1270, 150, "10:00", "17:00", "1,2,3,4,5,6,7", "MORNING", True, False, 4.8),
+        ("london", "Pub Crawl", json.dumps(["Nightlife", "Bar", "Social"]), 30, 18, 51.5126, -0.1325, 240, "19:00", "23:59", "4,5,6", "NIGHT", True, True, 4.4),
 
-        ("tokyo", "Robot Cafe", "Entertainment", 60, 12),
-        ("tokyo", "Mount Fuji Day Trip", "Nature", 120, 0),
+        ("tokyo", "Robot Cafe", json.dumps(["Entertainment", "Unique", "Indoor"]), 60, 12, 35.6943, 139.7028, 90, "15:00", "23:00", "1,2,3,4,5,6,7", "EVENING", True, True, 4.1),
+        ("tokyo", "Mount Fuji Day Trip", json.dumps(["Nature", "Day Trip", "Outdoor"]), 120, 0, 35.3606, 138.7274, 600, "08:00", "18:00", "1,2,3,4,5,6,7", "MORNING", True, True, 4.9),
 
-        ("new york", "Statue of Liberty", "Sightseeing", 25, 0),
+        ("new york", "Statue of Liberty", json.dumps(["Sightseeing", "Historic", "Outdoor"]), 25, 0, 40.6892, -74.0445, 180, "09:00", "17:00", "1,2,3,4,5,6,7", "MORNING", True, True, 4.7),
 
-        ("berlin", "Berlin Wall Tour", "History", 15, 0),
-        ("berlin", "Techno Club Entry", "Nightlife", 25, 18),
+        ("berlin", "Berlin Wall Tour", json.dumps(["History", "Walking", "Outdoor"]), 15, 0, 52.5351, 13.3902, 120, "10:00", "14:00", "1,2,3,4,5,6,7", "MORNING", False, False, 4.6),
+        ("berlin", "Techno Club Entry", json.dumps(["Nightlife", "Club", "Indoor"]), 25, 18, 52.5108, 13.4318, 300, "23:59", "08:00", "5,6", "NIGHT", False, False, 4.4),
 
-        ("amsterdam", "Rijksmuseum", "Culture", 22, 0),
-        ("amsterdam", "Canal Boat Tour", "Sightseeing", 18, 0),
+        ("amsterdam", "Rijksmuseum", json.dumps(["Culture", "Museum", "Indoor"]), 22, 0, 52.3600, 4.8852, 150, "09:00", "17:00", "1,2,3,4,5,6,7", "AFTERNOON", True, True, 4.8),
+        ("amsterdam", "Canal Boat Tour", json.dumps(["Sightseeing", "Relaxing", "Outdoor"]), 18, 0, 52.3780, 4.9000, 75, "10:00", "21:00", "1,2,3,4,5,6,7", "SUNSET", False, True, 4.5),
     ]
     conn.executemany(
         """
         INSERT INTO activities (
-            city_id,
-            name,
-            category,
-            price,
-            min_age
+            city_id, name, categories, price, min_age,
+            latitude, longitude, avg_duration_minutes,
+            opening_time, closing_time, operating_days,
+            best_time_of_day, food_available, requires_booking, rating
         )
-        VALUES (?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [
-            (ids[c], n, cat, p, ma)
-            for c, n, cat, p, ma in activities
+            (ids[c], n, cat, p, ma, lat, lng, dur, op, cl, days, bt, food, book, rat)
+            for c, n, cat, p, ma, lat, lng, dur, op, cl, days, bt, food, book, rat in activities
         ],
+    )
+    
+    feature_names = [
+        "Kosher", 
+        "Vegan Options", 
+        "Vegetarian Options", 
+        "Wheelchair Accessible", 
+        "Pet Friendly", 
+        "Air Conditioned",
+        "Guided Tour",
+        "Family Friendly"
+    ]
+    
+    conn.executemany(
+        "INSERT INTO activity_features (name) VALUES (?)",
+        [(name,) for name in feature_names]
+    )
+    
+    feature_ids = {name: fid for fid, name in conn.execute("SELECT id, name FROM activity_features")}
+    
+    activity_ids = {name: aid for aid, name in conn.execute("SELECT id, name FROM activities")}
+    
+   
+    activity_features_map = [
+       
+        ("Louvre Museum", ["Wheelchair Accessible", "Air Conditioned", "Guided Tour"]),
+        ("Eiffel Tower", ["Wheelchair Accessible"]),
+        ("Disneyland Paris", ["Wheelchair Accessible", "Vegetarian Options", "Family Friendly"]),
+        ("London Eye", ["Wheelchair Accessible", "Air Conditioned"]),
+        ("Mount Fuji Day Trip", ["Guided Tour"]),
+        ("Rijksmuseum", ["Wheelchair Accessible", "Air Conditioned", "Vegetarian Options"])
+   
+    ]
+    
+   
+    mapping_insert_data = []
+    for activity_name, feats in activity_features_map:
+        act_id = activity_ids.get(activity_name)
+        if act_id:
+            for feat in feats:
+                feat_id = feature_ids.get(feat)
+                if feat_id:
+                    mapping_insert_data.append((act_id, feat_id))
+                    
+    conn.executemany(
+        "INSERT INTO activity_feature_mapping (activity_id, feature_id) VALUES (?, ?)",
+        mapping_insert_data
     )
 
     transport = [

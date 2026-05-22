@@ -19,3 +19,4 @@ class SQLiteBestTimeQueriesMixin:
             "months": [m.strip() for m in rows[0]["months"].split(",")],
             "reason": rows[0]["reason"],
         }
+        

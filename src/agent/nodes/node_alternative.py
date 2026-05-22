@@ -211,4 +211,5 @@ Let us know if any of these spark your interest, or if you'd like to adjust your
 
         response = self.extraction_model.invoke(messages_to_pass)
 
-        return {"messages": [response]}
+        return {"messages": [response],
+                 "has_existing_trip_context": True}  # signal to router that we now have active trip context after presenting alternatives

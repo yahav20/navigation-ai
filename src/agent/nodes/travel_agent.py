@@ -291,4 +291,5 @@ class TravelAgentNode:
             lowest_total_estimate=payload["costs"].get("lowest_total_estimate"),
         )
 
-        return {"travel_plan": plan.model_dump()}
+        return {"travel_plan": plan.model_dump(),
+                "has_existing_trip_context": True}  # signal to router that we now have active trip context after producing a plan

@@ -41,3 +41,46 @@ class SQLiteHotelQueriesMixin:
             "price_min": min(all_prices) if all_prices else None,
             "price_max": max(all_prices) if all_prices else None,
         }
+    def get_hotels_by_city(self, destination: str):
+        destination = destination.strip().lower()
+
+        # 1. find city id
+        rows = self._query(
+            """
+            SELECT id
+            FROM cities
+            WHERE LOWER(name) = ?
+            """,
+            (destination,),
+        )
+
+        if not rows:
+            return [{"error": "CITY_NOT_FOUND", "city": destination}]
+
+        city_id = rows[0]["id"]
+
+        # 2. get hotels
+        rows = self._query(
+            """
+            SELECT
+                id,
+                name,
+                price_per_night,
+                stars,
+                min_age,
+                hotel_type,
+                distance_from_center_km,
+                breakfast_available,
+                breakfast_price,
+                amenities,
+                is_kosher,
+                latitude,
+                longitude
+            FROM hotels
+            WHERE city_id = ?
+            ORDER BY stars DESC, price_per_night ASC
+            """,
+            (city_id,),
+        )
+
+        return [dict(row) for row in rows]
