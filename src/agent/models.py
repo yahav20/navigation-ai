@@ -117,14 +117,19 @@ class IntentClassification(BaseModel):
         "new_travel_plan",
         "update_travel_plan",
         "recommendations",
+        "build_itinerary",
         "general_chat",
     ] = Field(
         description=(
-            "Classify the user's intent:\n"
-            "- 'new_travel_plan': Starting a brand new trip from scratch.\n"
-            "- 'update_travel_plan': Changing parameters (budget, days, destination) of an EXISTING trip.\n"
-            "- 'recommendations': Asking where to go, what destinations exist, OR refining search parameters (budget, days) within an ACTIVE RECOMMENDATION FLOW.\n"
-            "- 'general_chat': Greetings, thanks, casual chat, general travel tips (packing, visas, etiquette), "
-            "questions about a specific city's weather/activities/culture, or asking what the agent can do.\n"
+            "Classify the user's intent strictly following these rules:\n"
+            "- 'new_travel_plan': User wants a general travel package (flights, hotels, and a list of top activities) for a SPECIFIC destination.\n"
+            "- 'update_travel_plan': Changing parameters of an EXISTING travel package (budget, dates, origin/destination).\n"
+            "- 'recommendations': User wants to travel but has NO specific destination yet, looking for ideas.\n"
+            "- 'build_itinerary': User explicitly asks for a DAY-BY-DAY chronological schedule or a time-based routing of attractions.\n"
+            "- 'general_chat': Greetings, casual chat, or general travel questions.\n"
         )
+    )
+    has_explicit_destination: bool = Field(
+        default=False,
+        description="True ONLY if the user explicitly names a destination city or country in their message."
     )

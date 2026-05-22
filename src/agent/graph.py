@@ -6,7 +6,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode
 
-from agent.edge import after_flight_search, after_enrichment, after_router, chat_should_continue, rec_should_continue , after_travel_agent
+from agent.edge import after_flight_search, after_enrichment, after_router, chat_should_continue, rec_should_continue , after_travel_agent, after_security_gate
 from agent.llm import get_models
 from agent.nodes.adjustments import AdjustmentsNode
 from agent.nodes.enrichment import EnrichmentNode
@@ -23,8 +23,13 @@ from agent.nodes.rec_formatter import RecommendationFormatterNode
 from agent.nodes.router import RouterNode
 from agent.nodes.summary import SummaryNode
 from agent.nodes.travel_agent import TravelAgentNode
+from agent.nodes.security_gate import security_gate_node
 from agent.state import AgentState
 from tools.rec_tools import rec_tools
+
+
+def itinerary_agent_stub(state: AgentState) -> dict:
+    return {"messages": [("ai", "Itinerary agent is under construction!")]}
 
 
 def build_graph(
@@ -64,6 +69,7 @@ def build_graph(
     builder = StateGraph(AgentState)
 
     # Travel planning nodes
+    builder.add_node("security_gate", security_gate_node)
     builder.add_node("router", router_node)
     builder.add_node("extract_metadata", extract_metadata_node)
     builder.add_node("adjustments", adjustments_node)
@@ -74,6 +80,7 @@ def build_graph(
     builder.add_node("alternative_destination", alternative_destination_node)
     builder.add_node("formatter_alternative", formatter_alternative)
     builder.add_node("summary", summary_node)
+    builder.add_node("itinerary_agent", itinerary_agent_stub)
 
     # Recommendation nodes
     builder.add_node("rec_agent", rec_agent_node)
@@ -85,7 +92,16 @@ def build_graph(
     builder.add_node("chat_tools", ToolNode(rec_tools))
 
     # 4. Define edges — travel planning path
-    builder.add_edge(START, "router")
+    builder.add_edge(START, "security_gate")
+
+    builder.add_conditional_edges(
+        "security_gate",
+        after_security_gate,
+        {
+            "router": "router",
+            "summary": "summary",
+        }
+    )
 
     builder.add_conditional_edges(
         "router",
@@ -94,6 +110,7 @@ def build_graph(
             "extract_metadata": "extract_metadata",
             "adjustments": "adjustments",
             "rec_agent": "rec_agent",
+            "itinerary_agent": "itinerary_agent",
             "general_chat": "general_chat",
             END: END,
         },
@@ -121,6 +138,7 @@ def build_graph(
     builder.add_edge("alternative_destination", "formatter_alternative")
     builder.add_edge("formatter_alternative", "summary")
     builder.add_edge("formatter", "summary")
+    builder.add_edge("itinerary_agent", "summary")
     builder.add_edge("summary", END)
 
     # 5. Define edges — recommendation path

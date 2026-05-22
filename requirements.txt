@@ -11,3 +11,4 @@ langgraph-checkpoint-sqlite
 rich==14.3.3
 prompt_toolkit==3.0.48
 pydantic==2.12.5
+requests

@@ -40,14 +40,26 @@ class RouterNode:
         - Destination: {state.get("destination_city", "None")}
         - Budget: {state.get("total_budget", "None")}
 
+        Examples:
+        - "I live in Paris and want to fly somewhere." -> recommendations
+        - "Book me a trip to Rome for 3 days" -> new_travel_plan
+        - "Plan a day-by-day schedule for my 3 days in Rome" -> build_itinerary
+        - "Change my budget to $500." -> update_travel_plan
+        - "Do I need a visa for Japan?" -> general_chat
+
         User message: "{last_msg.content}"
         """
 
         classification: IntentClassification = self.classification_model.invoke(prompt)
 
+        final_intent = classification.intent
+
+        # Deterministic Guardrail: Can't start a new direct plan without a destination
+        if final_intent == "new_travel_plan" and not classification.has_explicit_destination:
+            final_intent = "recommendations"
+
         # Guardrail: If user tries to update but no active trip exists, convert to new plan
         # Exception: if we were in a recommendations flow, keep it as recommendations
-        final_intent = classification.intent
         if final_intent == "update_travel_plan" and not has_active_trip:
             if state.get("intent") == "recommendations":
                 final_intent = "recommendations"
