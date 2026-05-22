@@ -141,16 +141,16 @@ OUTPUT SCHEMA:
     # ------------------------------------------------------------------
 
     def __call__(self, state: AgentState) -> dict:
-        logger.info("=== ITINERARY PLANNER START ===")
-        logger.info(f"bundle exists: {bool(state.get('itinerary_data_bundle'))}")
-        logger.info(f"bundle keys: {list(state.get('itinerary_data_bundle', {}).keys())}")
+        print("=== ITINERARY PLANNER START ===")
+        print(f"bundle exists: {bool(state.get('itinerary_data_bundle'))}")
+        print(f"bundle keys: {list(state.get('itinerary_data_bundle', {}).keys())}")
         destination = state.get("destination_city", "")
         origin = state.get("current_city", "")
         budget = state.get("total_budget", 0)
         trip_days = state.get("trip_days", 3)
         prefs = state.get("user_preferences", {})
         
-        logger.info(
+        print(
             "ItineraryPlannerNode: destination=%s origin=%s days=%d budget=%.0f",
             destination, origin, trip_days, budget,
         )
@@ -161,7 +161,7 @@ OUTPUT SCHEMA:
         
         # נוודא שהחבילה לא ריקה לחלוטין (למקרה של תקלה קודמת)
         if not data_bundle:
-             logger.error("❌ EMPTY ITINERARY DATA BUNDLE - PLANNER EXIT")
+             print("❌ EMPTY ITINERARY DATA BUNDLE - PLANNER EXIT")
              return {
                  "itinerary_plan": {},
                  "itinerary_feasible": False,
