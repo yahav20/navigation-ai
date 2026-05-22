@@ -105,7 +105,6 @@ def after_router(state: AgentState) -> str:
         else:
             # Fresh start: need to collect metadata first
             return "extract_metadata"
-
     # ── Standard intents ────────────────────────────────────────────────
     if intent == "new_travel_plan":
         return "extract_metadata"

@@ -334,7 +334,7 @@ def seed_travel(conn: sqlite3.Connection) -> None:
     )
 
     hotels = [
-       ("paris", "Hotel de Ville", 150, 3, 0, "Family", 1.0, True, 15.0, json.dumps(["WiFi", "Family Rooms"]), False, 48.8566, 2.3522),
+        ("paris", "Hotel de Ville", 150, 3, 0, "Family", 1.0, True, 15.0, json.dumps(["WiFi", "Family Rooms"]), False, 48.8566, 2.3522),
         ("paris", "Luxury Ritz", 600, 5, 18, "Luxury", 0.2, True, 45.0, json.dumps(["Pool", "Spa", "Gym", "Bar"]), False, 48.8680, 2.3280),
         ("paris", "Ibis Budget Paris", 80, 2, 0, "Backpacker", 3.5, False, 8.0, json.dumps(["WiFi", "Vending Machine"]), False, 48.8825, 2.3222),
         ("paris", "Le Marais Boutique (Kosher)", 220, 4, 0, "Romantic", 0.5, True, 20.0, json.dumps(["WiFi", "Terrace"]), True, 48.8575, 2.3588),
@@ -349,21 +349,13 @@ def seed_travel(conn: sqlite3.Connection) -> None:
         ("berlin", "Hilton Berlin", 220, 4, 18, "Business", 0.5, True, 25.0, json.dumps(["Pool", "Gym", "Executive Lounge"]), False, 52.5126, 13.3916),
         
         ("amsterdam", "Canal Boutique Hotel", 180, 4, 18, "Romantic", 0.7, True, 20.0, json.dumps(["WiFi", "Bicycle Rental"]), False, 52.3670, 4.8870),
-        
-        # מלונות בישראל עם אופציה לכשרות!
+
         ("tel aviv", "The Norman", 500, 5, 21, "Luxury", 0.8, True, 30.0, json.dumps(["Rooftop Pool", "Spa", "Fine Dining"]), False, 32.0645, 34.7744),
         ("tel aviv", "Dan Tel Aviv", 350, 5, 0, "Family", 0.1, True, 25.0, json.dumps(["Pool", "Beachfront", "Kids Club"]), True, 32.0792, 34.7672),
     ]
     
     conn.executemany(
-        """
-        INSERT INTO hotels (
-            city_id, name, price_per_night, stars, min_age, hotel_type, 
-            distance_from_center_km, breakfast_available, breakfast_price,
-            amenities, is_kosher, latitude, longitude
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
+        """INSERT INTO hotels (city_id, name, price_per_night, stars, min_age, hotel_type, distance_from_center_km, breakfast_available, breakfast_price, amenities, is_kosher, latitude, longitude) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         [(ids[c], n, p, s, ma, t, dist, ba, bp, am, kos, lat, lng) for c, n, p, s, ma, t, dist, ba, bp, am, kos, lat, lng in hotels],
     )
 

@@ -42,31 +42,37 @@ def _parse_amenities(raw: Any) -> list[str]:
 
 
 def _matches_preferences(item: dict, prefs: dict) -> bool:
-    """Return True when *item* satisfies every hard constraint in *prefs*."""
+    if not prefs:
+        return True
+
     # Kosher
     if prefs.get("kosher"):
-        if not item.get("is_kosher") and not item.get("kosher"):
+        if int(item.get("is_kosher", 0)) != 1:
             return False
+
     # Wheelchair / accessibility
     if prefs.get("wheelchair") or prefs.get("accessibility"):
         amenities = _parse_amenities(item.get("amenities", []))
-        features = item.get("features", [])
+        features = _parse_amenities(item.get("amenities", []))
         accessible = any(
             "wheelchair" in str(a).lower() or "accessible" in str(a).lower()
             for a in amenities + features
         )
         if not accessible:
             return False
+
     # Vegan / vegetarian
     if prefs.get("vegan") or prefs.get("vegetarian"):
         cats = str(item.get("categories", "")).lower()
         food = str(item.get("food_available", "")).lower()
         if not ("vegan" in cats or "vegetarian" in cats or "vegan" in food):
             return False
-    # Min-age guard (e.g. families with toddlers)
+
+    # Min-age
     if "min_age" in prefs:
         if item.get("min_age", 0) > prefs["min_age"]:
             return False
+
     return True
 
 
@@ -228,7 +234,10 @@ OUTPUT SCHEMA:
             if str(f.get("availability", "")).lower() == "available"
         ]
         available_flights_sorted = sorted(available_flights, key=lambda f: f.get("price", 9999))
-
+        print("HOTEL SAMPLE:", raw_hotels[:2])
+        print("FILTERED HOTELS:", hotels)
+        print("ACTIVITY SAMPLE:", raw_activities[:2])
+        print("FILTERED ACTIVITIES:", activities)
         return {
             "hotels": hotels_sorted[:5],          # top-5 after filtering
             "activities": activities_sorted[:20],  # top-20 for LLM to choose from

@@ -27,7 +27,7 @@ class SQLiteHotelQueriesMixin:
                       MAX(h.price_per_night) AS price_max
                  FROM hotels h
                  JOIN cities c ON h.city_id = c.id
-                WHERE LOWER(c.name) = ?
+               
                 GROUP BY h.stars""",
             (city.strip().lower(),),
         )
@@ -44,22 +44,33 @@ class SQLiteHotelQueriesMixin:
     def get_hotels_by_city(self, destination: str):
         destination = destination.strip().lower()
 
-        # 1. find city id
+        # 1. resolve best matching city_id (stable + hotel-backed)
         rows = self._query(
             """
-            SELECT id
-            FROM cities
-            WHERE LOWER(name) = ?
+            SELECT c.id
+            FROM cities c
+            JOIN hotels h ON h.city_id = c.id
+            WHERE LOWER(c.name) = ?
+            OR LOWER(c.name) LIKE ?
+            GROUP BY c.id
+            ORDER BY 
+                CASE 
+                    WHEN LOWER(c.name) = ? THEN 1
+                    ELSE 2
+                END,
+                COUNT(h.id) DESC
+            LIMIT 1
             """,
-            (destination,),
+            (destination, destination + "%", destination),
         )
 
         if not rows:
-            return [{"error": "CITY_NOT_FOUND", "city": destination}]
+            print(f"[DB] City not found: {destination}")
+            return []
 
         city_id = rows[0]["id"]
 
-        # 2. get hotels
+        # 2. fetch hotels
         rows = self._query(
             """
             SELECT
@@ -82,5 +93,9 @@ class SQLiteHotelQueriesMixin:
             """,
             (city_id,),
         )
+
+        print(f"[DB] Looking for city: {destination}")
+        print(f"[DB] city_id resolved: {city_id}")
+        print(f"[DB] hotels found: {len(rows)}")
 
         return [dict(row) for row in rows]
