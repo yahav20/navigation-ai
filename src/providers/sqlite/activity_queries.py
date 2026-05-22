@@ -7,7 +7,7 @@ class SQLiteActivityQueriesMixin:
     def fetch_activities(self, city: str) -> list:
         """Return activities available in the given city."""
         rows = self._query(
-            """SELECT a.name, a.category, a.price
+            """SELECT a.name, a.categories, a.price
                FROM activities a
                JOIN cities c ON a.city_id = c.id
               WHERE LOWER(c.name) = ?""",

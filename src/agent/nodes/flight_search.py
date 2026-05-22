@@ -32,10 +32,19 @@ class FlightSearchNode:
             }
 
         # 1. Fetch Flights (Direct first, fallback to connecting)
-        flights = _usable_flights(data_provider.fetch_flights(origin, destination))
+         # 1. Fetch Flights (Direct first, fallback to connecting)
+        flights = _usable_flights(
+        data_provider.fetch_flights(origin, destination))
         if not flights:
-            flights = _usable_flights(data_provider.find_connecting_flights(origin, destination))
+            flights = _usable_flights(
+            data_provider.find_connecting_flights(origin, destination))
 
+         # 2. Fetch Return Flights 
+        return_flights = _usable_flights(
+        data_provider.fetch_flights(destination, origin))
+        if not return_flights:
+            return_flights = _usable_flights(
+            data_provider.find_connecting_flights(destination, origin))
         # 2. Fetch all other itinerary data (No early return!)
         hotels = data_provider.get_hotels_by_city(destination) or []
         activities = data_provider.get_activities_by_city(destination) or []
@@ -45,6 +54,7 @@ class FlightSearchNode:
         # 3. Build the Data Bundle
         data_bundle = {
             "flights": flights,
+            "return_flights": return_flights,
             "hotels": hotels,
             "activities": activities,
             "weather": weather,

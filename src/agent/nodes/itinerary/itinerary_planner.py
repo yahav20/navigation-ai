@@ -41,38 +41,59 @@ def _parse_amenities(raw: Any) -> list[str]:
     return []
 
 
-def _matches_preferences(item: dict, prefs: dict) -> bool:
-    if not prefs:
-        return True
-
-    # Kosher
-    if prefs.get("kosher"):
-        if int(item.get("is_kosher", 0)) != 1:
+def _filter_flight(flight: dict, prefs: dict) -> bool:
+    """מסנן טיסות לפי מחיר מקסימלי וחברת תעופה מועדפת"""
+    if prefs.get("max_flight_price"):
+        if flight.get("price", 9999) > prefs["max_flight_price"]:
             return False
-
-    # Wheelchair / accessibility
-    if prefs.get("wheelchair") or prefs.get("accessibility"):
-        amenities = _parse_amenities(item.get("amenities", []))
-        features = _parse_amenities(item.get("amenities", []))
-        accessible = any(
-            "wheelchair" in str(a).lower() or "accessible" in str(a).lower()
-            for a in amenities + features
-        )
-        if not accessible:
+            
+    if prefs.get("preferred_airline"):
+        pref_airline = str(prefs["preferred_airline"]).lower()
+        flight_airline = str(flight.get("airline", "")).lower()
+        if pref_airline not in flight_airline:
             return False
+            
+    return True
 
-    # Vegan / vegetarian
-    if prefs.get("vegan") or prefs.get("vegetarian"):
-        cats = str(item.get("categories", "")).lower()
-        food = str(item.get("food_available", "")).lower()
-        if not ("vegan" in cats or "vegetarian" in cats or "vegan" in food):
+def _filter_hotel(hotel: dict, prefs: dict) -> bool:
+    """מסנן מלונות לפי כוכבים, מחיר ללילה, כשרות ואבזור"""
+    if prefs.get("min_hotel_stars"):
+        if hotel.get("stars", 0) < prefs["min_hotel_stars"]:
             return False
-
-    # Min-age
-    if "min_age" in prefs:
-        if item.get("min_age", 0) > prefs["min_age"]:
+            
+    if prefs.get("max_hotel_price_per_night"):
+        if hotel.get("price_per_night", 9999) > prefs["max_hotel_price_per_night"]:
             return False
+            
+    dietary = str(prefs.get("dietary_restrictions", "")).lower()
+    if "kosher" in dietary:
+        if not hotel.get("is_kosher"):
+            return False
+            
+    if prefs.get("hotel_amenities"):
+        req_amenities = str(prefs["hotel_amenities"]).lower()
+        hotel_amenities = str(hotel.get("amenities", "")).lower()
+        # בדיקה פשוטה אם האבזור המבוקש קיים בטקסט האבזור של המלון
+        if req_amenities not in hotel_amenities:
+            return False
+            
+    return True
 
+def _filter_activity(activity: dict, prefs: dict) -> bool:
+    """מסנן אטרקציות ומסעדות לפי תזונה (טבעוני/צמחוני/כשר)"""
+    dietary = str(prefs.get("dietary_restrictions", "")).lower()
+    
+    if dietary and activity.get("food_available"):
+        cats = str(activity.get("categories", "")).lower()
+        features = str(activity.get("features", "")).lower()
+        
+        if "vegan" in dietary and "vegan" not in cats + features:
+            return False
+        if "vegetarian" in dietary and "vegetarian" not in cats + features:
+            return False
+        if "kosher" in dietary and "kosher" not in cats + features:
+            return False
+            
     return True
 
 
@@ -105,8 +126,18 @@ RULES:
    - Last day: pick only activities close to the airport / that end before flight departure.
 4. Estimate walking distances using hotel lat/lng vs activity lat/lng.
    Prefer nearby activities for morning slots, allow farther ones for afternoon.
-5. Budget awareness: track cumulative cost (flight + hotel_total + activities).
-6. Return ONLY valid JSON — no markdown, no explanation.
+5. BUDGET ENFORCEMENT: 
+   - Your total_days is {trip_days}. 
+   - Your budget is {budget}. 
+   - Calculation: (Flight Price + (Hotel Price * {trip_days}) + (Activities Budget)) MUST be <= {budget}.
+   - IF your plan exceeds this, YOU MUST REDUCE days or switch to a cheaper hotel/activity IMMEDIATELY.
+   - If you cannot meet the budget, RETURN ONLY: {"error": "budget_exceeded"}
+6.Each activity must be selected from the provided activities list ONLY.
+7.IF the total cost of your proposed itinerary exceeds the budget provided, 
+DO NOT RETURN THE ITINERARY. Return a JSON object with: 
+{ "error": "budget_exceeded", "reason": "Your itinerary is too expensive for the budget." }
+Use exact name from dataset. Do NOT create new activities.
+8. Return ONLY valid JSON — no markdown, no explanation.
 
 OUTPUT SCHEMA:
 {
@@ -165,7 +196,7 @@ OUTPUT SCHEMA:
 
         raw_bundle = state.get("itinerary_data_bundle", {})
         print(f"📦 Raw bundle exists: {bool(raw_bundle)}")
-        print(f"📦 Raw bundle keys: {list(raw_bundle.keys()) if raw_bundle else 'EMPTY'}")
+
             # 1. Collect & Filter data deterministically from the raw bundle
         data_bundle = self._collect_data(
             raw_bundle=raw_bundle,
@@ -194,6 +225,20 @@ OUTPUT SCHEMA:
             prefs=prefs,
         )
 
+        if "selected_flight" in plan and isinstance(plan["selected_flight"], dict):
+            chosen_flight_num = plan["selected_flight"].get("flight_number")
+            
+            real_flight = next(
+                (f for f in data_bundle["flights"] if f.get("flight_number") == chosen_flight_num), 
+                None
+            )
+            
+            if real_flight:
+                plan["selected_flight"]["departure_time"] = real_flight.get("departure_time", "Not available")
+                plan["selected_flight"]["arrival_time"] = real_flight.get("arrival_time", "Not available")
+                plan["selected_flight"]["airline"] = real_flight.get("airline", "Unknown")
+                plan["selected_flight"]["price"] = real_flight.get("price", 0)
+
         return {
             "itinerary_plan": plan,
             "itinerary_feasible": True,
@@ -213,37 +258,36 @@ OUTPUT SCHEMA:
         trip_days: int,
         flight_options: list[dict],
     ) -> dict:
-        """Filter raw hotels and activities from the existing bundle by preferences."""
+        """Filter raw data using explicit user preferences."""
 
-        # Hotels
-        raw_hotels = raw_bundle.get("hotels", [])
-        hotels = [h for h in raw_hotels if _matches_preferences(h, prefs)]
-        hotels_sorted = sorted(hotels, key=lambda h: (-h.get("stars", 0), h.get("price_per_night", 9999)))
-
-        # Activities
-        raw_activities = raw_bundle.get("activities", [])
-        activities = [a for a in raw_activities if _matches_preferences(a, prefs)]
-        activities_sorted = sorted(activities, key=lambda a: -a.get("rating", 0))
-
-        weather = raw_bundle.get("weather", [])
-        best_time = raw_bundle.get("best_time", {})
-
-        # Flights already fetched — pick cheapest available
-        available_flights = [
-            f for f in flight_options
+        available_flights = [f for f in flight_options if str(f.get("availability", "")).lower() == "available"]
+        filtered_flights = [f for f in available_flights if _filter_flight(f, prefs)]
+        flights_sorted = sorted(filtered_flights, key=lambda f: f.get("price", 9999))
+        return_flights = raw_bundle.get("return_flights", [])
+        available_return_flights = [
+            f for f in return_flights
             if str(f.get("availability", "")).lower() == "available"
         ]
-        available_flights_sorted = sorted(available_flights, key=lambda f: f.get("price", 9999))
-        print("HOTEL SAMPLE:", raw_hotels[:2])
-        print("FILTERED HOTELS:", hotels)
-        print("ACTIVITY SAMPLE:", raw_activities[:2])
-        print("FILTERED ACTIVITIES:", activities)
+        filtered_return_flights = [
+            f for f in available_return_flights
+            if _filter_flight(f, prefs)
+        ]
+        return_flights_sorted = sorted(filtered_return_flights, key=lambda f: f.get("price", 9999))
+        raw_hotels = raw_bundle.get("hotels", [])
+        filtered_hotels = [h for h in raw_hotels if _filter_hotel(h, prefs)]
+        hotels_sorted = sorted(filtered_hotels, key=lambda h: (-h.get("stars", 0), h.get("price_per_night", 9999)))
+
+        raw_activities = raw_bundle.get("activities", [])
+        filtered_activities = [a for a in raw_activities if _filter_activity(a, prefs)]
+        activities_sorted = sorted(filtered_activities, key=lambda a: -a.get("rating", 0))
+
         return {
-            "hotels": hotels_sorted[:5],          # top-5 after filtering
-            "activities": activities_sorted[:20],  # top-20 for LLM to choose from
-            "weather": weather,
-            "best_time": best_time,
-            "flights": available_flights_sorted[:3],
+            "flights": flights_sorted[:3],
+            "return_flights": return_flights_sorted[:3],
+            "hotels": hotels_sorted[:5],
+            "activities": activities_sorted[:20],
+            "weather": raw_bundle.get("weather", []),
+            "best_time": raw_bundle.get("best_time", {}),
             "budget": budget,
             "trip_days": trip_days,
             "preferences": prefs,
@@ -258,11 +302,12 @@ OUTPUT SCHEMA:
 
         if not bundle["hotels"]:
             return {"feasible": False, "reason": "no_hotels"}
+        print(f"DEBUG: Min cost calculated: {min_cost}, Budget: {budget}")
+        # מציאת המחיר הזול ביותר האמיתי מתוך כל האופציות בחבילה
+        min_flight = min((f.get("price", 9999) for f in bundle["flights"]), default=0)
+        min_hotel_night = min((h.get("price_per_night", 9999) for h in bundle["hotels"]), default=0)
 
-        # Rough cost estimate: cheapest flight + cheapest hotel × days
-        min_flight = bundle["flights"][0].get("price", 0)
-        min_hotel_night = bundle["hotels"][0].get("price_per_night", 0)
-        min_cost = min_flight + min_hotel_night * trip_days
+        min_cost = min_flight + (min_hotel_night * trip_days)
 
         if budget and min_cost > budget * 1.05:  # 5% tolerance
             return {
@@ -285,13 +330,21 @@ OUTPUT SCHEMA:
         trip_days: int,
         prefs: dict,
     ) -> dict:
+        return_flights = data_bundle.get("return_flights") or []
+
+        return_flight = return_flights[0] if return_flights else {}
+        return_departure = return_flight.get("departure_time", "Unknown")
+        data_bundle["return_departure"] = return_departure
+            
         user_msg = f"""
 Plan a {trip_days}-day trip from {origin} to {destination}.
 
 USER PREFERENCES: {json.dumps(prefs, ensure_ascii=False)}
 
-AVAILABLE FLIGHTS (pick one):
+AVAILABLE OUTBOUND FLIGHTS (pick one):
 {json.dumps(data_bundle['flights'], ensure_ascii=False, indent=2)}
+
+RETURN FLIGHT DEPARTURE TIME: {data_bundle['return_departure']}
 
 AVAILABLE HOTELS (pick one, must match preferences):
 {json.dumps(data_bundle['hotels'], ensure_ascii=False, indent=2)}
@@ -299,20 +352,16 @@ AVAILABLE HOTELS (pick one, must match preferences):
 AVAILABLE ACTIVITIES (choose the best mix per day — variety, proximity, preferences):
 {json.dumps(data_bundle['activities'], ensure_ascii=False, indent=2)}
 
-WEATHER INFO:
-{json.dumps(data_bundle['weather'], ensure_ascii=False, indent=2)}
-
-BEST TIME TO VISIT:
-{json.dumps(data_bundle['best_time'], ensure_ascii=False, indent=2)}
-
 BUDGET: ${data_bundle['budget'] or 'flexible'}
 
 Remember:
-- Day 1 schedule depends on flight arrival time.
+- Day 1 schedule depends on the outbound flight arrival time.
 - Account for hotel check-in (usually 15:00) and check-out (usually 10:00–11:00).
-- If hotel has breakfast, first activity starts after 10:00.
 - Estimate walk time between hotel and each activity using coordinates.
-- Last day: only activities that end ≥2 hours before flight departure.
+- 🔴 CRITICAL: - Day {trip_days} MUST end with:
+  "Transfer to airport"
+- Use RETURN FLIGHT DEPARTURE TIME: {return_departure}
+- Ensure this is the LAST activity of the day
 
 Return ONLY the JSON object described in your instructions.
 """
