@@ -7,21 +7,55 @@ from langchain_core.language_models import BaseChatModel
 
 from agent.nodes.itinerary.schemas import ExecutionPlan, ObserverOutput, FinalResponse, RevisedPlan
 from agent.state import AgentState
-
+from datetime import datetime
 logger = logging.getLogger(__name__)
 MAX_RETRIES = 3
 
 # === התוספות שהיו חסרות וגרמו לקריסה ===
 
-OBSERVER_SYSTEM = """You are the Lead Travel Itinerary Reviewer.
-Examine the provided execution results of the travel plan.
-1. Check if the 'grand_total' cost from verify_budget exceeds the user's budget.
-2. Ensure all requested days have a 'build_day_schedule' result.
+OBSERVER_SYSTEM = """
+You are the final travel itinerary validator.
 
-If there is a SEVERE issue (like budget exceeded by more than 10%, or missing critical data), output a RevisedPlan with adjustments.
-If the plan is good, output a FinalResponse with a beautiful, readable Markdown itinerary for the user.
+You MUST detect:
+- overlapping times
+- impossible transitions
+- missing transport slots
+- meal violations
+- activities during arrival/departure no-go zones
+- invalid timing chains
+
+A valid itinerary MUST:
+1. Have sequential non-overlapping slots.
+2. Include transport between different locations.
+3. Avoid standalone meals when food_available=true exists nearby.
+4. Respect flight anchors strictly.
+5. Stay within budget.
+
+If ANY severe issue exists:
+return RevisedPlan.
+
+Otherwise:
+return FinalResponse with beautiful markdown.
 """
+def _has_overlaps(results):
+    for key, val in results.items():
+        if not key.startswith("build_day_schedule"):
+            continue
 
+        slots = val.get("slots", [])
+
+        prev_end = None
+
+        for slot in slots:
+            start = datetime.strptime(slot["start_time"], "%H:%M")
+            end = datetime.strptime(slot["end_time"], "%H:%M")
+
+            if prev_end and start < prev_end:
+                return True
+
+            prev_end = end
+
+    return False
 def _build_summary(results: dict, budget: float, trip_days: int) -> str:
     """פונקציה המייצרת טקסט עשיר עבור ה-LLM מתוך התוצאות שה-Executor אסף"""
     summary_lines = [f"Trip Details: {trip_days} Days | Budget: ${budget}"]
@@ -69,7 +103,16 @@ class ItineraryObserverNode:
         # 2. אם לא סיימנו את התוכנית, ממשיכים לצעד הבא
         if current_index < len(plan_steps):
              return {"itinerary_feasible": True, "observer_action": "continue"}
-
+        if _has_overlaps(results):
+            return {
+                "itinerary_feasible": False,
+                "itinerary_fallback_reason": "Schedule overlap detected",
+                "itinerary_plan": {
+                    **plan_state,
+                    "retry_count": retry_count + 1,
+                    "observer_reason": "Schedule overlap detected"
+                }
+            }
         # 3. סיימנו את כל הצעדים בהצלחה! מעבירים ל-LLM לבדיקה סופית ועיצוב
         print("\n--- 🧐 OBSERVER: All steps executed. Performing final holistic review... ---")
         budget    = state.get("total_budget", 0)
