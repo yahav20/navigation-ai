@@ -17,6 +17,7 @@ Run:
 import json
 import os
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import requests
@@ -41,6 +42,86 @@ PRICE_LEVEL = {
     3: "$$$ – expensive",
     4: "$$$$ – very expensive",
 }
+
+# Trip dates — used for flight search AND hotel rate lookup.
+DEPART = "2026-06-10"
+RETURN = "2026-06-13"
+
+
+# ---------------------------------------------------------------------------
+# Xotelo (TripAdvisor-backed, no auth) — real per-night USD rates per OTA
+# ---------------------------------------------------------------------------
+XOTELO = "https://data.xotelo.com/api"
+# Paris TripAdvisor location key
+PARIS_LOCATION_KEY = "g187147"
+
+
+def xotelo_list_hotels(location_key: str, limit: int = 10, sort: str = "popularity") -> list[dict]:
+    r = requests.get(
+        f"{XOTELO}/list",
+        params={"location_key": location_key, "limit": limit, "sort": sort},
+        timeout=20,
+    )
+    r.raise_for_status()
+    return ((r.json().get("result") or {}).get("list") or [])
+
+
+def xotelo_rates(hotel_key: str, chk_in: str, chk_out: str, currency: str = "USD") -> list[dict]:
+    r = requests.get(
+        f"{XOTELO}/rates",
+        params={"hotel_key": hotel_key, "chk_in": chk_in, "chk_out": chk_out, "currency": currency},
+        timeout=20,
+    )
+    if r.status_code != 200:
+        return []
+    return ((r.json().get("result") or {}).get("rates") or [])
+
+
+def fetch_paris_hotels(chk_in: str, chk_out: str, limit: int = 10, with_rates: bool = False) -> list[dict]:
+    """Pull hotels from Xotelo's /list.
+
+    /list is fast (~4s once) and gives the historical USD `price_ranges.min/max`
+    per night — usually enough for planning. /rates adds the per-OTA breakdown
+    for the specific dates but stalls ~8-10s per hotel when TripAdvisor has no
+    cached quote, so it's off by default.
+    """
+    out: list[dict] = []
+    for h in xotelo_list_hotels(PARIS_LOCATION_KEY, limit=limit, sort="popularity"):
+        hotel_key = h.get("key")
+        geo = h.get("geo") or {}
+        review = h.get("review_summary") or {}
+        pr = h.get("price_ranges") or {}
+
+        rates: list[dict] = []
+        live_rate = None
+        if with_rates and hotel_key:
+            rates = xotelo_rates(hotel_key, chk_in, chk_out)
+            live_rate = min(
+                (r.get("rate") for r in rates if isinstance(r.get("rate"), (int, float))),
+                default=None,
+            )
+
+        out.append({
+            "name": h.get("name"),
+            "hotel_key": hotel_key,
+            "type": h.get("accommodation_type"),
+            "rating": review.get("rating"),
+            "review_count": review.get("count"),
+            "price_min_usd": pr.get("minimum"),
+            "price_max_usd": pr.get("maximum"),
+            "best_rate_usd": live_rate,
+            "rates_by_ota": [
+                {"name": r.get("name"), "rate_usd": r.get("rate")}
+                for r in rates
+            ],
+            "lat": geo.get("latitude"),
+            "lng": geo.get("longitude"),
+            "mentions": h.get("mentions", []),
+            "image": h.get("image"),
+            "tripadvisor_url": h.get("url"),
+        })
+    return out
+
 
 
 # ---------------------------------------------------------------------------
@@ -238,14 +319,17 @@ def _simplify_place(p: dict) -> dict:
 # ---------------------------------------------------------------------------
 # Run
 # ---------------------------------------------------------------------------
-print("Fetching flights TLV -> PAR on 2026-06-10 …")
-flights = fetch_flights("TLV", "PAR", "2026-06-10")
+print(f"Fetching flights TLV -> PAR on {DEPART} …")
+flights = fetch_flights("TLV", "PAR", DEPART)
 
 print("Geocoding Paris …")
 lat, lng, paris_addr = geocode("Paris, France")
 
-print("Fetching hotels …")
-hotels = places_text_search("hotels in Paris", limit=10)
+print(f"Fetching hotels via Xotelo (TripAdvisor) for {DEPART}..{RETURN} …")
+# `with_rates=True` adds per-OTA prices for the trip dates, but adds ~50s
+# (each /rates call stalls 8-10s when TripAdvisor has no cached quote).
+# The min/max range from /list is enough for planning.
+hotels = fetch_paris_hotels(DEPART, RETURN, limit=10, with_rates=False)
 
 print("Fetching attractions near Paris …")
 attractions = places_nearby(lat, lng, "tourist_attraction", radius=4500, limit=10)
@@ -322,7 +406,36 @@ def place_table(title: str, items: list[dict], with_range: bool = False) -> None
             )
 
 
-place_table("Hotels in Paris  (Google Places — Text Search)", hotels)
+has_live_rates = any(h.get("best_rate_usd") is not None for h in hotels)
+
+lines.append(f"\n## Hotels in Paris  (Xotelo / TripAdvisor)\n")
+if has_live_rates:
+    lines.append(f"_Per-night USD for {DEPART}..{RETURN}; range is the historical min/max from TripAdvisor._\n")
+    lines.append("| Name | ★ | Reviews | Best rate/night | Min–max USD | Lat | Lng | OTAs |")
+    lines.append("|---|---:|---:|---:|---|---:|---:|---|")
+    for h in hotels:
+        rating = h.get("rating") or "—"
+        reviews = h.get("review_count") or "—"
+        best = f"${h['best_rate_usd']:.0f}" if h.get("best_rate_usd") is not None else "—"
+        mn, mx = h.get("price_min_usd"), h.get("price_max_usd")
+        rng = f"${mn}–${mx}" if mn and mx else "—"
+        otas = ", ".join(f"{r['name']} ${r['rate_usd']:.0f}" for r in (h.get("rates_by_ota") or [])[:5])
+        lat_s = f"{h['lat']:.4f}" if h.get("lat") else "—"
+        lng_s = f"{h['lng']:.4f}" if h.get("lng") else "—"
+        lines.append(f"| {h['name']} | {rating} | {reviews} | {best} | {rng} | {lat_s} | {lng_s} | {otas or '—'} |")
+else:
+    lines.append("_Per-night USD range from TripAdvisor's historical data (live OTA rates skipped — slow)._\n")
+    lines.append("| Name | ★ | Reviews | Min–max USD / night | Lat | Lng |")
+    lines.append("|---|---:|---:|---|---:|---:|")
+    for h in hotels:
+        rating = h.get("rating") or "—"
+        reviews = h.get("review_count") or "—"
+        mn, mx = h.get("price_min_usd"), h.get("price_max_usd")
+        rng = f"${mn}–${mx}" if mn and mx else "—"
+        lat_s = f"{h['lat']:.4f}" if h.get("lat") else "—"
+        lng_s = f"{h['lng']:.4f}" if h.get("lng") else "—"
+        lines.append(f"| {h['name']} | {rating} | {reviews} | {rng} | {lat_s} | {lng_s} |")
+
 place_table("Top tourist attractions near Paris center  (Nearby Search)", attractions)
 place_table(
     "Restaurants in Paris  (new Places API v1 — `priceRange` in EUR)",
