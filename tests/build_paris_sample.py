@@ -565,7 +565,8 @@ else:
         lng_s = f"{h['lng']:.4f}" if h.get("lng") else "—"
         lines.append(f"| {h['name']} | {rating} | {reviews} | {rng} | {lat_s} | {lng_s} |")
 
-place_table("Top tourist attractions near Paris center  (Nearby Search)", attractions)
+lines.append("")
+lines.extend(attractions_markdown_section(attractions))
 place_table(
     "Restaurants in Paris  (new Places API v1 — `priceRange` in EUR)",
     restaurants,
