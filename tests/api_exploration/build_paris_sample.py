@@ -27,7 +27,7 @@ from dotenv import load_dotenv
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from enrich_attractions_wiki import enrich_attractions, attractions_markdown_section  # noqa: E402
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 load_dotenv(ROOT / ".env")
 
 TP_KEY = os.getenv("TRAVELPAYOUTS_API_KEY")

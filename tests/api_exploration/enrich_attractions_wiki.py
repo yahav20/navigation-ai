@@ -22,7 +22,7 @@ from pathlib import Path
 
 import requests
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "out"
 JSON_PATH = OUT / "paris_sample.json"
 MD_PATH = OUT / "paris_sample.md"
