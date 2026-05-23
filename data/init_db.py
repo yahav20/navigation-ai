@@ -266,29 +266,29 @@ def seed_travel(conn: sqlite3.Connection) -> None:
     )
 
     hotels = [
-        ("paris", "Hotel de Ville", 150, 3, 0, "Family", 1.0, True, 15.0, json.dumps(["WiFi", "Family Rooms"]), False, 48.8566, 2.3522),
-        ("paris", "Luxury Ritz", 600, 5, 18, "Luxury", 0.2, True, 45.0, json.dumps(["Pool", "Spa", "Gym", "Bar"]), False, 48.8680, 2.3280),
-        ("paris", "Ibis Budget Paris", 80, 2, 0, "Backpacker", 3.5, False, 8.0, json.dumps(["WiFi", "Vending Machine"]), False, 48.8825, 2.3222),
-        ("paris", "Le Marais Boutique (Kosher)", 220, 4, 0, "Romantic", 0.5, True, 20.0, json.dumps(["WiFi", "Terrace"]), True, 48.8575, 2.3588),
+        ("paris", "Hotel de Ville", 150, 3, 0, "Family", 1.0, json.dumps(["WiFi", "Family Rooms"]), False, 48.8566, 2.3522),
+        ("paris", "Luxury Ritz", 600, 5, 18, "Luxury", 0.2, json.dumps(["Pool", "Spa", "Gym", "Bar"]), False, 48.8680, 2.3280),
+        ("paris", "Ibis Budget Paris", 80, 2, 0, "Backpacker", 3.5, json.dumps(["WiFi", "Vending Machine"]), False, 48.8825, 2.3222),
+        ("paris", "Le Marais Boutique (Kosher)", 220, 4, 0, "Romantic", 0.5, json.dumps(["WiFi", "Terrace"]), True, 48.8575, 2.3588),
         
-        ("london", "The Savoy", 450, 5, 18, "Luxury", 0.5, True, 35.0, json.dumps(["Pool", "Gym", "River View"]), False, 51.5100, -0.1200),
-        ("london", "Premier Inn London", 120, 3, 0, "Business", 2.5, True, 10.0, json.dumps(["WiFi", "Restaurant"]), False, 51.5300, -0.1250),
+        ("london", "The Savoy", 450, 5, 18, "Luxury", 0.5, json.dumps(["Pool", "Gym", "River View"]), False, 51.5100, -0.1200),
+        ("london", "Premier Inn London", 120, 3, 0, "Business", 2.5, json.dumps(["WiFi", "Restaurant"]), False, 51.5300, -0.1250),
         
-        ("tokyo", "Park Hyatt Tokyo", 700, 5, 18, "Luxury", 1.5, True, 50.0, json.dumps(["Pool", "Spa", "City View"]), False, 35.6853, 139.6912),
+        ("tokyo", "Park Hyatt Tokyo", 700, 5, 18, "Luxury", 1.5, json.dumps(["Pool", "Spa", "City View"]), False, 35.6853, 139.6912),
         
-        ("new york", "The Plaza", 850, 5, 21, "Luxury", 0.1, True, 40.0, json.dumps(["Spa", "Gym", "Room Service"]), False, 40.7644, -73.9745),
+        ("new york", "The Plaza", 850, 5, 21, "Luxury", 0.1, json.dumps(["Spa", "Gym", "Room Service"]), False, 40.7644, -73.9745),
         
-        ("berlin", "Hilton Berlin", 220, 4, 18, "Business", 0.5, True, 25.0, json.dumps(["Pool", "Gym", "Executive Lounge"]), False, 52.5126, 13.3916),
+        ("berlin", "Hilton Berlin", 220, 4, 18, "Business", 0.5, json.dumps(["Pool", "Gym", "Executive Lounge"]), False, 52.5126, 13.3916),
         
-        ("amsterdam", "Canal Boutique Hotel", 180, 4, 18, "Romantic", 0.7, True, 20.0, json.dumps(["WiFi", "Bicycle Rental"]), False, 52.3670, 4.8870),
+        ("amsterdam", "Canal Boutique Hotel", 180, 4, 18, "Romantic", 0.7, json.dumps(["WiFi", "Bicycle Rental"]), False, 52.3670, 4.8870),
 
-        ("tel aviv", "The Norman", 500, 5, 21, "Luxury", 0.8, True, 30.0, json.dumps(["Rooftop Pool", "Spa", "Fine Dining"]), False, 32.0645, 34.7744),
-        ("tel aviv", "Dan Tel Aviv", 350, 5, 0, "Family", 0.1, True, 25.0, json.dumps(["Pool", "Beachfront", "Kids Club"]), True, 32.0792, 34.7672),
+        ("tel aviv", "The Norman", 500, 5, 21, "Luxury", 0.8, json.dumps(["Rooftop Pool", "Spa", "Fine Dining"]), False, 32.0645, 34.7744),
+        ("tel aviv", "Dan Tel Aviv", 350, 5, 0, "Family", 0.1, json.dumps(["Pool", "Beachfront", "Kids Club"]), True, 32.0792, 34.7672),
     ]
     
     conn.executemany(
-        """INSERT INTO hotels (city_id, name, price_per_night, stars, min_age, hotel_type, distance_from_center_km, breakfast_available, breakfast_price, amenities, is_kosher, latitude, longitude) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        [(ids[c], n, p, s, ma, t, dist, ba, bp, am, kos, lat, lng) for c, n, p, s, ma, t, dist, ba, bp, am, kos, lat, lng in hotels],
+        """INSERT INTO hotels (city_id, name, price_per_night, stars, min_age, hotel_type, distance_from_center_km,  amenities, is_kosher, latitude, longitude) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        [(ids[c], n, p, s, ma, t, dist, am, kos, lat, lng) for c, n, p, s, ma, t, dist, am, kos, lat, lng in hotels],
     )
 
     activities = [

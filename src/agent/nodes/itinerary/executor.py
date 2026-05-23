@@ -1,7 +1,4 @@
-"""
-ItineraryExecutorNode — executes one PlanStep at a time using tools.
-See docstring in class for full design notes.
-"""
+# src/agent/nodes/itinerary/executor.py
 from __future__ import annotations
 import json
 import logging
@@ -10,7 +7,9 @@ from typing import Optional
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from agent.nodes.itinerary.schemas import ExecutionPlan, PlanStep
+from agent.nodes.itinerary.schemas import ExecutionPlan
+
+# ייבוא הכלים של ה-Itinerary
 from agent.nodes.itinerary.itinerary_tools import (
     search_outbound_flights, search_return_flights,
     search_hotels, search_activities,
@@ -39,16 +38,7 @@ Each slot: {"time":"HH:MM","duration_minutes":int,"slot_type":"activity|meal|res
             "name":"string","description":"string","estimated_cost":float,"notes":"string or null"}
 """
 
-
 class ItineraryExecutorNode:
-    """
-    Iterates through every PlanStep and executes it.
-    - Data-fetch steps: call tools deterministically.
-    - build_day_schedule: LLM builds the day using context from prior steps.
-    - verify_budget: deterministic calculation.
-    Tool errors are caught and stored as {"error": "..."} — never crash.
-    """
-
     def __init__(self, llm: BaseChatModel) -> None:
         self.llm = llm
 
@@ -56,26 +46,45 @@ class ItineraryExecutorNode:
         plan_state  = state.get("itinerary_plan", {})
         plan        = ExecutionPlan(**plan_state["execution_plan"])
         results     = dict(plan_state.get("step_results", {}))
+        
+        # --- שליפת המשתנים מה-State ---
         destination = state.get("destination_city", "")
         origin      = state.get("current_city", "")
         trip_days   = state.get("trip_days", plan.total_days)
         budget      = state.get("total_budget", 0)
         prefs       = state.get("user_preferences", {})
 
-        for step in plan.steps:
-            key = f"{step.step_type}_{step.step_id}"
-            logger.info("Executor: step %d [%s]", step.step_id, step.step_type)
-            try:
-                results[key] = self._run(step, results, destination, origin,
-                                         trip_days, budget, prefs, state)
-            except Exception as e:
-                logger.warning("Step %d error: %s", step.step_id, e)
-                results[key] = {"error": str(e), "step_type": step.step_type}
-                
-                
+        current_index = state.get("current_step_index", 0)
         
+        # הגנה מפני חריגת אינדקס
+        if current_index >= len(plan.steps):
+            return {"skipped": True}
 
-        return {"itinerary_plan": {**plan_state, "step_results": results}}
+        step = plan.steps[current_index]
+        key = f"{step.step_type}_{step.step_id}"
+        cache_key = step.step_type 
+
+        print(f"\n--- ⚙️ EXECUTING STEP {current_index + 1}/{len(plan.steps)}: {step.step_type} ---")
+        
+        # מנגנון Caching (למניעת קריאות כפולות לאותו כלי אם ה-Replanner הריץ שוב)
+        cached_key = next((k for k in results if k.startswith(cache_key) and "error" not in results[k] and "skipped" not in results[k]), None)
+        
+        if cached_key and step.step_type not in ["build_day_schedule", "verify_budget"]:
+             print(f"⏩ Skipping Tool Execution - Using cached actual data for '{step.step_type}'.")
+             results[key] = results[cached_key] 
+        else:
+             try:
+                 # 🔴 כאן אנחנו מעבירים את כל המשתנים בבטחה לפונקציית העזר _run
+                 results[key] = self._run(step, results, destination, origin, trip_days, budget, prefs, state)
+                 print(f"✅ Step {step.step_type} completed successfully.")
+             except Exception as e:
+                 print(f"❌ Step {step.step_type} failed: {e}")
+                 results[key] = {"error": str(e), "step_type": step.step_type}
+
+        return {
+            "current_step_index": current_index + 1,
+            "itinerary_plan": {**plan_state, "step_results": results}
+        }
 
     def _run(self, step, results, destination, origin, trip_days, budget, prefs, state):
         dietary = str(prefs.get("dietary_restrictions", "")).lower()
@@ -120,14 +129,15 @@ class ItineraryExecutorNode:
         weather  = _list(results, "fetch_weather")
 
         used = _used_activities(results)
-        available = [a for a in acts if a.get("name") not in used]
+        available = [a for a in acts if isinstance(a, dict) and a.get("name") not in used]
 
-        arrival_time   = (outbound or {}).get("arrival_time", "12:00")
-        departure_time = (ret or {}).get("departure_time", "20:00")
-        has_breakfast  = (hotel or {}).get("breakfast_available", False)
-        hotel_name     = (hotel or {}).get("name", "N/A")
-        hotel_lat      = (hotel or {}).get("latitude") or (hotel or {}).get("lat")
-        hotel_lng      = (hotel or {}).get("longitude") or (hotel or {}).get("lng")
+        # שליפה בטוחה למקרה שהכלים חזרו ריקים
+        arrival_time   = (outbound or {}).get("arrival_time", "12:00") if isinstance(outbound, dict) else "12:00"
+        departure_time = (ret or {}).get("departure_time", "20:00") if isinstance(ret, dict) else "20:00"
+        has_breakfast  = (hotel or {}).get("breakfast_available", False) if isinstance(hotel, dict) else False
+        hotel_name     = (hotel or {}).get("name", "N/A") if isinstance(hotel, dict) else "N/A"
+        hotel_lat      = (hotel or {}).get("latitude") or (hotel or {}).get("lat") if isinstance(hotel, dict) else None
+        hotel_lng      = (hotel or {}).get("longitude") or (hotel or {}).get("lng") if isinstance(hotel, dict) else None
 
         context = (
             f"Day {day_num} of {trip_days} in {destination}.\n"
@@ -177,9 +187,9 @@ class ItineraryExecutorNode:
             if k.startswith("build_day_schedule") and isinstance(v, dict)
         )
         return calculate_trip_cost.invoke({
-            "flight_price":                  (outbound or {}).get("price", 0),
-            "return_flight_price":           (ret or {}).get("price", 0),
-            "hotel_price_per_night":         (hotel or {}).get("price_per_night", 0),
+            "flight_price":                  (outbound or {}).get("price", 0) if isinstance(outbound, dict) else 0,
+            "return_flight_price":           (ret or {}).get("price", 0) if isinstance(ret, dict) else 0,
+            "hotel_price_per_night":         (hotel or {}).get("price_per_night", 0) if isinstance(hotel, dict) else 0,
             "trip_days":                     trip_days,
             "estimated_activities_budget":   activity_cost,
             "estimated_meals_budget_per_day": DEFAULT_MEALS_PER_DAY,
@@ -235,9 +245,9 @@ def _fallback_slots(day_num, arrival, departure, has_breakfast, acts):
         slots.append({"time": "08:00", "duration_minutes": 60, "slot_type": "meal",
                        "name": bk_name, "description": "", "estimated_cost": bk_cost})
         for i, a in enumerate(acts[:2]):
-            slots.append({"time": f"{10+i*2}:00", "duration_minutes": a.get("avg_duration_minutes",90),
-                           "slot_type": "activity", "name": a.get("name","Activity"),
-                           "description": a.get("categories",""), "estimated_cost": a.get("price",0)})
+            slots.append({"time": f"{10+i*2}:00", "duration_minutes": a.get("avg_duration_minutes",90) if isinstance(a, dict) else 90,
+                           "slot_type": "activity", "name": a.get("name","Activity") if isinstance(a, dict) else "Activity",
+                           "description": a.get("categories","") if isinstance(a, dict) else "", "estimated_cost": a.get("price",0) if isinstance(a, dict) else 0})
         slots += [
             {"time": "13:00", "duration_minutes": 60, "slot_type": "meal",
              "name": "Lunch", "description": "", "estimated_cost": 18},
@@ -245,9 +255,9 @@ def _fallback_slots(day_num, arrival, departure, has_breakfast, acts):
              "name": "Afternoon rest", "description": "", "estimated_cost": 0},
         ]
         for i, a in enumerate(acts[2:4]):
-            slots.append({"time": f"{15+i*2}:00", "duration_minutes": a.get("avg_duration_minutes",90),
-                           "slot_type": "activity", "name": a.get("name","Activity"),
-                           "description": a.get("categories",""), "estimated_cost": a.get("price",0)})
+            slots.append({"time": f"{15+i*2}:00", "duration_minutes": a.get("avg_duration_minutes",90) if isinstance(a, dict) else 90,
+                           "slot_type": "activity", "name": a.get("name","Activity") if isinstance(a, dict) else "Activity",
+                           "description": a.get("categories","") if isinstance(a, dict) else "", "estimated_cost": a.get("price",0) if isinstance(a, dict) else 0})
         slots.append({"time": "19:30", "duration_minutes": 60, "slot_type": "meal",
                        "name": "Dinner", "description": "", "estimated_cost": 25})
     return slots

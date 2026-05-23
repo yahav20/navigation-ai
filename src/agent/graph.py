@@ -7,18 +7,13 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode
 
 from agent.edge import (
-    after_enrichment,
-    after_flight_search,
-    after_router,
-    after_travel_agent,
-    after_security_gate,
-    after_alternative_destination,
-    after_itinerary_planner,
-    after_itinerary_executor,
-    after_itinerary_observer,
-    after_itinerary_fallback,
-    chat_should_continue,
-    rec_should_continue,
+    after_flight_search, 
+    after_enrichment, 
+    after_router, 
+    chat_should_continue, 
+    rec_should_continue, 
+    after_travel_agent, 
+    after_security_gate
 )
 from agent.llm import get_models
 from agent.nodes.adjustments import AdjustmentsNode
@@ -26,7 +21,10 @@ from agent.nodes.enrichment import EnrichmentNode
 from agent.nodes.flight_search import FlightSearchNode
 from agent.nodes.formatting import FormatterNode
 from agent.nodes.metadata import MetadataNode
-from agent.nodes.node_alternative import AlternativeDestinationNode, FormatterAlternativeNode
+from agent.nodes.node_alternative import (
+    AlternativeDestinationNode,
+    FormatterAlternativeNode,
+)
 from agent.nodes.general_chat import GeneralChatNode
 from agent.nodes.rec_agent import RecommendationAgentNode
 from agent.nodes.rec_formatter import RecommendationFormatterNode
@@ -34,157 +32,207 @@ from agent.nodes.router import RouterNode
 from agent.nodes.summary import SummaryNode
 from agent.nodes.travel_agent import TravelAgentNode
 from agent.nodes.security_gate import security_gate_node
+from agent.state import AgentState
+from tools.rec_tools import rec_tools
+
+# ייבוא הצמתים ופונקציות הניתוב של ה-Itinerary Agent החדש:
 from agent.nodes.itinerary.planner import ItineraryPlannerNode
 from agent.nodes.itinerary.executor import ItineraryExecutorNode
 from agent.nodes.itinerary.observer import ItineraryObserverNode
-from agent.nodes.itinerary.itinerary_fallback import ItineraryFallbackNode
-from agent.nodes.itinerary.itinerary_formatter import ItineraryFormatterNode
-from agent.state import AgentState
-from tools.rec_tools import rec_tools
+from agent.nodes.itinerary.fallback import ItineraryFallbackNode
+from agent.nodes.itinerary.formatter import ItineraryFormatterNode
+from agent.nodes.itinerary.itinerary_edges import (
+    after_itinerary_planner,
+    after_itinerary_observer,
+    after_itinerary_fallback,
+)
 
 
 def build_graph(
     provider: str = "google",
     checkpointer: BaseCheckpointSaver | None = None,
 ) -> CompiledStateGraph:
+    """Build the graph using the specified model provider ('google' or 'groq').
 
-    # ── Models ──────────────────────────────────────────────────────────
+    If no `checkpointer` is supplied, falls back to an in-memory saver so the
+    graph still works for tests and one-shot invocations. Persistent runs
+    should pass a durable checkpointer (e.g. `SqliteSaver`).
+    """
+    # 1. Create nodes for the travel planning path
     response_model, extraction_model = get_models(provider)
-    rec_model, rec_extraction_model   = get_models(provider, mode="recommendation")
-    chat_model, _                     = get_models(provider, mode="recommendation")
 
-    # ── Nodes ────────────────────────────────────────────────────────────
+    extract_metadata_node = MetadataNode(extraction_model)
+    adjustments_node = AdjustmentsNode(extraction_model)
+    enrichment_node = EnrichmentNode(extraction_model)
+    flight_search_node = FlightSearchNode()
+    travel_agent_node = TravelAgentNode(response_model)
+    summary_node = SummaryNode(extraction_model)
+    formatter = FormatterNode(response_model)
+    alternative_destination_node = AlternativeDestinationNode(extraction_model)
+    formatter_alternative = FormatterAlternativeNode(extraction_model)
+    router_node = RouterNode(extraction_model)
+
+    # יצירת צמתי ה-Itinerary
+    itinerary_planner_node = ItineraryPlannerNode(response_model)
+    itinerary_executor_node = ItineraryExecutorNode(response_model)
+    itinerary_observer_node = ItineraryObserverNode(response_model)
+    itinerary_fallback_node = ItineraryFallbackNode(response_model)
+    itinerary_formatter_node = ItineraryFormatterNode()
+
+    # 2. Create nodes for the recommendation path (uses its own model)
+    rec_model_with_tools, rec_extraction_model = get_models(provider, mode="recommendation")
+    rec_agent_node = RecommendationAgentNode(rec_model_with_tools, rec_extraction_model)
+    rec_formatter_node = RecommendationFormatterNode(rec_extraction_model)
+
+    # 3a. Create nodes for the general chat path (reuses rec tools)
+    chat_model_with_tools, _ = get_models(provider, mode="recommendation")
+    general_chat_node = GeneralChatNode(chat_model_with_tools, extraction_model)
+
+    # 3. Build the graph
     builder = StateGraph(AgentState)
 
-    # Security & routing
-    builder.add_node("security_gate",    security_gate_node)
-    builder.add_node("router",           RouterNode(extraction_model))
+    # Travel planning nodes
+    builder.add_node("security_gate", security_gate_node)
+    builder.add_node("router", router_node)
+    builder.add_node("extract_metadata", extract_metadata_node)
+    builder.add_node("adjustments", adjustments_node)
+    builder.add_node("enrichment", enrichment_node)
+    builder.add_node("flight_search", flight_search_node)
+    builder.add_node("travel_agent", travel_agent_node)
+    builder.add_node("formatter", formatter)
+    builder.add_node("alternative_destination", alternative_destination_node)
+    builder.add_node("formatter_alternative", formatter_alternative)
+    builder.add_node("summary", summary_node)
 
-    # Standard travel planning
-    builder.add_node("extract_metadata",        MetadataNode(extraction_model))
-    builder.add_node("adjustments",             AdjustmentsNode(extraction_model))
-    builder.add_node("enrichment",              EnrichmentNode(extraction_model))
-    builder.add_node("flight_search",           FlightSearchNode())
-    builder.add_node("travel_agent",            TravelAgentNode(response_model))
-    builder.add_node("formatter",               FormatterNode(response_model))
-    builder.add_node("alternative_destination", AlternativeDestinationNode(extraction_model))
-    builder.add_node("formatter_alternative",   FormatterAlternativeNode(extraction_model))
-    builder.add_node("summary",                 SummaryNode(extraction_model))
+    # הוספת צמתי ה-Itinerary לגרף במקום ה-stub
+    builder.add_node("itinerary_planner", itinerary_planner_node)
+    builder.add_node("itinerary_executor", itinerary_executor_node)
+    builder.add_node("itinerary_observer", itinerary_observer_node)
+    builder.add_node("itinerary_fallback", itinerary_fallback_node)
+    builder.add_node("itinerary_formatter", itinerary_formatter_node)
 
-    # Itinerary — Plan & Execute
-    builder.add_node("itinerary_planner",   ItineraryPlannerNode(response_model))
-    builder.add_node("itinerary_executor",  ItineraryExecutorNode())         # no LLM
-    builder.add_node("itinerary_observer",  ItineraryObserverNode())         # no LLM
-    builder.add_node("itinerary_fallback",  ItineraryFallbackNode(response_model, extraction_model))
-    builder.add_node("itinerary_formatter", ItineraryFormatterNode(response_model))
+    # Recommendation nodes
+    builder.add_node("rec_agent", rec_agent_node)
+    builder.add_node("rec_tools", ToolNode(rec_tools))
+    builder.add_node("rec_formatter", rec_formatter_node)
 
-    # Recommendations
-    builder.add_node("rec_agent",     RecommendationAgentNode(rec_model, rec_extraction_model))
-    builder.add_node("rec_tools",     ToolNode(rec_tools))
-    builder.add_node("rec_formatter", RecommendationFormatterNode(rec_extraction_model))
+    # General chat nodes
+    builder.add_node("general_chat", general_chat_node)
+    builder.add_node("chat_tools", ToolNode(rec_tools))
 
-    # General chat
-    builder.add_node("general_chat", GeneralChatNode(chat_model, extraction_model))
-    builder.add_node("chat_tools",   ToolNode(rec_tools))
-
-    # ── Edges ────────────────────────────────────────────────────────────
-
-    # Entry
+    # 4. Define edges — travel planning path
     builder.add_edge(START, "security_gate")
-    builder.add_conditional_edges("security_gate", after_security_gate,
-                                  {"router": "router", "summary": "summary"})
 
-    # Router dispatch
-    # NOTE: "update_itinerary" must be in the map — it routes to itinerary_planner or adjustments
     builder.add_conditional_edges(
-        "router", after_router,
+        "security_gate",
+        after_security_gate,
         {
-            "extract_metadata":  "extract_metadata",
-            "adjustments":       "adjustments",
-            "itinerary_planner": "itinerary_planner",
-            "rec_agent":         "rec_agent",
-            "general_chat":      "general_chat",
-            END:                 END,
+            "router": "router",
+            "summary": "summary",
+        }
+    )
+
+    builder.add_conditional_edges(
+        "router",
+        after_router,
+        {
+            "extract_metadata": "extract_metadata",
+            "adjustments": "adjustments",
+            "rec_agent": "rec_agent",
+            "itinerary_planner": "itinerary_planner",  # שונה מ-itinerary_agent
+            "general_chat": "general_chat",
+            END: END,
         },
     )
 
-    # Standard planning path
     builder.add_edge("extract_metadata", "enrichment")
-    builder.add_edge("adjustments",      "enrichment")
-    builder.add_conditional_edges("enrichment", after_enrichment,
-                                  {"flight_search": "flight_search", END: END})
+    builder.add_edge("adjustments", "enrichment")
+    
+    # עדכון המעבר מ-enrichment: ניתן לנווט עכשיו גם ל-flight_search וגם ל-itinerary_planner
     builder.add_conditional_edges(
-        "flight_search", after_flight_search,
+        "enrichment", 
+        after_enrichment, 
         {
-            "itinerary_planner":      "itinerary_planner",
-            "travel_agent":           "travel_agent",
-            "alternative_destination":"alternative_destination",
-        },
-    )
-    builder.add_conditional_edges(
-        "travel_agent", after_travel_agent,
-        {
-            "formatter":         "formatter",
+            "flight_search": "flight_search", 
             "itinerary_planner": "itinerary_planner",
-            "summary":           "summary",
+            END: END
+        }
+    )
+    
+    builder.add_conditional_edges(
+        "flight_search",
+        after_flight_search,
+        {
+            "travel_agent": "travel_agent",
+            "alternative_destination": "alternative_destination",
         },
     )
-    builder.add_conditional_edges("alternative_destination", after_alternative_destination,
-                                  {"formatter_alternative": "formatter_alternative"})
-    builder.add_edge("formatter_alternative", "summary")
-    builder.add_edge("formatter",             "summary")
-    builder.add_edge("summary",               END)
-
-    # ── Itinerary Plan & Execute sub-graph ───────────────────────────────
-    #
-    #  itinerary_planner
-    #       ↓ (feasible)          ↓ (not feasible)
-    #  itinerary_executor      itinerary_fallback
-    #       ↓                       ↓ (retry)    ↓ (show alternatives)
-    #  itinerary_observer  ←───────┘         itinerary_formatter → summary
-    #       ↓ (ok)   ↓ (re-plan) ↓ (fallback)
-    #    summary  planner      fallback
-    #
     builder.add_conditional_edges(
-        "itinerary_planner", after_itinerary_planner,
+        "travel_agent",
+        after_travel_agent,
+        {
+            "formatter": "formatter",
+            "summary": "summary",
+        },
+    )
+    builder.add_edge("alternative_destination", "formatter_alternative")
+    builder.add_edge("formatter_alternative", "summary")
+    builder.add_edge("formatter", "summary")
+
+    # ----- חיווט מסלול ה-Itinerary (Plan & Execute) -----
+    builder.add_conditional_edges(
+        "itinerary_planner", 
+        after_itinerary_planner,
         {
             "itinerary_executor": "itinerary_executor",
-            "itinerary_fallback": "itinerary_fallback",
-        },
+            "itinerary_fallback": "itinerary_fallback"
+        }
     )
+    builder.add_edge("itinerary_executor", "itinerary_observer")
+    
     builder.add_conditional_edges(
-        "itinerary_executor", after_itinerary_executor,
-        {"itinerary_observer": "itinerary_observer"},
-    )
-    builder.add_conditional_edges(
-        "itinerary_observer", after_itinerary_observer,
+        "itinerary_observer", 
+        after_itinerary_observer,
         {
-            "itinerary_planner":  "itinerary_planner",   # re-plan
-            "itinerary_fallback": "itinerary_fallback",  # unrecoverable
-            "summary":            "summary",             # done
-        },
+            "itinerary_executor": "itinerary_executor",  # להמשך ה-Step-by-Step
+            "itinerary_planner": "itinerary_planner",    # במקרה של שגיאה (Replanner)
+            "itinerary_fallback": "itinerary_fallback",  # שגיאה קריטית
+            "itinerary_formatter": "itinerary_formatter" # סיום בהצלחה!
+        }
     )
+    
     builder.add_conditional_edges(
-        "itinerary_fallback", after_itinerary_fallback,
+        "itinerary_fallback", 
+        after_itinerary_fallback,
         {
-            "itinerary_planner":   "itinerary_planner",
-            "itinerary_formatter": "itinerary_formatter",
-        },
+            "itinerary_planner": "itinerary_planner",    # תוקן, אפשר לנסות שוב
+            "itinerary_formatter": "itinerary_formatter" # אין ברירה, מציגים אלטרנטיבות
+        }
     )
+    
+    # בסיום העיצוב, הולכים ל-Summary כדי לסיים את הריצה ולשמור הקשר
     builder.add_edge("itinerary_formatter", "summary")
+    # ----------------------------------------------------
 
-    # Recommendations
-    builder.add_conditional_edges("rec_agent", rec_should_continue,
-                                  {"rec_tools": "rec_tools", "rec_formatter": "rec_formatter"})
-    builder.add_edge("rec_tools",     "rec_agent")
+    builder.add_edge("summary", END)
+
+    # 5. Define edges — recommendation path
+    builder.add_conditional_edges(
+        "rec_agent",
+        rec_should_continue,
+        {"rec_tools": "rec_tools", "rec_formatter": "rec_formatter"},
+    )
+    builder.add_edge("rec_tools", "rec_agent")
     builder.add_edge("rec_formatter", "summary")
 
-    # General chat
-    builder.add_conditional_edges("general_chat", chat_should_continue,
-                                  {"chat_tools": "chat_tools", "summary": "summary"})
+    # 6. Define edges — general chat path
+    builder.add_conditional_edges(
+        "general_chat",
+        chat_should_continue,
+        {"chat_tools": "chat_tools", "summary": "summary"},
+    )
     builder.add_edge("chat_tools", "general_chat")
 
-    # ── Compile ──────────────────────────────────────────────────────────
     if checkpointer is None:
         checkpointer = MemorySaver(serde=JsonPlusSerializer())
     return builder.compile(checkpointer=checkpointer)

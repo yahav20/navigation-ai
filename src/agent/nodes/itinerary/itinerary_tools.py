@@ -8,38 +8,56 @@ USAGE: connect to your DB by implementing the stub functions at the bottom.
 All tools return JSON-serialisable dicts or raise ToolException on failure.
 """
 from __future__ import annotations
-
+from security import validate_city, validate_positive_number, validate_season
 from typing import Optional
 from langchain_core.tools import tool, ToolException
-
-
-# ---------------------------------------------------------------------------
-# ── DB stubs ── replace these with your real data_provider calls ────────────
-# ---------------------------------------------------------------------------
+from tools.dependencies import data_provider
 
 def _fetch_flights(origin: str, destination: str) -> list[dict]:
     """Return list of flight dicts for this route."""
-    raise NotImplementedError("Connect to your data_provider here")
+    """Fetch available flights between two cities. Automatically finds direct flights, and if none exist, finds connecting flights."""
+    origin = validate_city(origin)
+    destination = validate_city(destination)
+    direct_flights = data_provider.fetch_flights(origin, destination)
+    has_direct = any("flight_number" in f for f in direct_flights)
+    if not has_direct:
+        connecting_flights = data_provider.find_connecting_flights(origin, destination)
+        if connecting_flights and any("route" in f for f in connecting_flights):
+            return connecting_flights
+    return direct_flights
 
 
 def _fetch_hotels(city: str) -> list[dict]:
-    raise NotImplementedError
+    """Fetch available hotels in a city with prices and availability, optionally filtered by maximum price per night."""
+    city = validate_city(city)
+    return data_provider.fetch_hotels(city)
 
 
 def _fetch_activities(city: str) -> list[dict]:
-    raise NotImplementedError
+    city = validate_city(city)
+    return data_provider.fetch_activities(city)
 
 
 def _fetch_weather(city: str) -> list[dict]:
-    raise NotImplementedError
+    city = validate_city(city)
+    return data_provider.get_average_weather(city, "Spring")  # Default to spring if no season specified
 
 
 def _fetch_best_time(city: str) -> dict:
-    raise NotImplementedError
+    city = validate_city(city)
+    return data_provider.get_best_time_to_visit(city)
 
 
 def _fetch_return_flights(origin: str, destination: str) -> list[dict]:
-    raise NotImplementedError
+    origin = validate_city(origin)
+    destination = validate_city(destination)
+    direct_flights = data_provider.fetch_flights(origin, destination)
+    has_direct = any("flight_number" in f for f in direct_flights)
+    if not has_direct:
+        connecting_flights = data_provider.find_connecting_flights(origin, destination)
+        if connecting_flights and any("route" in f for f in connecting_flights):
+            return connecting_flights
+    return direct_flights
 
 
 # ---------------------------------------------------------------------------
