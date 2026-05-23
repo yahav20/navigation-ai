@@ -23,6 +23,10 @@ from pathlib import Path
 import requests
 from dotenv import load_dotenv
 
+# Local import — Wikipedia/Wikivoyage enrichment for attractions
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from enrich_attractions_wiki import enrich_attractions, attractions_markdown_section  # noqa: E402
+
 ROOT = Path(__file__).resolve().parents[1]
 load_dotenv(ROOT / ".env")
 
@@ -422,6 +426,9 @@ hotels = fetch_paris_hotels(DEPART, RETURN, limit=10, with_rates=False)
 
 print("Fetching attractions near Paris …")
 attractions = places_nearby(lat, lng, "tourist_attraction", radius=4500, limit=10)
+
+print("Enriching attractions with Wikipedia + Wikivoyage …")
+enrich_attractions(attractions, verbose=False)
 
 print("Fetching restaurants near Paris (new Places API for priceRange) …")
 restaurants = places_v1_text_search(

@@ -27,9 +27,6 @@ OUT = ROOT / "out"
 JSON_PATH = OUT / "paris_sample.json"
 MD_PATH = OUT / "paris_sample.md"
 
-if not JSON_PATH.exists():
-    print("Run tests/build_paris_sample.py first")
-    sys.exit(1)
 
 WP_API = "https://en.wikipedia.org/w/api.php"
 WP_REST = "https://en.wikipedia.org/api/rest_v1"
@@ -143,67 +140,85 @@ def clip_price(s: str) -> str:
     return s[:80]
 
 
-sample = json.loads(JSON_PATH.read_text())
-attractions = sample["attractions_in_paris"]
+def enrich_attractions(attractions: list[dict], verbose: bool = True) -> None:
+    """Mutate `attractions` in place, adding wiki_* and wikivoyage_admission."""
+    if verbose:
+        print("Building Wikivoyage price map…")
+    price_map = build_paris_price_map()
+    if verbose:
+        print(f"  -> {len(price_map)} priced listings indexed\n")
+        print(f"Enriching {len(attractions)} attractions…")
+    for a in attractions:
+        name = a["name"]
+        title = wiki_search_title(name) or name
+        summary = wiki_summary(title)
 
-print("Building Wikivoyage price map…")
-price_map = build_paris_price_map()
-print(f"  -> {len(price_map)} priced listings indexed\n")
+        description = summary.get("description") or first_sentence(summary.get("extract", ""))
+        q_id = summary.get("wikibase_item")
+        wiki_url = ((summary.get("content_urls") or {}).get("desktop") or {}).get("page")
 
-print(f"Enriching {len(attractions)} attractions…\n")
-for a in attractions:
-    name = a["name"]
-    title = wiki_search_title(name) or name
-    summary = wiki_summary(title)
+        a["wiki_title"] = summary.get("title") or title
+        a["wiki_url"] = wiki_url
+        a["wiki_description"] = description
+        a["wikidata_id"] = q_id
 
-    description = summary.get("description") or first_sentence(summary.get("extract", ""))
-    q_id = summary.get("wikibase_item")  # e.g., "Q19675"
-    wiki_url = ((summary.get("content_urls") or {}).get("desktop") or {}).get("page")
+        wv = price_map.get(q_id) if q_id else None
+        if wv:
+            a["wikivoyage_admission"] = clip_price(wv["price"])
+            a["wikivoyage_source"] = wv["source_page"]
+        else:
+            a["wikivoyage_admission"] = None
+            a["wikivoyage_source"] = None
 
-    a["wiki_title"] = summary.get("title") or title
-    a["wiki_url"] = wiki_url
-    a["wiki_description"] = description
-    a["wikidata_id"] = q_id
-
-    wv = price_map.get(q_id) if q_id else None
-    if wv:
-        a["wikivoyage_admission"] = clip_price(wv["price"])
-        a["wikivoyage_source"] = wv["source_page"]
-    else:
-        a["wikivoyage_admission"] = None
-        a["wikivoyage_source"] = None
-
-    print(f"  · {name:<40s} {q_id or '-':<10s}  {description[:50]}")
-    print(f"      admission: {a['wikivoyage_admission']}")
-    time.sleep(0.1)
+        if verbose:
+            print(f"  · {name:<40s} {q_id or '-':<10s}  {description[:50]}")
+            print(f"      admission: {a['wikivoyage_admission']}")
+        time.sleep(0.05)
 
 
-JSON_PATH.write_text(json.dumps(sample, indent=2, ensure_ascii=False))
-print(f"\nUpdated {JSON_PATH}")
+def attractions_markdown_section(attractions: list[dict]) -> list[str]:
+    """Render the attractions table as markdown lines (description + admission)."""
+    out = [
+        "## Top tourist attractions near Paris center  (Google Nearby + Wikipedia + Wikivoyage)",
+        "",
+        "| Name | ★ | Reviews | Description | Admission | Lat | Lng | Wiki |",
+        "|---|---:|---:|---|---|---:|---:|---|",
+    ]
+    for a in attractions:
+        desc = (a.get("wiki_description") or "—").replace("|", "\\|")[:80]
+        adm = (a.get("wikivoyage_admission") or "—").replace("|", "\\|")
+        wiki = f"[wiki]({a['wiki_url']})" if a.get("wiki_url") else "—"
+        lat = f"{a['lat']:.4f}" if a.get("lat") is not None else "—"
+        lng = f"{a['lng']:.4f}" if a.get("lng") is not None else "—"
+        out.append(
+            f"| {a['name']} | {a['rating']} | {a['review_count']} | {desc} | {adm} | "
+            f"{lat} | {lng} | {wiki} |"
+        )
+    out.append("")
+    return out
 
-# Re-render the attractions section of the markdown.
-md_lines = MD_PATH.read_text().splitlines()
-start = next(i for i, ln in enumerate(md_lines) if ln.startswith("## Top tourist attractions"))
-end = len(md_lines)
-for i in range(start + 1, len(md_lines)):
-    if md_lines[i].startswith("## ") or md_lines[i].startswith("_Note"):
-        end = i
-        break
 
-new_section = [
-    "## Top tourist attractions near Paris center  (Google Nearby + Wikipedia + Wikivoyage)",
-    "",
-    "| Name | ★ | Reviews | Description | Admission | Lat | Lng | Wiki |",
-    "|---|---:|---:|---|---|---:|---:|---|",
-]
-for a in attractions:
-    desc = (a.get("wiki_description") or "—").replace("|", "\\|")[:80]
-    adm = (a.get("wikivoyage_admission") or "—").replace("|", "\\|")
-    wiki = f"[wiki]({a['wiki_url']})" if a.get("wiki_url") else "—"
-    new_section.append(
-        f"| {a['name']} | {a['rating']} | {a['review_count']} | {desc} | {adm} | "
-        f"{a['lat']:.4f} | {a['lng']:.4f} | {wiki} |"
+# Standalone CLI path: read JSON, enrich, write back, patch markdown.
+if __name__ == "__main__":
+    if not JSON_PATH.exists():
+        print("Run tests/build_paris_sample.py first")
+        sys.exit(1)
+
+    sample = json.loads(JSON_PATH.read_text())
+    attractions = sample["attractions_in_paris"]
+    enrich_attractions(attractions)
+
+    JSON_PATH.write_text(json.dumps(sample, indent=2, ensure_ascii=False))
+    print(f"\nUpdated {JSON_PATH}")
+
+    md_lines = MD_PATH.read_text().splitlines()
+    start = next(i for i, ln in enumerate(md_lines) if ln.startswith("## Top tourist attractions"))
+    end = len(md_lines)
+    for i in range(start + 1, len(md_lines)):
+        if md_lines[i].startswith("## ") or md_lines[i].startswith("_Note"):
+            end = i
+            break
+    MD_PATH.write_text(
+        "\n".join(md_lines[:start] + attractions_markdown_section(attractions) + md_lines[end:])
     )
-new_section.append("")
-MD_PATH.write_text("\n".join(md_lines[:start] + new_section + md_lines[end:]))
-print(f"Updated {MD_PATH}")
+    print(f"Updated {MD_PATH}")
