@@ -125,40 +125,126 @@ def fetch_paris_hotels(chk_in: str, chk_out: str, limit: int = 10, with_rates: b
 
 
 # ---------------------------------------------------------------------------
-# 1. Flights — TLV -> PAR on 2026-06-10
+# 1. Flights — TLV -> PAR (Aviasales v3, three queries combined)
+#
+# The exact-day query on a city code ("PAR") returns only the single cheapest
+# cached offer. We get richer results by:
+#   - separately asking for direct flights on the date
+#   - asking for cheapest connecting per Paris airport (CDG, ORY, BVA)
+#   - pulling the monthly per-day calendar so the agent can suggest shifting
 # ---------------------------------------------------------------------------
-def fetch_flights(origin: str, destination: str, depart: str) -> list[dict]:
+AVIASALES = "https://api.travelpayouts.com/aviasales/v3"
+PARIS_AIRPORTS = ("CDG", "ORY", "BVA")
+_airline_cache: dict[str, str] | None = None
+
+
+def airline_name(code: str | None) -> str:
+    """Resolve a 2-letter IATA airline code to its name. Cached after first call."""
+    global _airline_cache
+    if not code:
+        return ""
+    if _airline_cache is None:
+        try:
+            r = requests.get("https://api.travelpayouts.com/data/en/airlines.json", timeout=15)
+            r.raise_for_status()
+            _airline_cache = {a.get("iata") or a.get("code"): a.get("name") for a in r.json() if a.get("iata") or a.get("code")}
+        except Exception:
+            _airline_cache = {}
+    return _airline_cache.get(code) or code
+
+
+def _normalize_offer(it: dict) -> dict:
+    code = it.get("airline")
+    return {
+        "airline_code": code,
+        "airline_name": airline_name(code),
+        "flight_number": it.get("flight_number"),
+        "price_usd": it.get("price"),
+        "departure_at": it.get("departure_at"),
+        "origin_airport": it.get("origin_airport"),
+        "destination_airport": it.get("destination_airport"),
+        "duration_minutes": it.get("duration"),
+        "transfers": it.get("transfers"),
+        "seller": it.get("gate"),
+        "booking_link": "https://www.aviasales.com" + (it.get("link") or ""),
+    }
+
+
+def _prices_for_dates(origin: str, dest: str, depart: str, direct: bool, limit: int = 5) -> list[dict]:
     r = requests.get(
-        "https://api.travelpayouts.com/aviasales/v3/prices_for_dates",
+        f"{AVIASALES}/prices_for_dates",
         params={
-            "origin": origin,
-            "destination": destination,
-            "departure_at": depart,  # exact-day filter
-            "currency": "usd",
-            "limit": 20,
-            "sorting": "price",
-            "one_way": "true",
+            "origin": origin, "destination": dest,
+            "departure_at": depart, "currency": "usd",
+            "limit": limit, "sorting": "price", "one_way": "true",
+            "direct": "true" if direct else "false",
             "token": TP_KEY,
         },
-        timeout=20,
+        timeout=15,
     )
     r.raise_for_status()
-    items = r.json().get("data", [])
-    return [
-        {
-            "airline": it.get("airline"),
-            "flight_number": it.get("flight_number"),
-            "price_usd": it.get("price"),
-            "departure_at": it.get("departure_at"),
-            "origin_airport": it.get("origin_airport"),
-            "destination_airport": it.get("destination_airport"),
-            "duration_minutes": it.get("duration"),
-            "transfers": it.get("transfers"),
-            "seller": it.get("gate"),
-            "booking_link": "https://www.aviasales.com" + it.get("link", ""),
-        }
-        for it in items
-    ]
+    return [_normalize_offer(it) for it in r.json().get("data", [])]
+
+
+def _grouped_by_day(origin: str, dest: str, month: str) -> list[dict]:
+    """grouped_prices group_by=departure_at — one cheapest offer per day."""
+    r = requests.get(
+        f"{AVIASALES}/grouped_prices",
+        params={
+            "origin": origin, "destination": dest,
+            "departure_at": month, "currency": "usd",
+            "group_by": "departure_at", "trip_class": 0,
+            "token": TP_KEY,
+        },
+        timeout=15,
+    )
+    r.raise_for_status()
+    out: list[dict] = []
+    for day, offer in (r.json().get("data") or {}).items():
+        if isinstance(offer, dict):
+            code = offer.get("airline")
+            out.append({
+                "date": day,
+                "price_usd": offer.get("price"),
+                "airline_code": code,
+                "airline_name": airline_name(code),
+                "flight_number": offer.get("flight_number"),
+                "transfers": offer.get("transfers"),
+                "duration_minutes": offer.get("duration"),
+                "destination_airport": offer.get("destination_airport"),
+            })
+    out.sort(key=lambda r: r["date"])
+    return out
+
+
+def fetch_flight_options(origin: str, destination: str, depart: str) -> dict:
+    """Combine direct + per-airport cheapest connecting + monthly calendar."""
+    direct = _prices_for_dates(origin, destination, depart, direct=True, limit=5)
+
+    # Per-Paris-airport cheapest connecting (each call returns the single
+    # cheapest cached offer for that airport on that day)
+    connecting: list[dict] = []
+    seen_keys: set[tuple] = set()
+    for ap in PARIS_AIRPORTS:
+        for offer in _prices_for_dates(origin, ap, depart, direct=False, limit=3):
+            key = (offer["flight_number"], offer["departure_at"])
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            connecting.append(offer)
+    connecting.sort(key=lambda o: o["price_usd"] or 1e9)
+
+    month = depart[:7]
+    calendar = _grouped_by_day(origin, destination, month)
+
+    return {
+        "depart_date": depart,
+        "origin": origin,
+        "destination": destination,
+        "direct_on_date": direct,
+        "connecting_on_date": connecting,
+        "monthly_cheapest_by_day": calendar,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -319,8 +405,11 @@ def _simplify_place(p: dict) -> dict:
 # ---------------------------------------------------------------------------
 # Run
 # ---------------------------------------------------------------------------
-print(f"Fetching flights TLV -> PAR on {DEPART} …")
-flights = fetch_flights("TLV", "PAR", DEPART)
+print(f"Fetching flight options TLV -> PAR for {DEPART} (direct + connecting + month) …")
+flight_options = fetch_flight_options("TLV", "PAR", DEPART)
+print(f"  direct on date:       {len(flight_options['direct_on_date'])}")
+print(f"  connecting on date:   {len(flight_options['connecting_on_date'])}")
+print(f"  monthly day-by-day:   {len(flight_options['monthly_cheapest_by_day'])}")
 
 print("Geocoding Paris …")
 lat, lng, paris_addr = geocode("Paris, France")
@@ -344,7 +433,7 @@ restaurants = places_v1_text_search(
 sample = {
     "generated_for": "2026-06-10 trip to Paris",
     "paris_center": {"lat": lat, "lng": lng, "address": paris_addr},
-    "flights_TLV_PAR_2026_06_10": flights,
+    "flights_TLV_PAR_2026_06_10": flight_options,
     "hotels_in_paris": hotels,
     "attractions_in_paris": attractions,
     "restaurants_in_paris": restaurants,
@@ -369,17 +458,50 @@ lines: list[str] = []
 lines.append(f"# Paris sample — 2026-06-10\n")
 lines.append(f"Paris center geocoded to **{lat:.4f}, {lng:.4f}** ({paris_addr}).\n")
 
-lines.append("\n## Flights TLV → PAR on 2026-06-10  (Travelpayouts, sorted by price)\n")
-lines.append("| Price USD | Airline | Flight | Depart | Stops | Duration | Route | Seller |")
-lines.append("|---:|---|---|---|---:|---|---|---|")
-for f in flights:
-    lines.append(
-        f"| ${f['price_usd']} | {f['airline']} | {f['flight_number']} | "
-        f"{f['departure_at'][:16].replace('T', ' ')} | {f['transfers']} | "
-        f"{fmt_minutes(f['duration_minutes'])} | {f['origin_airport']}→{f['destination_airport']} | {f['seller']} |"
+def _flight_row(f: dict) -> str:
+    depart = (f.get("departure_at") or "")[:16].replace("T", " ")
+    return (
+        f"| ${f['price_usd']} | {f['airline_code']} ({f['airline_name']}) | "
+        f"{f['flight_number']} | {depart} | {f['transfers']} | "
+        f"{fmt_minutes(f['duration_minutes'])} | "
+        f"{f['origin_airport']}→{f['destination_airport']} | {f['seller']} |"
     )
-if not flights:
-    lines.append("| _no offers found for that date_ | | | | | | | |")
+
+
+lines.append(f"\n## Flights TLV → PAR  (Travelpayouts / Aviasales)\n")
+
+lines.append(f"### Direct flights on {DEPART}\n")
+lines.append("| Price | Airline | Flight | Depart | Stops | Duration | Route | Seller |")
+lines.append("|---:|---|---|---|---:|---|---|---|")
+if flight_options["direct_on_date"]:
+    for f in flight_options["direct_on_date"]:
+        lines.append(_flight_row(f))
+else:
+    lines.append("| _no direct flights cached for this date_ | | | | | | | |")
+
+lines.append(f"\n### Cheapest connecting options on {DEPART}  (per Paris airport)\n")
+lines.append("| Price | Airline | Flight | Depart | Stops | Duration | Route | Seller |")
+lines.append("|---:|---|---|---|---:|---|---|---|")
+if flight_options["connecting_on_date"]:
+    for f in flight_options["connecting_on_date"]:
+        lines.append(_flight_row(f))
+else:
+    lines.append("| _no connecting offers cached_ | | | | | | | |")
+
+lines.append(f"\n### Cheapest fare per day across {DEPART[:7]}  (flex your date)\n")
+lines.append("| Date | Price | Airline | Flight | Stops | Duration | To |")
+lines.append("|---|---:|---|---|---:|---|---|")
+target_day = flight_options["depart_date"]
+for d in flight_options["monthly_cheapest_by_day"]:
+    marker = " ← target" if d["date"] == target_day else ""
+    lines.append(
+        f"| {d['date']}{marker} | ${d['price_usd']} | "
+        f"{d['airline_code']} ({d['airline_name']}) | {d['flight_number']} | "
+        f"{d['transfers']} | {fmt_minutes(d['duration_minutes'])} | {d.get('destination_airport') or '—'} |"
+    )
+if flight_options["monthly_cheapest_by_day"]:
+    cheapest = min(flight_options["monthly_cheapest_by_day"], key=lambda x: x["price_usd"] or 1e9)
+    lines.append(f"\n_Cheapest day in window: **{cheapest['date']}** at **${cheapest['price_usd']}** ({cheapest['airline_name']}, {cheapest['transfers']} stops)._")
 
 
 def place_table(title: str, items: list[dict], with_range: bool = False) -> None:
@@ -453,7 +575,10 @@ md_path.write_text("\n".join(lines))
 print(f"Wrote {md_path}  ({md_path.stat().st_size:,} bytes)\n")
 
 print("Quick stats:")
-print(f"  flights:     {len(flights)}")
+print(f"  flights direct/connecting/calendar: "
+      f"{len(flight_options['direct_on_date'])}/"
+      f"{len(flight_options['connecting_on_date'])}/"
+      f"{len(flight_options['monthly_cheapest_by_day'])}")
 print(f"  hotels:      {len(hotels)}")
 print(f"  attractions: {len(attractions)}")
 print(f"  restaurants: {len(restaurants)}")
