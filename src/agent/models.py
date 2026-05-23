@@ -119,6 +119,8 @@ class IntentClassification(BaseModel):
         "recommendations",
         "build_itinerary",
         "general_chat",
+        "itinerary",         
+        "update_itinerary"   
     ] = Field(
         description=(
             "Classify the user's intent strictly following these rules:\n"

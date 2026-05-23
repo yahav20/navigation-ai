@@ -47,7 +47,7 @@ class FlightSearchNode:
             data_provider.find_connecting_flights(destination, origin))
         # 2. Fetch all other itinerary data (No early return!)
         hotels = data_provider.get_hotels_by_city(destination) or []
-        activities = data_provider.get_activities_by_city(destination) or []
+        activities = data_provider.fetch_activities(destination) or []
         weather = data_provider.get_average_weather(destination) or []
         best_time = data_provider.get_best_time_to_visit(destination) or {}
         

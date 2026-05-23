@@ -66,7 +66,6 @@ CREATE TABLE hotels (
 );
 CREATE INDEX idx_hotels_city ON hotels(city_id);
 
--- הטבלאות הקיימות של האטרקציות (ללא שינוי, כפי שהגדרנו קודם)
 CREATE TABLE activities (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     city_id INTEGER NOT NULL REFERENCES cities(id),
@@ -87,17 +86,11 @@ CREATE TABLE activities (
 );
 CREATE INDEX idx_activities_city ON activities(city_id);
 
--- =========================================================
--- טבלאות חדשות: מאפייני העדפות לאטרקציות ומסעדות
--- =========================================================
-
--- טבלת המילון של המאפיינים האפשריים (כשר, טבעוני, נגיש וכו')
 CREATE TABLE activity_features (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT UNIQUE NOT NULL
 );
 
--- טבלת הגישור: מקשרת בין אטרקציה ספציפית למאפיינים שלה
 CREATE TABLE activity_feature_mapping (
     activity_id INTEGER NOT NULL,
     feature_id INTEGER NOT NULL,
@@ -212,7 +205,7 @@ def resolve_city(conn: sqlite3.Connection, name: str, alpha2: str) -> int:
 
 
 def seed_travel(conn: sqlite3.Connection) -> None:
-    # key → (city name as it appears in world_cities, ISO alpha-2)
+
     city_keys = {
         "tel aviv":  ("Tel Aviv",      "IL"),
         "paris":     ("Paris",         "FR"),
@@ -228,87 +221,28 @@ def seed_travel(conn: sqlite3.Connection) -> None:
     ("tel aviv", "paris", "El Al", 350, "LY321", "2026-06-01 08:00:00", "2026-06-01 11:50:00", 290, "Available", 4.5),
     ("tel aviv", "paris", "Air France", 420, "AF123", "2026-06-01 09:30:00", "2026-06-01 13:00:00", 270, "Available", 4.5),
     ("tel aviv", "paris", "EasyJet", 180, "U2111", "2026-06-01 14:00:00", "2026-06-01 18:30:00", 270, "Available", 4.5), # אופציית לואו-קוסט
-
-    
     ("paris", "tel aviv", "El Al", 355, "LY322", "2026-06-04 15:00:00", "2026-06-04 20:50:00", 295, "Available", 4.8),
     ("paris", "tel aviv", "Air France", 400, "AF126", "2026-06-04 10:00:00", "2026-06-04 15:30:00", 270, "Available", 4.5),
     ("paris", "tel aviv", "EasyJet", 150, "U2112", "2026-06-04 21:00:00", "2026-06-05 02:30:00", 270, "Available", 4.5),
-
-    ("tel aviv", "london", "British Airways", 450, "BA164",
-     "2026-06-01 07:30:00", "2026-06-01 11:00:00",
-     330, "Limited", 5.0),
-
-    ("tel aviv", "london", "Virgin Atlantic", 390, "VS100",
-     "2026-06-01 10:00:00", "2026-06-01 13:30:00",
-     300, "Available", 5.0),
-
-    ("tel aviv", "tokyo", "El Al", 950, "LY091",
-     "2026-06-01 22:00:00", "2026-06-02 14:30:00",
-     690, "Available", 11.5),
-
-    ("tel aviv", "tokyo", "Emirates", 820, "EK312",
-     "2026-06-01 23:30:00", "2026-06-02 18:30:00",
-     780, "Available", 13.0),
-
-    ("tel aviv", "new york", "United", 750, "UA445",
-     "2026-06-01 16:00:00", "2026-06-01 21:00:00",
-     660, "Limited", 11.0),
-
-    ("tel aviv", "berlin", "Lufthansa", 280, "LH909",
-     "2026-06-01 06:30:00", "2026-06-01 09:00:00",
-     210, "Available", 3.5),
-
-    ("tel aviv", "berlin", "Ryanair", 110, "FR101",
-     "2026-06-01 12:00:00", "2026-06-01 14:30:00",
-     210, "Available", 3.5),
-
-    ("tel aviv", "amsterdam", "KLM", 410, "KL456",
-     "2026-06-01 11:00:00", "2026-06-01 14:30:00",
-     270, "Available", 4.5),
-
-    ("london", "paris", "Air France", 120, "AF124",
-     "2026-06-01 12:00:00", "2026-06-01 14:15:00",
-     75, "Available", 1.25),
-
-     ("paris", "tel aviv", "El Al", 355, "LY322",
-     "2026-06-02 08:00:00", "2026-06-02 11:50:00",
-     295, "Available", 5.0),
-
-    ("paris", "london", "Air France", 120, "AF125",
-     "2026-06-01 13:00:00", "2026-06-01 14:15:00",
-     75, "Available", 1.25),
-
-    ("london", "tokyo", "JAL", 890, "JL402",
-     "2026-06-01 19:00:00", "2026-06-02 15:00:00",
-     780, "Available", 12.0),
-
-    ("london", "new york", "Virgin Atlantic", 550, "VS001",
-     "2026-06-01 15:00:00", "2026-06-01 18:30:00",
-     450, "Limited", 7.5),
-
-    ("new york", "london", "Virgin Atlantic", 550, "VS002",
-     "2026-06-01 19:00:00", "2026-06-02 07:00:00",
-     420, "Available", 7.0),
-
-    ("new york", "paris", "Air France", 480, "AF200",
-     "2026-06-01 18:30:00", "2026-06-02 07:45:00",
-     435, "Available", 7.5),
-
-    ("new york", "amsterdam", "Delta", 500, "DL300",
-     "2026-06-01 20:00:00", "2026-06-02 09:30:00",
-     450, "Available", 7.5),
-
-    ("london", "berlin", "Ryanair", 60, "FR555",
-     "2026-06-02 10:00:00", "2026-06-02 12:00:00",
-     120, "Available", 2.0),
-
-    ("paris", "berlin", "Lufthansa", 160, "LH111",
-     "2026-06-02 11:30:00", "2026-06-02 13:15:00",
-     105, "Available", 1.75),
-
-    ("amsterdam", "berlin", "EasyJet", 80, "U2444",
-     "2026-06-02 13:00:00", "2026-06-02 14:20:00",
-     80, "Available", 1.33),
+    ("tel aviv", "london", "British Airways", 450, "BA164","2026-06-01 07:30:00", "2026-06-01 11:00:00",330, "Limited", 5.0),
+    ("tel aviv", "london", "Virgin Atlantic", 390, "VS100","2026-06-01 10:00:00", "2026-06-01 13:30:00", 300, "Available", 5.0),
+    ("tel aviv", "tokyo", "El Al", 950, "LY091","2026-06-01 22:00:00", "2026-06-02 14:30:00",690, "Available", 11.5),
+    ("tel aviv", "tokyo", "Emirates", 820, "EK312", "2026-06-01 23:30:00", "2026-06-02 18:30:00",780, "Available", 13.0),
+    ("tel aviv", "new york", "United", 750, "UA445","2026-06-01 16:00:00", "2026-06-01 21:00:00",660, "Limited", 11.0),
+    ("tel aviv", "berlin", "Lufthansa", 280, "LH909","2026-06-01 06:30:00", "2026-06-01 09:00:00",210, "Available", 3.5),
+    ("tel aviv", "berlin", "Ryanair", 110, "FR101","2026-06-01 12:00:00", "2026-06-01 14:30:00",210, "Available", 3.5),
+    ("tel aviv", "amsterdam", "KLM", 410, "KL456","2026-06-01 11:00:00", "2026-06-01 14:30:00",270, "Available", 4.5),
+    ("london", "paris", "Air France", 120, "AF124","2026-06-01 12:00:00", "2026-06-01 14:15:00",75, "Available", 1.25),
+    ("paris", "tel aviv", "El Al", 355, "LY322","2026-06-02 08:00:00", "2026-06-02 11:50:00",295, "Available", 5.0),
+    ("paris", "london", "Air France", 120, "AF125","2026-06-01 13:00:00", "2026-06-01 14:15:00",75, "Available", 1.25),
+    ("london", "tokyo", "JAL", 890, "JL402","2026-06-01 19:00:00", "2026-06-02 15:00:00",780, "Available", 12.0),
+    ("london", "new york", "Virgin Atlantic", 550, "VS001","2026-06-01 15:00:00", "2026-06-01 18:30:00",450, "Limited", 7.5),
+    ("new york", "london", "Virgin Atlantic", 550, "VS002","2026-06-01 19:00:00", "2026-06-02 07:00:00",420, "Available", 7.0),
+    ("new york", "paris", "Air France", 480, "AF200","2026-06-01 18:30:00", "2026-06-02 07:45:00",435, "Available", 7.5),
+    ("new york", "amsterdam", "Delta", 500, "DL300","2026-06-01 20:00:00", "2026-06-02 09:30:00",450, "Available", 7.5),
+    ("london", "berlin", "Ryanair", 60, "FR555","2026-06-02 10:00:00", "2026-06-02 12:00:00",120, "Available", 2.0),
+    ("paris", "berlin", "Lufthansa", 160, "LH111","2026-06-02 11:30:00", "2026-06-02 13:15:00",105, "Available", 1.75),
+    ("amsterdam", "berlin", "EasyJet", 80, "U2444","2026-06-02 13:00:00", "2026-06-02 14:20:00",80, "Available", 1.33),
     
     ]
     conn.executemany(
@@ -433,12 +367,8 @@ def seed_travel(conn: sqlite3.Connection) -> None:
         
         ("London Eye", ["Wheelchair Accessible", "Air Conditioned"]),
         ("Mount Fuji Day Trip", ["Guided Tour"]),
-        ("Rijksmuseum", ["Wheelchair Accessible", "Air Conditioned", "Vegetarian Options"]),
-        
-   
+        ("Rijksmuseum", ["Wheelchair Accessible", "Air Conditioned", "Vegetarian Options"]),        
     ]
-    
-   
     mapping_insert_data = []
     for activity_name, feats in activity_features_map:
         act_id = activity_ids.get(activity_name)
