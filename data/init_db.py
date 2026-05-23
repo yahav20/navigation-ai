@@ -57,8 +57,6 @@ CREATE TABLE hotels (
     min_age         INTEGER DEFAULT 0,
     hotel_type      TEXT CHECK (hotel_type IN ('Luxury', 'Family', 'Romantic', 'Backpacker', 'Business')),
     distance_from_center_km REAL,
-    breakfast_available BOOLEAN DEFAULT FALSE,
-    breakfast_price REAL,
     amenities TEXT, 
     is_kosher BOOLEAN DEFAULT FALSE,
     latitude REAL,

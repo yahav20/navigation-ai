@@ -1,6 +1,6 @@
 """
-Pydantic schemas shared across all itinerary nodes.
-Import from here — never duplicate these in individual node files.
+schemas.py — Pydantic contracts between Planner → Executor → Observer.
+Import from here only; never redefine these in other files.
 """
 from __future__ import annotations
 from typing import List, Literal, Optional
@@ -8,14 +8,22 @@ from pydantic import BaseModel, Field
 
 
 # ---------------------------------------------------------------------------
-# Plan & Execute — Planner output
+# Planner output
 # ---------------------------------------------------------------------------
 
 class PlanStep(BaseModel):
     step_id: int
-    step_type: Literal["select_flight", "select_hotel", "build_day", "verify_budget"]
-    description: str                              # e.g. "Day 3: last day, depart at 18:00"
-    depends_on: List[int] = Field(default_factory=list)
+    step_type: Literal[
+        "fetch_flights",
+        "fetch_return_flights",
+        "fetch_hotels",
+        "fetch_activities",
+        "fetch_weather",
+        "build_day_schedule",
+        "verify_budget",
+    ]
+    description: str          # human-readable, e.g. "Day 2: museums + kosher lunch"
+    day: Optional[int] = None # set for build_day_schedule steps
 
 
 class ExecutionPlan(BaseModel):
@@ -23,14 +31,35 @@ class ExecutionPlan(BaseModel):
     origin: str
     total_days: int
     steps: List[PlanStep]
+    retry_count: int = 0
 
 
 # ---------------------------------------------------------------------------
-# Executor output — individual day slots
+# Observer output — either done or re-plan
+# ---------------------------------------------------------------------------
+
+class FinalResponse(BaseModel):
+    status: Literal["complete"] = "complete"
+    markdown: str
+
+
+class RevisedPlan(BaseModel):
+    status: Literal["replan"] = "replan"
+    reason: str
+    remaining_steps: List[PlanStep]
+    adjustments: dict = Field(default_factory=dict)
+
+
+class ObserverOutput(BaseModel):
+    result: FinalResponse | RevisedPlan
+
+
+# ---------------------------------------------------------------------------
+# Day slot
 # ---------------------------------------------------------------------------
 
 class DaySlot(BaseModel):
-    time: str                                     # "HH:MM"
+    time: str
     duration_minutes: int
     slot_type: Literal["activity", "meal", "rest", "transport"]
     name: str
@@ -39,10 +68,3 @@ class DaySlot(BaseModel):
     lat: Optional[float] = None
     lng: Optional[float] = None
     notes: Optional[str] = None
-
-
-class BuiltDay(BaseModel):
-    day: int
-    theme: str
-    slots: List[DaySlot]
-    day_cost: float = 0.0

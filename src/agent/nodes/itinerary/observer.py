@@ -1,160 +1,157 @@
 """
-ItineraryObserverNode — Plan & Execute, Step 3: OBSERVE
-
-Reviews the assembled itinerary produced by the Executor.
-No LLM calls — pure validation + Markdown rendering.
-
-Outcomes:
-  - Issues found + retries remaining  → signals re-plan (itinerary_planner)
-  - Budget exceeded, no more retries  → signals fallback (itinerary_fallback)
-  - All good                          → renders Markdown, goes to summary
+ItineraryObserverNode — reviews results, re-plans or renders final markdown.
+Three outcomes: COMPLETE → summary | REPLAN → planner | hard-fail → fallback
 """
 from __future__ import annotations
 import logging
-from langchain_core.messages import AIMessage
+from typing import Optional
+
+from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+
+from agent.nodes.itinerary.schemas import (
+    ExecutionPlan, FinalResponse, ObserverOutput, RevisedPlan,
+)
 from agent.state import AgentState
 
 logger = logging.getLogger(__name__)
+MAX_RETRIES = 3
 
-MAX_RETRIES = 2
+OBSERVER_SYSTEM = """You are a travel plan quality reviewer.
+Inspect the execution results summary and decide:
 
-TYPE_EMOJI = {"activity": "🎯", "meal": "🍽️", "rest": "🛌", "transport": "🚌"}
+A) COMPLETE: all days built, budget OK, no errors.
+   Output: {"result": {"status":"complete","markdown":"<full itinerary markdown>"}}
+   The markdown MUST include:
+   - Trip header with destination, total estimated cost
+   - Outbound flight: airline, flight number, departure_time, arrival_time, price
+   - Return flight: airline, flight number, departure_time, arrival_time, price
+   - Hotel: name, stars, price per night, breakfast info
+   - Day-by-day: for each day list every slot with time, name, duration, cost
+   - Cost breakdown table (flight + return + hotel + activities + meals = total)
+   Use ONLY values from the results summary. Never invent times or prices.
+
+B) REPLAN: a fixable issue exists.
+   Common reasons and suggested adjustments:
+   - budget_exceeded → try {"trip_days": current_days - 1} or {"total_budget": budget + 500}
+   - missing_day → add missing build_day_schedule step
+   - tool_error → retry the failed fetch step
+   Output: {"result": {"status":"replan","reason":"...","remaining_steps":[...],"adjustments":{...}}}
+"""
 
 
 class ItineraryObserverNode:
-    """Validate, optionally re-plan, or render the final itinerary."""
+    def __init__(self, llm: BaseChatModel) -> None:
+        self.llm = llm.with_structured_output(ObserverOutput)
 
     def __call__(self, state: AgentState) -> dict:
-        plan_state = state.get("itinerary_plan", {})
-        assembled  = plan_state.get("assembled", {})
-        retries    = plan_state.get("observer_retries", 0)
+        plan_state   = state.get("itinerary_plan", {})
+        results      = plan_state.get("step_results", {})
+        retry_count  = plan_state.get("retry_count", 0)
+        budget       = state.get("total_budget", 0)
+        trip_days    = state.get("trip_days", 3)
 
-        if not assembled:
+        if retry_count >= MAX_RETRIES:
+            return {"itinerary_feasible": False,
+                    "itinerary_fallback_reason": "max_retries_exceeded"}
+
+        hard_fail = _check_hard_failures(results)
+        if hard_fail:
+            logger.info("Observer hard-fail: %s", hard_fail)
+            return {"itinerary_feasible": False, "itinerary_fallback_reason": hard_fail}
+
+        summary = _build_summary(results, budget, trip_days)
+
+        try:
+            output: ObserverOutput = self.llm.invoke([
+                SystemMessage(content=OBSERVER_SYSTEM),
+                HumanMessage(content=summary),
+            ])
+            result = output.result
+        except Exception as e:
+            logger.error("Observer LLM error: %s", e)
+            result = RevisedPlan(status="replan", reason=f"observer_error:{e}",
+                                  remaining_steps=[], adjustments={})
+
+        if isinstance(result, FinalResponse):
+            logger.info("Observer: COMPLETE")
             return {
-                "itinerary_feasible": False,
-                "itinerary_fallback_reason": "no_flights",
+                "itinerary_plan": {**plan_state, "final_markdown": result.markdown},
+                "itinerary_feasible": True,
+                "messages": [AIMessage(content=result.markdown)],
             }
 
-        issues = _find_issues(assembled, state)
+        if isinstance(result, RevisedPlan):
+            new_retry = retry_count + 1
+            logger.info("Observer: REPLAN reason=%s retry=%d", result.reason, new_retry)
+            if new_retry >= MAX_RETRIES:
+                return {"itinerary_feasible": False,
+                        "itinerary_fallback_reason": result.reason}
 
-        if issues and retries < MAX_RETRIES:
-            logger.info("Observer: issues=%s retry=%d — triggering re-plan", issues, retries + 1)
-            return {
+            updates: dict = {
                 "itinerary_plan": {
                     **plan_state,
-                    "assembled": {},            # clear so planner re-runs cleanly
-                    "observer_issues": issues,
-                    "observer_retries": retries + 1,
+                    "retry_count": new_retry,
+                    "observer_reason": result.reason,
+                    "step_results": results,
                 },
                 "itinerary_feasible": False,
-                "itinerary_fallback_reason": issues[0],
+                "itinerary_fallback_reason": result.reason,
             }
+            if "trip_days"    in result.adjustments:
+                updates["trip_days"]    = result.adjustments["trip_days"]
+            if "total_budget" in result.adjustments:
+                updates["total_budget"] = result.adjustments["total_budget"]
+            return updates
 
-        if issues and not assembled.get("within_budget", True):
-            # Retries exhausted and still over budget → fallback
-            return {
-                "itinerary_feasible": False,
-                "itinerary_fallback_reason": "budget_exceeded",
-            }
-
-        # ── All good: render ────────────────────────────────────────────
-        md = _render(assembled)
-        return {
-            "itinerary_plan": {**plan_state, "final_markdown": md},
-            "itinerary_feasible": True,
-            "messages": [AIMessage(content=md)],
-        }
+        return {"itinerary_feasible": False,
+                "itinerary_fallback_reason": "observer_unexpected_output"}
 
 
-# ---------------------------------------------------------------------------
-# Validation
-# ---------------------------------------------------------------------------
-
-def _find_issues(assembled: dict, state: AgentState) -> list[str]:
-    issues = []
-    budget = state.get("total_budget", 0)
-    if budget and not assembled.get("within_budget", True):
-        issues.append("budget_exceeded")
-    if len(assembled.get("days", [])) < assembled.get("total_days", 0):
-        issues.append("missing_days")
-    return issues
+def _check_hard_failures(results: dict) -> Optional[str]:
+    for k, v in results.items():
+        if k.startswith("fetch_flights"):
+            if (isinstance(v, list) and not v) or (isinstance(v, dict) and v.get("error")):
+                return "no_flights"
+        if k.startswith("fetch_hotels"):
+            if (isinstance(v, list) and not v) or (isinstance(v, dict) and v.get("error")):
+                return "no_hotels"
+    return None
 
 
-# ---------------------------------------------------------------------------
-# Markdown renderer
-# ---------------------------------------------------------------------------
-
-def _render(plan: dict) -> str:
-    if not plan:
-        return "⚠️ Could not build your itinerary. Please try again."
-
-    lines = []
-    dest       = plan.get("destination", "")
-    origin     = plan.get("origin", "")
-    total_days = plan.get("total_days", 0)
-    total_cost = plan.get("estimated_total_cost", 0)
-    prefs      = plan.get("user_preferences_applied", [])
-
-    lines.append(f"# ✈️ Your {total_days}-Day Trip to {dest}")
-    lines.append(f"*From {origin} · Estimated total: **${total_cost:,.0f}***\n")
-
-    if prefs:
-        lines.append(" · ".join(f"✅ {p.capitalize()}" for p in prefs) + "\n")
-
-    # Outbound flight
-    f = plan.get("selected_flight", {})
-    if f and f.get("flight_number"):
-        lines.append("## ✈️ Outbound Flight")
-        lines.append(
-            f"**{f.get('airline', '')} {f.get('flight_number', '')}**"
-            f" · ${f.get('price', 0):,.0f}  \n"
-            f"🛫 Departure: `{f.get('departure_time') or 'N/A'}`"
-            f" → 🛬 Arrival: `{f.get('arrival_time') or 'N/A'}`\n"
-        )
-
-    # Return flight
-    rf = plan.get("selected_return_flight", {})
-    if rf and rf.get("flight_number"):
-        lines.append("## 🔄 Return Flight")
-        lines.append(
-            f"**{rf.get('airline', '')} {rf.get('flight_number', '')}**"
-            f" · ${rf.get('price', 0):,.0f}  \n"
-            f"🛫 Departure: `{rf.get('departure_time') or 'N/A'}`"
-            f" → 🛬 Arrival: `{rf.get('arrival_time') or 'N/A'}`\n"
-        )
-
-    # Hotel
-    h = plan.get("selected_hotel", {})
-    if h and h.get("name"):
-        stars = "⭐" * h.get("stars", 0)
-        bk    = " · 🍳 Breakfast included" if h.get("breakfast_available") else ""
-        lines.append("## 🏨 Hotel")
-        lines.append(f"**{h.get('name', '')}** {stars} · ${h.get('price_per_night', 0):,.0f}/night{bk}\n")
-
-    # Day-by-day
-    for day in plan.get("days", []):
-        lines.append(f"---\n## 📅 Day {day['day']}: {day.get('theme', '')}\n")
-        for slot in day.get("slots", []):
-            emoji    = TYPE_EMOJI.get(slot.get("slot_type", ""), "📍")
-            cost_str = f"💰 ${slot['estimated_cost']:,.0f}" if slot.get("estimated_cost") else "🆓 Free"
-            lines.append(f"### {emoji} `{slot.get('time', '')}` — {slot.get('name', '')}")
-            if slot.get("description"):
-                lines.append(slot["description"])
-            lines.append(f"*⏱ {slot.get('duration_minutes', '')} min · {cost_str}*")
-            if slot.get("notes"):
-                lines.append(f"> {slot['notes']}")
-            lines.append("")
-
-    # Cost summary
-    cb = plan.get("cost_breakdown", {})
-    if cb:
-        lines.append("---\n## 💳 Cost Summary\n")
-        lines.append("| | Cost |")
-        lines.append("|---|---|")
-        lines.append(f"| ✈️ Outbound flight | ${cb.get('flight_cost', 0):,.0f} |")
-        lines.append(f"| 🏨 Hotel ({total_days} nights) | ${cb.get('hotel_cost', 0):,.0f} |")
-        lines.append(f"| 🎯 Activities & meals | ${cb.get('activity_cost', 0):,.0f} |")
-        lines.append(f"| **Total** | **${cb.get('total_cost', 0):,.0f}** |")
-
-    lines.append("\n*Prices are estimates. Verify before booking.*")
+def _build_summary(results: dict, budget: float, trip_days: int) -> str:
+    lines = [f"Budget: ${budget or 'flexible'} | Trip days: {trip_days}\n"]
+    for key, val in results.items():
+        if isinstance(val, dict) and val.get("error"):
+            lines.append(f"STEP {key}: ERROR — {val['error']}")
+        elif key.startswith("fetch_flights") and isinstance(val, list):
+            f = val[0] if val else None
+            if f:
+                lines.append(f"OUTBOUND FLIGHT: {f.get('airline')} {f.get('flight_number')} "
+                             f"${f.get('price')} departs={f.get('departure_time','?')} "
+                             f"arrives={f.get('arrival_time','?')}")
+            else:
+                lines.append("OUTBOUND FLIGHT: none found")
+        elif key.startswith("fetch_return_flights") and isinstance(val, list):
+            f = val[0] if val else None
+            if f:
+                lines.append(f"RETURN FLIGHT: {f.get('airline')} {f.get('flight_number')} "
+                             f"${f.get('price')} departs={f.get('departure_time','?')} "
+                             f"arrives={f.get('arrival_time','?')}")
+        elif key.startswith("fetch_hotels") and isinstance(val, list):
+            h = val[0] if val else None
+            if h:
+                lines.append(f"HOTEL: {h.get('name')} {h.get('stars')}* "
+                             f"${h.get('price_per_night')}/night breakfast={h.get('breakfast_available')}")
+            else:
+                lines.append("HOTEL: none found")
+        elif key.startswith("fetch_activities") and isinstance(val, list):
+            lines.append(f"ACTIVITIES: {len(val)} available")
+        elif key.startswith("build_day_schedule") and isinstance(val, dict):
+            lines.append(f"DAY {val.get('day')}: {val.get('theme')} | "
+                        f"{len(val.get('slots',[]))} slots | day_cost=${val.get('day_cost',0)}")
+        elif key.startswith("verify_budget") and isinstance(val, dict):
+            total = val.get("grand_total", 0)
+            ok = not budget or total <= budget * 1.10
+            lines.append(f"BUDGET CHECK: grand_total=${total} | ok={ok}")
     return "\n".join(lines)

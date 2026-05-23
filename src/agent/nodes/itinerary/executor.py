@@ -1,356 +1,215 @@
 """
-ItineraryExecutorNode — Plan & Execute, Step 2: EXECUTE
-
-Runs each PlanStep from the ExecutionPlan deterministically.
-NO LLM calls. Only real data from the filtered bundle.
-
-Steps handled:
-  select_flight  → cheapest available outbound flight (real departure/arrival times)
-  select_hotel   → top hotel after filtering
-  build_day      → hour-by-hour slots with Haversine travel times
-  verify_budget  → total cost calculation
+ItineraryExecutorNode — executes one PlanStep at a time using tools.
+See docstring in class for full design notes.
 """
 from __future__ import annotations
-
+import json
 import logging
-from datetime import datetime, timedelta
 from typing import Optional
 
-from agent.nodes.itinerary.helpers import (
-    extract_day_number,
-    fmt_time,
-    haversine_km,
-    parse_dt,
-    travel_slot,
+from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import HumanMessage, SystemMessage
+
+from agent.nodes.itinerary.schemas import ExecutionPlan, PlanStep
+from agent.nodes.itinerary.itinerary_tools import (
+    search_outbound_flights, search_return_flights,
+    search_hotels, search_activities,
+    get_weather, calculate_trip_cost,
 )
-from agent.nodes.itinerary.schemas import DaySlot, ExecutionPlan
 from agent.state import AgentState
 
 logger = logging.getLogger(__name__)
 
-DAY_THEMES = {1: "Arrival & first impressions"}
+DEFAULT_MEALS_PER_DAY = 60.0
+
+DAY_SCHEDULE_SYSTEM = """You are a single-day travel scheduler.
+Build a realistic hour-by-hour schedule for ONE day of a trip.
+
+MANDATORY:
+- 3 meals every full day: breakfast (~08:00), lunch (~13:00), dinner (~19:30).
+- Hotel breakfast is FREE if breakfast_available=true.
+- Include a 30-min rest after lunch.
+- Add transport slots between locations that are >0.5 km apart.
+- Respect activity opening_time / closing_time.
+- Day 1: first activity only AFTER flight arrival + 90 min check-in.
+- Last day: no activity ending later than 2.5 h before return flight departure.
+
+Return ONLY a valid JSON array of slot objects. No explanation.
+Each slot: {"time":"HH:MM","duration_minutes":int,"slot_type":"activity|meal|rest|transport",
+            "name":"string","description":"string","estimated_cost":float,"notes":"string or null"}
+"""
 
 
 class ItineraryExecutorNode:
-    """No LLM. Produces a fully assembled itinerary dict."""
+    """
+    Iterates through every PlanStep and executes it.
+    - Data-fetch steps: call tools deterministically.
+    - build_day_schedule: LLM builds the day using context from prior steps.
+    - verify_budget: deterministic calculation.
+    Tool errors are caught and stored as {"error": "..."} — never crash.
+    """
+
+    def __init__(self, llm: BaseChatModel) -> None:
+        self.llm = llm
 
     def __call__(self, state: AgentState) -> dict:
-        plan_state = state.get("itinerary_plan", {})
-        plan       = ExecutionPlan(**plan_state["execution_plan"])
-        bundle     = plan_state["filtered_bundle"]
-        trip_days  = state.get("trip_days", plan.total_days)
-        budget     = state.get("total_budget", 0)
-
-        execution_results: dict = {}
+        plan_state  = state.get("itinerary_plan", {})
+        plan        = ExecutionPlan(**plan_state["execution_plan"])
+        results     = dict(plan_state.get("step_results", {}))
+        destination = state.get("destination_city", "")
+        origin      = state.get("current_city", "")
+        trip_days   = state.get("trip_days", plan.total_days)
+        budget      = state.get("total_budget", 0)
+        prefs       = state.get("user_preferences", {})
 
         for step in plan.steps:
-            logger.info("Executing step %d [%s]: %s",
-                        step.step_id, step.step_type, step.description[:60])
+            key = f"{step.step_type}_{step.step_id}"
+            logger.info("Executor: step %d [%s]", step.step_id, step.step_type)
+            try:
+                results[key] = self._run(step, results, destination, origin,
+                                         trip_days, budget, prefs, state)
+            except Exception as e:
+                logger.warning("Step %d error: %s", step.step_id, e)
+                results[key] = {"error": str(e), "step_type": step.step_type}
+                
+                
+        
 
-            if step.step_type == "select_flight":
-                execution_results["select_flight"] = _exec_select_flight(bundle)
+        return {"itinerary_plan": {**plan_state, "step_results": results}}
 
-            elif step.step_type == "select_hotel":
-                execution_results["select_hotel"] = _exec_select_hotel(bundle)
+    def _run(self, step, results, destination, origin, trip_days, budget, prefs, state):
+        dietary = str(prefs.get("dietary_restrictions", "")).lower()
+        kosher  = "kosher"     in dietary
+        veg     = "vegetarian" in dietary
+        vegan   = "vegan"      in dietary
 
-            elif step.step_type == "build_day":
-                day_num = extract_day_number(step.description, len(execution_results) - 1)
-                used    = _collect_used(execution_results)
-                execution_results[f"build_day_{day_num}"] = _exec_build_day(
-                    day_num=day_num,
-                    total_days=trip_days,
-                    activities=bundle.get("activities", []),
-                    hotel=execution_results.get("select_hotel", {}),
-                    outbound_flight=execution_results.get("select_flight", {}),
-                    return_flights=bundle.get("return_flights", []),
-                    already_used=used,
-                )
+        if step.step_type == "fetch_flights":
+            return search_outbound_flights.invoke({"origin": origin, "destination": destination})
 
-            elif step.step_type == "verify_budget":
-                execution_results["verify_budget"] = _exec_verify_budget(
-                    execution_results, budget, trip_days, bundle
-                )
+        if step.step_type == "fetch_return_flights":
+            return search_return_flights.invoke({"origin": destination, "destination": origin})
 
-        assembled = _assemble(execution_results, state, plan)
+        if step.step_type == "fetch_hotels":
+            return search_hotels.invoke({"city": destination, "kosher_only": kosher})
+
+        if step.step_type == "fetch_activities":
+            return search_activities.invoke({
+                "city": destination, "kosher_only": kosher,
+                "vegetarian_friendly": veg, "vegan_friendly": vegan,
+            })
+
+        if step.step_type == "fetch_weather":
+            return get_weather.invoke({"city": destination})
+
+        if step.step_type == "build_day_schedule":
+            return self._build_day(step, results, destination, trip_days, prefs)
+
+        if step.step_type == "verify_budget":
+            return self._verify_budget(results, budget, trip_days)
+
+        return {"skipped": True}
+
+    # ------------------------------------------------------------------
+    def _build_day(self, step, results, destination, trip_days, prefs):
+        day_num = step.day or 1
+
+        outbound = _first(results, "fetch_flights")
+        ret      = _first(results, "fetch_return_flights")
+        hotel    = _first(results, "fetch_hotels")
+        acts     = _list(results, "fetch_activities")
+        weather  = _list(results, "fetch_weather")
+
+        used = _used_activities(results)
+        available = [a for a in acts if a.get("name") not in used]
+
+        arrival_time   = (outbound or {}).get("arrival_time", "12:00")
+        departure_time = (ret or {}).get("departure_time", "20:00")
+        has_breakfast  = (hotel or {}).get("breakfast_available", False)
+        hotel_name     = (hotel or {}).get("name", "N/A")
+        hotel_lat      = (hotel or {}).get("latitude") or (hotel or {}).get("lat")
+        hotel_lng      = (hotel or {}).get("longitude") or (hotel or {}).get("lng")
+
+        context = (
+            f"Day {day_num} of {trip_days} in {destination}.\n"
+            f"Hotel: {hotel_name} (breakfast_available={has_breakfast}, "
+            f"lat={hotel_lat}, lng={hotel_lng})\n"
+            f"User preferences: {prefs}\n"
+            f"Weather: {json.dumps(weather, ensure_ascii=False)}\n"
+            + (f"ARRIVAL DAY: flight arrives {arrival_time}\n" if day_num == 1 else "")
+            + (f"DEPARTURE DAY: return flight departs {departure_time}\n" if day_num == trip_days else "")
+            + f"\nAvailable activities (not yet used, sorted by rating):\n"
+            + json.dumps(available[:10], ensure_ascii=False, indent=2)
+        )
+
+        raw = self.llm.invoke([
+            SystemMessage(content=DAY_SCHEDULE_SYSTEM),
+            HumanMessage(content=context),
+        ]).content.strip()
+
+        if raw.startswith("```"):
+            raw = raw.split("```")[1].lstrip("json").strip().rstrip("```").strip()
+
+        try:
+            slots = json.loads(raw)
+            if not isinstance(slots, list):
+                raise ValueError("Expected list")
+        except Exception as e:
+            logger.error("Day %d parse error: %s — using fallback", day_num, e)
+            slots = _fallback_slots(day_num, arrival_time, departure_time,
+                                     has_breakfast, available[:4])
+
+        day_cost = round(sum(float(s.get("estimated_cost", 0)) for s in slots), 2)
+        themes = {1: "Arrival & first impressions", trip_days: "Final day & departure"}
         return {
-            "itinerary_plan": {
-                **plan_state,
-                "assembled": assembled,
-            }
+            "day": day_num,
+            "theme": themes.get(day_num, f"Day {day_num} — Explore {destination}"),
+            "slots": slots,
+            "day_cost": day_cost,
         }
 
+    def _verify_budget(self, results, budget, trip_days):
+        outbound = _first(results, "fetch_flights")
+        ret      = _first(results, "fetch_return_flights")
+        hotel    = _first(results, "fetch_hotels")
 
-# ---------------------------------------------------------------------------
-# Step executors
-# ---------------------------------------------------------------------------
-
-def _exec_select_flight(bundle: dict) -> dict:
-    flights = bundle.get("flights", [])
-    if not flights:
-        return {}
-    chosen = flights[0]  # already sorted cheapest-first by filter_bundle
-    return {
-        "flight_number":  chosen.get("flight_number", ""),
-        "airline":        chosen.get("airline", ""),
-        "price":          chosen.get("price", 0),
-        "departure_time": chosen.get("departure_time", ""),   # real DB value
-        "arrival_time":   chosen.get("arrival_time", ""),     # real DB value
-    }
-
-
-def _exec_select_hotel(bundle: dict) -> dict:
-    hotels = bundle.get("hotels", [])
-    if not hotels:
-        return {}
-    chosen = hotels[0]  # already sorted stars-desc, price-asc
-    return {
-        "name":               chosen.get("name", ""),
-        "stars":              chosen.get("stars", 0),
-        "price_per_night":    chosen.get("price_per_night", 0),
-        "breakfast_available":chosen.get("breakfast_available", False),
-        "lat":  chosen.get("latitude") or chosen.get("lat"),
-        "lng":  chosen.get("longitude") or chosen.get("lng"),
-    }
-
-
-def _exec_build_day(
-    day_num: int,
-    total_days: int,
-    activities: list,
-    hotel: dict,
-    outbound_flight: dict,
-    return_flights: list,
-    already_used: set,
-) -> dict:
-    slots: list[DaySlot] = []
-    hotel_lat = hotel.get("lat")
-    hotel_lng = hotel.get("lng")
-    has_breakfast = hotel.get("breakfast_available", False)
-
-    # ── Day 1: arrival ─────────────────────────────────────────────────
-    if day_num == 1:
-        arrival_str = outbound_flight.get("arrival_time", "12:00")
-        arrival_dt  = parse_dt(arrival_str)
-        hour = arrival_dt.hour
-
-        slots.append(DaySlot(
-            time=fmt_time(arrival_dt), duration_minutes=90,
-            slot_type="rest", name="Arrival & hotel check-in",
-            description="Settle in and freshen up after the flight.",
-            estimated_cost=0.0,
-            notes="Standard check-in: 15:00. Early check-in may cost extra.",
-        ))
-
-        if hour < 12:
-            # Morning arrival → rest, lunch at noon, 2 afternoon activities
-            slots.append(DaySlot(
-                time="12:00", duration_minutes=60, slot_type="meal",
-                name="Welcome lunch",
-                description="First taste of local cuisine near the hotel.",
-                estimated_cost=18.0,
-            ))
-            _add_activities(slots, activities, already_used,
-                            hotel_lat, hotel_lng,
-                            start=parse_dt("13:30"), max_count=2)
-
-        elif hour < 17:
-            # Afternoon arrival → check-in, dinner, 1 evening activity
-            dinner_start = arrival_dt + timedelta(hours=2)
-            slots.append(DaySlot(
-                time=fmt_time(dinner_start), duration_minutes=60, slot_type="meal",
-                name="Welcome dinner",
-                description="Enjoy dinner at a local restaurant.",
-                estimated_cost=25.0,
-            ))
-            _add_activities(slots, activities, already_used,
-                            hotel_lat, hotel_lng,
-                            start=dinner_start + timedelta(hours=1, minutes=30),
-                            max_count=1)
-        else:
-            # Late/night arrival → check-in only
-            slots.append(DaySlot(
-                time=fmt_time(arrival_dt + timedelta(hours=1)),
-                duration_minutes=30, slot_type="rest",
-                name="Rest & prepare for tomorrow",
-                description="Early night before your adventures begin.",
-                estimated_cost=0.0,
-            ))
-
-        theme = "Arrival & first impressions"
-
-    # ── Last day: return flight ─────────────────────────────────────────
-    elif day_num == total_days:
-        if has_breakfast:
-            slots.append(DaySlot(
-                time="08:00", duration_minutes=60, slot_type="meal",
-                name="Hotel breakfast & check-out",
-                description="Final breakfast. Check out by 10:00.",
-                estimated_cost=0.0,
-            ))
-
-        # Find return flight and compute airport cutoff
-        return_dep_str = ""
-        cutoff_dt: Optional[datetime] = None
-        chosen_return: dict = {}
-
-        if return_flights:
-            chosen_return = return_flights[0]  # already sorted cheapest-first
-            return_dep_str = chosen_return.get("departure_time", "")
-            if return_dep_str:
-                cutoff_dt = parse_dt(return_dep_str) - timedelta(hours=2, minutes=30)
-
-        _add_activities(slots, activities, already_used,
-                        hotel_lat, hotel_lng,
-                        start=parse_dt("10:30"),
-                        max_count=2,
-                        cutoff=cutoff_dt)
-
-        transfer_time = cutoff_dt or parse_dt("16:00")
-        slots.append(DaySlot(
-            time=fmt_time(transfer_time), duration_minutes=30,
-            slot_type="transport", name="Transfer to airport",
-            description="Head to the airport for your return flight.",
-            estimated_cost=15.0,
-            notes=f"Return flight departs: {return_dep_str}" if return_dep_str else None,
-        ))
-
-        theme = f"Final day & departure"
-
-    # ── Middle days ─────────────────────────────────────────────────────
-    else:
-        if has_breakfast:
-            slots.append(DaySlot(
-                time="08:00", duration_minutes=60, slot_type="meal",
-                name="Hotel breakfast",
-                description="Start the day with the included breakfast.",
-                estimated_cost=0.0,
-            ))
-        _add_activities(slots, activities, already_used,
-                        hotel_lat, hotel_lng,
-                        start=parse_dt("09:30" if has_breakfast else "09:00"),
-                        max_count=4)
-        theme = f"Day {day_num} — Explore"
-    if not slots:
-        slots.append(DaySlot(
-            time="10:00", duration_minutes=480, slot_type="rest",
-            name="Leisure time",
-            description="Explore the city at your own pace or relax.",
-            estimated_cost=0.0
-        ))
-    return {
-        "day": day_num,
-        "theme": theme,
-        "slots": [s.model_dump() for s in slots],
-        "day_cost": round(sum(s.estimated_cost for s in slots), 2),
-    }
-
-
-def _exec_verify_budget(results: dict, budget: float, trip_days: int, bundle: dict) -> dict:
-    outbound_cost = results.get("select_flight", {}).get("price", 0)
-    
-    ret_flights = bundle.get("return_flights", [])
-    return_cost = ret_flights[0].get("price", 0) if ret_flights else 0
-    
-    flight_cost   = outbound_cost + return_cost
-    hotel_night   = results.get("select_hotel", {}).get("price_per_night", 0)
-    hotel_cost    = hotel_night * max(1, (trip_days ))
-    activity_cost = sum(
-        v.get("day_cost", 0)
-        for k, v in results.items()
-        if k.startswith("build_day_")
-    )
-    total = round(flight_cost + hotel_cost + activity_cost, 2)
-    return {
-        "flight_cost":   flight_cost,
-        "hotel_cost":    hotel_cost,
-        "activity_cost": round(activity_cost, 2),
-        "total_cost":    total,
-        "within_budget": not budget or total <= budget * 1.10,
-    }
+        activity_cost = sum(
+            v.get("day_cost", 0) for k, v in results.items()
+            if k.startswith("build_day_schedule") and isinstance(v, dict)
+        )
+        return calculate_trip_cost.invoke({
+            "flight_price":                  (outbound or {}).get("price", 0),
+            "return_flight_price":           (ret or {}).get("price", 0),
+            "hotel_price_per_night":         (hotel or {}).get("price_per_night", 0),
+            "trip_days":                     trip_days,
+            "estimated_activities_budget":   activity_cost,
+            "estimated_meals_budget_per_day": DEFAULT_MEALS_PER_DAY,
+        })
 
 
 # ---------------------------------------------------------------------------
-# Activity scheduling helper
-# ---------------------------------------------------------------------------
+def _find_key(results: dict, prefix: str) -> Optional[str]:
+    for k in results:
+        if k.startswith(prefix):
+            return k
+    return None
 
-def _add_activities(
-    slots: list,
-    activities: list,
-    already_used: set,
-    hotel_lat: Optional[float],
-    hotel_lng: Optional[float],
-    start: datetime,
-    max_count: int,
-    cutoff: Optional[datetime] = None,
-) -> None:
-    current_time = start
-    current_lat  = hotel_lat
-    current_lng  = hotel_lng
-    added = 0
+def _first(results: dict, prefix: str) -> Optional[dict]:
+    k = _find_key(results, prefix)
+    if not k:
+        return None
+    v = results[k]
+    if isinstance(v, list):
+        return v[0] if v else None
+    return v if isinstance(v, dict) and not v.get("error") else None
 
-    for act in activities:
-        if added >= max_count:
-            break
-        name = act.get("name", "")
-        if name in already_used:
-            continue
+def _list(results: dict, prefix: str) -> list:
+    k = _find_key(results, prefix)
+    if not k:
+        return []
+    v = results[k]
+    return v if isinstance(v, list) else []
 
-        act_lat  = act.get("latitude") or act.get("lat")
-        act_lng  = act.get("longitude") or act.get("lng")
-        duration = act.get("avg_duration_minutes") or 90
-        cost     = float(act.get("price", 0))
-
-        # Travel slot
-        travel_end = current_time
-        if current_lat and current_lng and act_lat and act_lng:
-            km = haversine_km(current_lat, current_lng, act_lat, act_lng)
-            if km > 0.1:
-                t_slot = travel_slot(name, km, current_time)
-                travel_end = current_time + timedelta(minutes=t_slot.duration_minutes)
-                slots.append(t_slot)
-
-        # Respect opening hours
-        open_str  = act.get("opening_time") or "09:00"
-        open_dt   = parse_dt(open_str)
-        if travel_end.replace(year=2000) < open_dt:
-            travel_end = travel_end.replace(hour=open_dt.hour, minute=open_dt.minute)
-
-        activity_end = travel_end + timedelta(minutes=duration)
-
-        # Respect last-day airport cutoff
-        if cutoff and activity_end > cutoff:
-            continue
-
-        notes_parts = []
-        if act.get("requires_booking"):
-            notes_parts.append("⚠️ Advance booking required.")
-        if act.get("min_age", 0) > 0:
-            notes_parts.append(f"Min age: {act['min_age']}.")
-
-        slots.append(DaySlot(
-            time=fmt_time(travel_end),
-            duration_minutes=duration,
-            slot_type="activity",
-            name=name,
-            description=act.get("categories", ""),
-            estimated_cost=cost,
-            lat=act_lat,
-            lng=act_lng,
-            notes=" ".join(notes_parts) or None,
-        ))
-
-        already_used.add(name)
-        current_time = activity_end
-        current_lat  = act_lat
-        current_lng  = act_lng
-        added += 1
-
-
-# ---------------------------------------------------------------------------
-# Assembly
-# ---------------------------------------------------------------------------
-
-def _collect_used(results: dict) -> set:
+def _used_activities(results: dict) -> set:
     used = set()
     for v in results.values():
         if isinstance(v, dict) and "slots" in v:
@@ -359,40 +218,36 @@ def _collect_used(results: dict) -> set:
                     used.add(s.get("name", ""))
     return used
 
-
-def _assemble(results: dict, state: AgentState, plan: ExecutionPlan) -> dict:
-    flight  = results.get("select_flight", {})
-    hotel   = results.get("select_hotel", {})
-    budget_check = results.get("verify_budget", {})
-
-    days = sorted(
-        [v for k, v in results.items() if k.startswith("build_day_")],
-        key=lambda d: d["day"],
-    )
-
-    # Best available return flight for display
-    bundle = state.get("itinerary_plan", {}).get("filtered_bundle", {})
-    ret_flights = bundle.get("return_flights", [])
-    chosen_ret = ret_flights[0] if ret_flights else {}
-
-    prefs = state.get("user_preferences", {})
-
-    return {
-        "destination":           plan.destination,
-        "origin":                plan.origin,
-        "total_days":            plan.total_days,
-        "estimated_total_cost":  budget_check.get("total_cost", 0),
-        "within_budget":         budget_check.get("within_budget", True),
-        "selected_flight":       flight,
-        "selected_return_flight": {
-            "flight_number":  chosen_ret.get("flight_number", ""),
-            "airline":        chosen_ret.get("airline", ""),
-            "price":          chosen_ret.get("price", 0),
-            "departure_time": chosen_ret.get("departure_time", ""),
-            "arrival_time":   chosen_ret.get("arrival_time", ""),
-        } if chosen_ret else {},
-        "selected_hotel":        hotel,
-        "days":                  days,
-        "cost_breakdown":        budget_check,
-        "user_preferences_applied": [k for k, v in prefs.items() if v],
-    }
+def _fallback_slots(day_num, arrival, departure, has_breakfast, acts):
+    slots = []
+    if day_num == 1:
+        slots += [
+            {"time": arrival, "duration_minutes": 90, "slot_type": "rest",
+             "name": "Arrival & check-in", "description": "Settle in.", "estimated_cost": 0},
+            {"time": "13:00", "duration_minutes": 60, "slot_type": "meal",
+             "name": "Lunch", "description": "Local restaurant.", "estimated_cost": 18},
+            {"time": "19:30", "duration_minutes": 60, "slot_type": "meal",
+             "name": "Welcome dinner", "description": "", "estimated_cost": 25},
+        ]
+    else:
+        bk_cost = 0 if has_breakfast else 12
+        bk_name = "Hotel breakfast" if has_breakfast else "Breakfast at café"
+        slots.append({"time": "08:00", "duration_minutes": 60, "slot_type": "meal",
+                       "name": bk_name, "description": "", "estimated_cost": bk_cost})
+        for i, a in enumerate(acts[:2]):
+            slots.append({"time": f"{10+i*2}:00", "duration_minutes": a.get("avg_duration_minutes",90),
+                           "slot_type": "activity", "name": a.get("name","Activity"),
+                           "description": a.get("categories",""), "estimated_cost": a.get("price",0)})
+        slots += [
+            {"time": "13:00", "duration_minutes": 60, "slot_type": "meal",
+             "name": "Lunch", "description": "", "estimated_cost": 18},
+            {"time": "14:00", "duration_minutes": 30, "slot_type": "rest",
+             "name": "Afternoon rest", "description": "", "estimated_cost": 0},
+        ]
+        for i, a in enumerate(acts[2:4]):
+            slots.append({"time": f"{15+i*2}:00", "duration_minutes": a.get("avg_duration_minutes",90),
+                           "slot_type": "activity", "name": a.get("name","Activity"),
+                           "description": a.get("categories",""), "estimated_cost": a.get("price",0)})
+        slots.append({"time": "19:30", "duration_minutes": 60, "slot_type": "meal",
+                       "name": "Dinner", "description": "", "estimated_cost": 25})
+    return slots
