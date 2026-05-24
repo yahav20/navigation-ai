@@ -43,13 +43,8 @@ You are the final travel itinerary quality reviewer AND copywriter.
 
 You receive a structured trip plan. Your tasks:
 1. Check for any qualitative issues (boring repetition, poor flow, missing highlights).
-2. If the plan is good → return FinalResponse with beautiful markdown.
-3. If there is a SEVERE structural problem → return RevisedPlan with a clear reason.
-
-A plan is GOOD if:
-- Each day has a coherent theme and energy curve (culture → outdoor → food/evening).
-- Activities feel like a real trip, not a random list.
-- The writing is warm, personal, and practical.
+2. If there is a SEVERE structural problem, reply ONLY with a string starting exactly with "REJECT:" followed by the reason. (Example: "REJECT: Day 2 is too empty.")
+3. If the plan is good, output ONLY the final beautiful markdown itinerary. Do not add any JSON or extra chat around it.
 
 Markdown format for FinalResponse:
 # ✈️ Your [N]-Day {destination} Itinerary
@@ -72,8 +67,6 @@ Markdown format for FinalResponse:
 ---
 *Tips, highlights, and local recommendations here.*
 """
-
-
 # ---------------------------------------------------------------------------
 # Layer 1 — Pure Python Validators
 # ---------------------------------------------------------------------------
@@ -264,7 +257,7 @@ def _build_summary(results: dict, budget: float, trip_days: int) -> str:
 
 class ItineraryObserverNode:
     def __init__(self, llm: BaseChatModel) -> None:
-        self.llm = llm.with_structured_output(ObserverOutput)
+        self.llm = llm
 
     def __call__(self, state: AgentState) -> dict:
         plan_state = state.get("itinerary_plan", {})
@@ -319,22 +312,30 @@ class ItineraryObserverNode:
                 SystemMessage(content=OBSERVER_SYSTEM),
                 HumanMessage(content=summary),
             ])
-            result = getattr(output, "result", output)
+            # שולפים את הטקסט החופשי מהמודל
+            content = output.content.strip()
         except Exception as e:
             print(f"\n❌ OBSERVER LLM crashed: {e}")
-            # Fallback: generate markdown ourselves
-            result = None
+            content = ""
 
-        if isinstance(result, RevisedPlan):
-            print(f"\n--- ⚠️ LLM Review: {result.reason} ---")
-            return self._trigger_replan(plan_state, retry_count, result.reason, result)
+        # ── בדיקה האם המודל החליט לדחות את התוכנית ──
+        if content.startswith("REJECT:"):
+            reason = content.replace("REJECT:", "").strip()
+            print(f"\n--- ⚠️ LLM Review: {reason} ---")
+            return self._trigger_replan(plan_state, retry_count, reason)
 
         # ── 5. Success ──
         print("\n--- 🎉 OBSERVER: Plan approved! ---")
 
-        if result is not None:
-            markdown = getattr(result, "markdown", str(result))
+        # אם התוכן לא ריק ולא מתחיל ב-REJECT, זה המארקדאון המוכן שלנו!
+        if content and not content.startswith("REJECT:"):
+            # ננקה עטיפות Markdown למקרה שהמודל הוסיף ```markdown 
+            if content.startswith("```"):
+                markdown = content.split("```")[1].lstrip("markdown").strip().rstrip("```").strip()
+            else:
+                markdown = content
         else:
+            # במקרה של קריסה אמיתית, נשתמש בגיבוי של הפייתון
             markdown = _generate_fallback_markdown(results, trip_days, budget)
 
         return {

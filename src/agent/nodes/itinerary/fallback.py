@@ -63,17 +63,21 @@ class ItineraryFallbackNode:
         print(f"\n--- 🛟 FALLBACK: {reason} ---")
 
         if "budget" in reason.lower() or "exceeded" in reason.lower():
-            return self._handle_budget(results, budget, trip_days, destination, origin)
+            return self._handle_budget(results, budget, trip_days, destination, origin, plan_state)
 
         return self._suggest_alternatives(destination, origin, budget, trip_days)
 
     # ── Budget handler ─────────────────────────────────────────────────────
 
-    def _handle_budget(self, results, budget, trip_days, destination, origin):
-    
+
+   # ── Budget handler ─────────────────────────────────────────────────────
+
+    def _handle_budget(self, results, budget, trip_days, destination, origin, plan_state):
         min_flight = _cheapest_price(results, "fetch_flights")
         min_ret = _cheapest_price(results, "fetch_return_flights")
-        min_hotel = _cheapest_hotel_night(results)
+        
+        # שימוש בפונקציה הריאליסטית שתיקנו מקודם
+        realistic_hotel = _realistic_hotel_night(results)
 
         base_cost = min_flight + min_ret  # flights are fixed
 
@@ -84,19 +88,36 @@ class ItineraryFallbackNode:
             if new_days < 1 or new_days == trip_days:
                 continue
                 
-            est_cost = base_cost + min_hotel * new_days
+            est_cost = (base_cost + realistic_hotel * new_days) * 1.15
+            
             if budget and est_cost <= budget * 1.05:
                 print(f"✅ Fallback: adjusting trip from {trip_days} → {new_days} days")
+                
+                # 🔥 תיקון באג 2 (Caching): מוחקים מהזיכרון את טיסת החזור והמלון 
+                # כדי להכריח את ה-Executor להביא אותם מחדש לפי הימים החדשים!
+                cleared_results = {
+                    k: v for k, v in results.items() 
+                    if not k.startswith("fetch_return_flights") and not k.startswith("fetch_hotels")
+                }
+
                 return {
                     "trip_days": new_days,
                     "itinerary_fallback_action": f"days_adjusted_to_{new_days}",
                     "itinerary_feasible": True,
                     "itinerary_fallback_alternatives": [],
+                    # 🔥 תיקון באג 1 (Retry Loop): מאפסים את הניסיונות ודוחפים את הקאש הנקי
+                    "itinerary_plan": {
+                        **plan_state,
+                        "retry_count": 0,
+                        "observer_reason": "",
+                        "step_results": cleared_results
+                    }
                 }
 
         # Try +$500 budget bump
         bumped = budget + 500
-        est_cost = base_cost + min_hotel * trip_days
+        est_cost = (base_cost + realistic_hotel * trip_days) * 1.15
+        
         if est_cost <= bumped * 1.05:
             print(f"✅ Fallback: bumping budget ${budget} → ${bumped}")
             return {
@@ -104,12 +125,17 @@ class ItineraryFallbackNode:
                 "itinerary_fallback_action": "budget_bumped_500",
                 "itinerary_feasible": True,
                 "itinerary_fallback_alternatives": [],
+                # 🔥 תיקון באג 1: מאפסים ניסיונות גם כאן
+                "itinerary_plan": {
+                    **plan_state,
+                    "retry_count": 0,
+                    "observer_reason": ""
+                }
             }
 
         # Nothing worked → alternatives
-        print("⚠️ Budget adjustment impossible. Suggesting alternatives.")
+        print("⚠️ Budget adjustment impossible even with bumps. Suggesting alternatives.")
         return self._suggest_alternatives(destination, origin, bumped, trip_days)
-
     # ── Alternative city suggester ─────────────────────────────────────────
 
     def _suggest_alternatives(self, destination, origin, budget, trip_days):
@@ -181,7 +207,24 @@ def _cheapest_hotel_night(results: dict) -> float:
                 return min(prices)
     return 0.0
 
-
+def _realistic_hotel_night(results: dict) -> float:
+    """
+    במקום לקחת את המלון הכי זול (מה שגורם לאופטימיות יתר), 
+    ניקח ממוצע של 3 המלונות הזולים ביותר, כדי לאפשר ל-Planner גמישות בחירה.
+    """
+    for k, v in results.items():
+        if k.startswith("fetch_hotels"):
+            hotels = v if isinstance(v, list) else []
+            if isinstance(v, dict):
+                hotels = v.get("hotels", [])
+            
+            prices = [float(h.get("price_per_night", 9999)) for h in hotels if isinstance(h, dict)]
+            
+            if prices:
+                prices.sort()
+                top_3 = prices[:3] # ניקח את 3 הזולים ביותר
+                return sum(top_3) / len(top_3)
+    return 0.0
 def _render_alternatives(
     original: str, alternatives: list[str], origin: str,
     budget: float, trip_days: int,

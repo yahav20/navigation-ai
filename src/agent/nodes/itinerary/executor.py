@@ -220,22 +220,21 @@ class ItineraryExecutorNode:
     # ── Budget verifier ────────────────────────────────────────────────────
 
     def _verify_budget(self, results, budget, trip_days):
-        outbound = _first(results, "fetch_flights")
-        ret = _first(results, "fetch_return_flights")
-        hotel_raw = _first(results, "fetch_hotels")
+        # 🔥 עכשיו אנחנו לוקחים את הזול ביותר מתוך ה-Cache, לא סתם את הראשון!
+        outbound = _cheapest(results, "fetch_flights")
+        ret      = _cheapest(results, "fetch_return_flights")
+        hotel    = _cheapest(results, "fetch_hotels")
 
         activity_cost = sum(
-            v.get("day_cost", 0)
-            for k, v in results.items()
+            v.get("day_cost", 0) for k, v in results.items()
             if k.startswith("build_day_schedule") and isinstance(v, dict)
         )
-
         return calculate_trip_cost.invoke({
-            "flight_price": _safe_float(outbound, "price"),
-            "return_flight_price": _safe_float(ret, "price"),
-            "hotel_price_per_night": _safe_float(hotel_raw, "price_per_night"),
-            "trip_days": trip_days,
-            "estimated_activities_budget": activity_cost,
+            "flight_price":                  (outbound or {}).get("price", 0) if isinstance(outbound, dict) else 0,
+            "return_flight_price":           (ret or {}).get("price", 0) if isinstance(ret, dict) else 0,
+            "hotel_price_per_night":         (hotel or {}).get("price_per_night", 0) if isinstance(hotel, dict) else 0,
+            "trip_days":                     trip_days,
+            "estimated_activities_budget":   activity_cost,
             "estimated_meals_budget_per_day": DEFAULT_MEALS_PER_DAY,
         })
 
@@ -314,3 +313,26 @@ def _normalize_time(raw: str) -> str:
         raw = raw.split(" ")[1]
     # 'HH:MM:SS' → 'HH:MM'
     return raw[:5]
+# הוסיף את זה למטה באזור ה-Helpers ב-executor.py
+def _cheapest(results: dict, prefix: str) -> Optional[dict]:
+    k = _find_key(results, prefix)
+    if not k:
+        return None
+    
+    v = results[k]
+    # אם זה לא רשימה (למשל dict שמכיל רשימה בפנים)
+    if isinstance(v, dict) and "hotels" in v:
+        items = v["hotels"]
+    elif isinstance(v, list):
+        items = v
+    else:
+        return v if isinstance(v, dict) and not v.get("error") else None
+
+    # סינון שגיאות ומציאת הפריט הזול ביותר
+    valid_items = [item for item in items if isinstance(item, dict) and "price" in item or "price_per_night" in item]
+    
+    if not valid_items:
+        return items[0] if items else None
+        
+    # מחזיר את הפריט עם המחיר הנמוך ביותר
+    return min(valid_items, key=lambda x: float(x.get("price", x.get("price_per_night", 9999))))

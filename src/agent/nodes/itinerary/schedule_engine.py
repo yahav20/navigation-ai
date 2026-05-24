@@ -243,16 +243,21 @@ class DayScheduleBuilder:
             cursor = self._insert_breakfast(cfg, cursor)
             self._last_food_time = cursor  # breakfast just happened
 
+        # ── 1. הפרדת המסעדות מהאטרקציות ──
+        meal_candidates = [act for act in candidates if act.is_meal_venue]
+        regular_candidates = [act for act in candidates if not act.is_meal_venue]
+
         # ── Main activity loop ──
         used_names: set[str] = set()
 
-        for act in candidates:
+        for act in regular_candidates:
             if cursor >= departure_anchor:
                 break
 
             # ─ Hunger check: inject meal before activity if needed ─
             if self._is_hungry(cursor) and not act.food_available:
-                cursor = self._inject_meal(cursor, departure_anchor)
+                # מעבירים את המיקום ואת רשימת המסעדות הפנויות
+                cursor, location = self._inject_meal(cursor, departure_anchor, location, meal_candidates)
                 if cursor >= departure_anchor:
                     break
 
@@ -325,8 +330,9 @@ class DayScheduleBuilder:
             used_names.add(act.name)
 
         # ── Final dinner ──
-        if not self._had_dinner and cursor < departure_anchor:
-            cursor = self._inject_dinner(cursor, departure_anchor, location, cfg)
+        # מוודאים שהשעה היא לפחות 18:00 לפני שמוסיפים ארוחת ערב
+        if not self._had_dinner and cursor < departure_anchor and cursor.hour >= 18:
+            cursor, location = self._inject_dinner(cursor, departure_anchor, location, cfg, meal_candidates)
 
         return [s.to_dict() for s in self._slots]
 
@@ -392,8 +398,42 @@ class DayScheduleBuilder:
         self._last_food_time = end
         return end
 
-    def _inject_meal(self, cursor: datetime, hard_limit: datetime) -> datetime:
-        """Inject lunch or dinner depending on time of day."""
+    def _inject_meal(self, cursor: datetime, hard_limit: datetime, location: GeoPoint, meal_candidates: list[ActivityCandidate]) -> tuple[datetime, GeoPoint]:
+        """Inject lunch or dinner depending on time of day, using real DB venues if available."""
+        is_dinner = cursor.hour >= 17 or self._had_lunch
+
+        # 1. מנסים למצוא מסעדה אמיתית מה-DB
+        for i, meal in enumerate(meal_candidates):
+            opening_hr = int(meal.opening_time.split(":")[0])
+            # סינון קל: לא ניקח קרוז ערב לצהריים, ולא ניקח בית קפה של בוקר לערב
+            if not is_dinner and opening_hr >= 17: continue
+            if is_dinner and meal.closing_time < "18:00": continue
+
+            meal_candidates.pop(i)
+            meal_pt = GeoPoint(meal.lat, meal.lng, meal.name)
+            mode, t_min, t_cost = transit_plan(location, meal_pt)
+            
+            start = cursor + timedelta(minutes=t_min)
+            opening = _parse_time(self._date, meal.opening_time)
+            if start < opening:
+                start = opening
+            
+            end = start + timedelta(minutes=meal.duration_minutes)
+            if end > hard_limit:
+                end = hard_limit
+                
+            if t_min > 0:
+                self._push(TimeSlot(start=cursor, end=start, slot_type="transport", name=f"Transit to {meal.name}", estimated_cost=t_cost, transport_mode=mode, distance_km=haversine_km(location, meal_pt)))
+                
+            self._push(TimeSlot(start=start, end=end, slot_type="meal", name=meal.name, description=meal.categories, estimated_cost=meal.price))
+            
+            if is_dinner: self._had_dinner = True
+            else: self._had_lunch = True
+            
+            self._last_food_time = end
+            return end, meal_pt # מעדכן את המיקום למסעדה!
+
+        # 2. גיבוי - אם נגמרו המסעדות ב-DB, שמים בלוק גנרי
         if cursor.hour < 15 and not self._had_lunch:
             name, cost, dur = "Lunch", MEAL_COSTS["lunch"], LUNCH_DURATION
             self._had_lunch = True
@@ -401,55 +441,57 @@ class DayScheduleBuilder:
             name, cost, dur = "Dinner", MEAL_COSTS["dinner"], DINNER_DURATION
             self._had_dinner = True
         else:
-            # Snack break
             name, cost, dur = "Snack / coffee break", 8.0, 20
 
         end = cursor + timedelta(minutes=dur)
         if end > hard_limit:
             end = hard_limit
-        self._push(TimeSlot(
-            start=cursor, end=end,
-            slot_type="meal", name=name,
-            description="Local restaurant",
-            estimated_cost=cost,
-        ))
+        self._push(TimeSlot(start=cursor, end=end, slot_type="meal", name=name, description="Local restaurant", estimated_cost=cost))
         self._last_food_time = end
-        return end
+        return end, location
 
-    def _inject_dinner(
-        self, cursor: datetime, hard_limit: datetime,
-        location: GeoPoint, cfg: "DayConfig"
-    ) -> datetime:
-        # Walk/taxi back to hotel-area restaurant
+
+    def _inject_dinner(self, cursor: datetime, hard_limit: datetime, location: GeoPoint, cfg: "DayConfig", meal_candidates: list[ActivityCandidate]) -> tuple[datetime, GeoPoint]:
+        # 1. מנסים למצוא מסעדה אמיתית מה-DB
+        for i, meal in enumerate(meal_candidates):
+            if meal.closing_time < "18:00": continue # מדלגים על מקומות שסגורים בערב
+            
+            meal_candidates.pop(i)
+            meal_pt = GeoPoint(meal.lat, meal.lng, meal.name)
+            mode, t_min, t_cost = transit_plan(location, meal_pt)
+            
+            start = cursor + timedelta(minutes=t_min)
+            opening = _parse_time(self._date, meal.opening_time)
+            if start < opening:
+                start = opening
+                
+            end = min(start + timedelta(minutes=meal.duration_minutes), hard_limit)
+            
+            if t_min > 0:
+                self._push(TimeSlot(start=cursor, end=start, slot_type="transport", name=f"Transit to {meal.name}", estimated_cost=t_cost, transport_mode=mode, distance_km=haversine_km(location, meal_pt)))
+                
+            self._push(TimeSlot(start=start, end=end, slot_type="meal", name=meal.name, description=meal.categories, estimated_cost=meal.price))
+            self._had_dinner = True
+            self._last_food_time = end
+            return end, meal_pt
+
+        # 2. גיבוי - מסעדה גנרית קרובה למלון
         hotel = GeoPoint(cfg.hotel_lat, cfg.hotel_lng, cfg.hotel_name)
         mode, t_min, t_cost = transit_plan(location, hotel)
         dinner_start = cursor + timedelta(minutes=t_min)
 
         if dinner_start >= hard_limit:
-            return cursor
+            return cursor, location
 
         if t_min > 0:
-            self._push(TimeSlot(
-                start=cursor,
-                end=dinner_start,
-                slot_type="transport",
-                name=f"Return to hotel area",
-                description=f"{mode} back",
-                estimated_cost=t_cost,
-                transport_mode=mode,
-            ))
+            self._push(TimeSlot(start=cursor, end=dinner_start, slot_type="transport", name=f"Return to hotel area", description=f"{mode} back", estimated_cost=t_cost, transport_mode=mode))
 
         dinner_end = min(dinner_start + timedelta(minutes=DINNER_DURATION), hard_limit)
-        self._push(TimeSlot(
-            start=dinner_start, end=dinner_end,
-            slot_type="meal", name="Dinner",
-            description="Local restaurant near hotel",
-            estimated_cost=MEAL_COSTS["dinner"],
-        ))
+        self._push(TimeSlot(start=dinner_start, end=dinner_end, slot_type="meal", name="Dinner", description="Local restaurant near hotel", estimated_cost=MEAL_COSTS["dinner"]))
         self._had_dinner = True
         self._last_food_time = dinner_end
-        return dinner_end
-
+        return dinner_end, hotel
+    
     def _inject_rest(self, cursor: datetime) -> datetime:
         end = cursor + timedelta(minutes=REST_DURATION)
         self._push(TimeSlot(

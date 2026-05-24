@@ -296,23 +296,32 @@ def seed_travel(conn: sqlite3.Connection) -> None:
         ("paris", "Eiffel Tower", json.dumps(["Sightseeing", "Landmark", "Outdoor"]), 35, 0, 48.8584, 2.2945, 120, "09:30", "23:45", "1,2,3,4,5,6,7", "SUNSET", True, True, 4.7),
         ("paris", "Disneyland Paris", json.dumps(["Family", "Theme Park", "Outdoor"]), 95, 0, 48.8722, 2.7758, 480, "09:30", "21:00", "1,2,3,4,5,6,7", "MORNING", True, True, 4.5),
         ("paris", "Seine River Cruise", json.dumps(["Sightseeing", "Relaxing", "Outdoor"]), 15, 0, 48.8616, 2.3266, 60, "10:00", "22:00", "1,2,3,4,5,6,7", "SUNSET", False, False, 4.6),
-        ("paris", "Montmartre Walking Tour", json.dumps(["Culture", "Walking", "Outdoor"]), 0, 0, 48.8867, 2.3431, 120, "10:00", "16:00", "1,2,3,4,5,6,7", "MORNING", False, False, 4.7), # פעילות חינמית! מעולה לתקציב
+        ("paris", "Montmartre Walking Tour", json.dumps(["Culture", "Walking", "Outdoor"]), 0, 0, 48.8867, 2.3431, 120, "10:00", "16:00", "1,2,3,4,5,6,7", "MORNING", False, False, 4.7),
         ("paris", "Palace of Versailles", json.dumps(["Historic", "Day Trip", "Indoor", "Outdoor"]), 45, 0, 48.8049, 2.1204, 300, "09:00", "18:30", "2,3,4,5,6,7", "MORNING", True, True, 4.8),
         ("paris", "Musee d'Orsay", json.dumps(["Culture", "Museum", "Indoor"]), 18, 0, 48.8599, 2.3266, 150, "09:30", "18:00", "2,3,4,5,6,7", "AFTERNOON", True, True, 4.9),
         ("paris", "Latin Quarter Food Tour", json.dumps(["Food", "Walking", "Outdoor"]), 65, 0, 48.8500, 2.3499, 180, "11:00", "15:00", "1,2,3,4,5,6,7", "AFTERNOON", True, True, 4.8),
         
+        ("paris", "Le Jules Verne (Eiffel Tower)", json.dumps(["Food", "Fine Dining", "Indoor"]), 150, 0, 48.8584, 2.2945, 120, "12:00", "23:00", "1,2,3,4,5,6,7", "EVENING", True, True, 4.8),
+        ("paris", "L'As du Fallafel", json.dumps(["Food", "Street Food", "Casual"]), 15, 0, 48.8574, 2.3598, 45, "11:00", "23:30", "1,2,3,4,5,7", "AFTERNOON", True, False, 4.7), # סגור בשבת
+        ("paris", "Café de Flore", json.dumps(["Food", "Cafe", "Breakfast"]), 25, 0, 48.8542, 2.3326, 60, "07:30", "01:30", "1,2,3,4,5,6,7", "MORNING", True, False, 4.4),
+        ("paris", "Arc de Triomphe", json.dumps(["Sightseeing", "Landmark", "Outdoor"]), 13, 0, 48.8738, 2.2950, 60, "10:00", "22:30", "1,2,3,4,5,6,7", "AFTERNOON", False, False, 4.7),
+        ("paris", "Sainte-Chapelle", json.dumps(["Historic", "Culture", "Indoor"]), 11, 0, 48.8554, 2.3450, 60, "09:00", "17:00", "1,2,3,4,5,6,7", "MORNING", False, True, 4.8),
+        ("paris", "Bouillon Chartier", json.dumps(["Food", "Restaurant", "Casual"]), 20, 0, 48.8718, 2.3433, 90, "11:30", "00:00", "1,2,3,4,5,6,7", "EVENING", True, False, 4.3),
+        ("paris", "Centre Pompidou", json.dumps(["Culture", "Museum", "Indoor"]), 15, 0, 48.8606, 2.3522, 120, "11:00", "21:00", "1,3,4,5,6,7", "AFTERNOON", True, False, 4.5), # סגור בשלישי
+        ("paris", "Jardin du Luxembourg", json.dumps(["Nature", "Park", "Outdoor"]), 0, 0, 48.8462, 2.3371, 90, "08:00", "18:00", "1,2,3,4,5,6,7", "AFTERNOON", False, False, 4.8),
+        ("paris", "Bateaux Parisiens Dinner Cruise", json.dumps(["Food", "Sightseeing", "Boat"]), 90, 0, 48.8616, 2.3266, 150, "20:30", "23:00", "1,2,3,4,5,6,7", "NIGHT", True, True, 4.6),
+        ("paris", "Angelina Paris (Rivoli)", json.dumps(["Food", "Cafe", "Dessert"]), 30, 0, 48.8651, 2.3283, 60, "08:00", "19:00", "1,2,3,4,5,6,7", "MORNING", True, False, 4.5),
+        ("paris", "Catacombs of Paris", json.dumps(["History", "Unique", "Indoor"]), 29, 10, 48.8338, 2.3324, 90, "09:45", "20:30", "2,3,4,5,6,7", "AFTERNOON", False, True, 4.6),
+        ("paris", "Macaron Baking Class", json.dumps(["Activity", "Food", "Class"]), 55, 12, 48.8732, 2.3291, 90, "10:00", "18:00", "1,2,3,4,5,6", "AFTERNOON", True, True, 4.7),
+
         ("london", "London Eye", json.dumps(["Sightseeing", "Viewpoint"]), 30, 0, 51.5033, -0.1195, 60, "10:00", "20:30", "1,2,3,4,5,6,7", "SUNSET", False, True, 4.5),
         ("london", "British Museum", json.dumps(["Culture", "Museum", "Indoor"]), 0, 0, 51.5194, -0.1270, 150, "10:00", "17:00", "1,2,3,4,5,6,7", "MORNING", True, False, 4.8),
         ("london", "Pub Crawl", json.dumps(["Nightlife", "Bar", "Social"]), 30, 18, 51.5126, -0.1325, 240, "19:00", "23:59", "4,5,6", "NIGHT", True, True, 4.4),
-
         ("tokyo", "Robot Cafe", json.dumps(["Entertainment", "Unique", "Indoor"]), 60, 12, 35.6943, 139.7028, 90, "15:00", "23:00", "1,2,3,4,5,6,7", "EVENING", True, True, 4.1),
         ("tokyo", "Mount Fuji Day Trip", json.dumps(["Nature", "Day Trip", "Outdoor"]), 120, 0, 35.3606, 138.7274, 600, "08:00", "18:00", "1,2,3,4,5,6,7", "MORNING", True, True, 4.9),
-
         ("new york", "Statue of Liberty", json.dumps(["Sightseeing", "Historic", "Outdoor"]), 25, 0, 40.6892, -74.0445, 180, "09:00", "17:00", "1,2,3,4,5,6,7", "MORNING", True, True, 4.7),
-
         ("berlin", "Berlin Wall Tour", json.dumps(["History", "Walking", "Outdoor"]), 15, 0, 52.5351, 13.3902, 120, "10:00", "14:00", "1,2,3,4,5,6,7", "MORNING", False, False, 4.6),
         ("berlin", "Techno Club Entry", json.dumps(["Nightlife", "Club", "Indoor"]), 25, 18, 52.5108, 13.4318, 300, "23:59", "08:00", "5,6", "NIGHT", False, False, 4.4),
-
         ("amsterdam", "Rijksmuseum", json.dumps(["Culture", "Museum", "Indoor"]), 22, 0, 52.3600, 4.8852, 150, "09:00", "17:00", "1,2,3,4,5,6,7", "AFTERNOON", True, True, 4.8),
         ("amsterdam", "Canal Boat Tour", json.dumps(["Sightseeing", "Relaxing", "Outdoor"]), 18, 0, 52.3780, 4.9000, 75, "10:00", "21:00", "1,2,3,4,5,6,7", "SUNSET", False, True, 4.5),
     ]
@@ -354,7 +363,6 @@ def seed_travel(conn: sqlite3.Connection) -> None:
     
    
     activity_features_map = [
-       
         ("Louvre Museum", ["Wheelchair Accessible", "Air Conditioned", "Guided Tour"]),
         ("Eiffel Tower", ["Wheelchair Accessible"]),
         ("Disneyland Paris", ["Wheelchair Accessible", "Vegetarian Options", "Family Friendly"]),
@@ -363,6 +371,16 @@ def seed_travel(conn: sqlite3.Connection) -> None:
         ("Musee d'Orsay", ["Wheelchair Accessible", "Air Conditioned", "Vegetarian Options"]),
         ("Latin Quarter Food Tour", ["Vegetarian Options", "Guided Tour", "Vegan Options"]),
         
+        ("Le Jules Verne (Eiffel Tower)", ["Air Conditioned", "Wheelchair Accessible"]),
+        ("L'As du Fallafel", ["Kosher", "Vegetarian Options", "Vegan Options", "Family Friendly"]),
+        ("Café de Flore", ["Vegetarian Options", "Air Conditioned"]),
+        ("Bouillon Chartier", ["Family Friendly", "Air Conditioned"]),
+        ("Bateaux Parisiens Dinner Cruise", ["Air Conditioned", "Wheelchair Accessible", "Vegetarian Options"]),
+        ("Macaron Baking Class", ["Air Conditioned", "Family Friendly", "Vegetarian Options"]),
+        ("Jardin du Luxembourg", ["Wheelchair Accessible", "Family Friendly", "Pet Friendly"]),
+        ("Sainte-Chapelle", ["Wheelchair Accessible"]),
+        ("Centre Pompidou", ["Wheelchair Accessible", "Air Conditioned"]),
+
         ("London Eye", ["Wheelchair Accessible", "Air Conditioned"]),
         ("Mount Fuji Day Trip", ["Guided Tour"]),
         ("Rijksmuseum", ["Wheelchair Accessible", "Air Conditioned", "Vegetarian Options"]),        
