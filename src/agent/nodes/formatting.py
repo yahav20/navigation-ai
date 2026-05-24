@@ -14,6 +14,7 @@ CRITICAL RULES:
 3. If a list is empty, omit that whole section — do NOT print placeholder text.
 4. Do not ask the user any questions and do not add extra commentary outside the template.
 5. Do not output the raw JSON. Render the fields.
+6. ALWAYS end your response with the EXACT sign-off text provided in the template below.
 
 TEMPLATE:
 
@@ -62,7 +63,9 @@ For each activity:
   * **Autumn:** {weather.Autumn}
   * **Winter:** {weather.Winter}
 
-{sign_off}
+---
+**Ready to turn this into a real plan?**
+If these flights and hotels fit your budget, just tell me: **"Build my daily schedule"** (or ask to change the budget, dates, or destination!)
 """
 
 
