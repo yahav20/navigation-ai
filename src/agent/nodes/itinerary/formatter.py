@@ -1,10 +1,7 @@
 # src/agent/nodes/itinerary/formatter.py
 from __future__ import annotations
-import logging
 from langchain_core.messages import AIMessage
 from agent.state import AgentState
-
-logger = logging.getLogger(__name__)
 
 class ItineraryFormatterNode:
     """
@@ -18,8 +15,6 @@ class ItineraryFormatterNode:
         action = state.get("itinerary_fallback_action", "")
         feasible = state.get("itinerary_feasible", True)
         
-        print("\n--- 📊 FORMATTING PHASE: Preparing User Response ---")
-
         # Case 1: The itinerary failed and the system proposed alternative destinations (Fallback Alternatives)
         if action == "suggested_alternatives" or not feasible:
             return self._format_fallback_response(state)
@@ -27,7 +22,6 @@ class ItineraryFormatterNode:
         # Case 2: The itinerary was completed successfully and we have a ready markdown from the Observer
         final_markdown = plan_state.get("final_markdown")
         if final_markdown:
-            print("✨ Successfully formatted final itinerary markdown.")
             return {"messages": [AIMessage(content=final_markdown)]}
 
         # Case 3: Edge case/fallback - an existing plan that wasn't finalized
@@ -35,7 +29,6 @@ class ItineraryFormatterNode:
 
     def _format_fallback_response(self, state: AgentState) -> dict:
         """Formats a nice response for the user when the original destination is not feasible and suggests culturally close alternatives"""
-        print("🗺️ Formatting alternative destinations view.")
         original_dest = state.get("destination_city", "the requested destination")
         origin = state.get("current_city", "")
         alternatives = state.get("alternative_destinations", [])

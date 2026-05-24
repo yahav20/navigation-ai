@@ -16,10 +16,10 @@ Flow per execution step:
 from __future__ import annotations
 
 import json
-import logging
 from typing import Optional
 
 from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import AIMessage
 
 from agent.nodes.itinerary.schemas import ExecutionPlan
 from agent.nodes.itinerary.itinerary_tools import (
@@ -34,8 +34,6 @@ from agent.nodes.itinerary.activity_selector import (
     select_activities_per_day, resolve_candidates,
 )
 from agent.state import AgentState
-
-logger = logging.getLogger(__name__)
 
 DEFAULT_MEALS_PER_DAY = 60.0
 
@@ -63,8 +61,7 @@ class ItineraryExecutorNode:
         step = plan.steps[current_index]
         key = f"{step.step_type}_{step.step_id}"
         cache_key = step.step_type
-
-        print(f"\n--- ⚙️ EXECUTING STEP {current_index + 1}/{len(plan.steps)}: {step.step_type} ---")
+        msg_content = f"⚙️ **Executing Step {current_index + 1}/{len(plan.steps)}:** `{step.step_type}`"
 
         # ── Cache check (skip duplicate tool calls on replanning) ──
         cached_key = next(
@@ -79,20 +76,21 @@ class ItineraryExecutorNode:
         skip_cache_types = {"build_day_schedule", "verify_budget", "fetch_activities"}
 
         if cached_key and step.step_type not in skip_cache_types:
-            print(f"⏩ Skipping — using cached data for '{step.step_type}'.")
             results[key] = results[cached_key]
+            msg_content += f"\n⏩ **Skipped** — using cached data."
         else:
             try:
                 results[key] = self._run(step, results, destination, origin,
                                          trip_days, budget, prefs, state)
-                print(f"✅ Step {step.step_type} completed.")
+                msg_content += f"\n✅ **Step completed.**"
             except Exception as e:
-                logger.exception("Step %s failed", step.step_type)
                 results[key] = {"error": str(e), "step_type": step.step_type}
+                msg_content += f"\n❌ **Step failed:** {e}"
 
         return {
             "current_step_index": current_index + 1,
             "itinerary_plan": {**plan_state, "step_results": results},
+            "messages": [AIMessage(content=msg_content, name="executor_log")],
         }
 
     # ── Step dispatcher ────────────────────────────────────────────────────
@@ -193,8 +191,6 @@ class ItineraryExecutorNode:
         day_names = [n for n in day_names if n not in used]
 
         candidates = resolve_candidates(all_activities, day_names)
-
-        print(f"📅 Day {day_num}: {len(candidates)} candidate activities → ScheduleEngine")
 
         # ── Run deterministic scheduler ──
         builder = DayScheduleBuilder(cfg)

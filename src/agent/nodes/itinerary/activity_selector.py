@@ -26,13 +26,10 @@ Output format (structured):
 from __future__ import annotations
 
 import json
-import logging
 from typing import Optional
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
-
-logger = logging.getLogger(__name__)
 
 SELECTOR_SYSTEM = """
 You are a senior travel curator. Your ONLY job: given a list of activities,
@@ -119,7 +116,7 @@ def select_activities_per_day(
                 normalised[key] = val if isinstance(val, list) else []
             return normalised
     except Exception as e:
-        logger.warning("ActivitySelector LLM failed (%s), using fallback.", e)
+        pass
 
     # ── Fallback: round-robin by rating ──
     sorted_acts = sorted(activities, key=lambda a: -a.get("rating", 0))
@@ -162,5 +159,5 @@ def resolve_candidates(
                 operating_days=str(a.get("operating_days") or "Daily"),
             ))
         except (TypeError, ValueError) as e:
-            logger.warning("Skipping activity %s due to bad data: %s", name, e)
+            pass
     return candidates

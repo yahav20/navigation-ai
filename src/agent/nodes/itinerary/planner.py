@@ -13,15 +13,12 @@ What changed vs v1:
 """
 from __future__ import annotations
 
-import logging
-
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 
 from agent.nodes.itinerary.schemas import ExecutionPlan, PlanStep
 from agent.state import AgentState
 
-logger = logging.getLogger(__name__)
 MAX_RETRIES = 3
 
 SYSTEM_PROMPT = """
@@ -59,17 +56,16 @@ class ItineraryPlannerNode:
         prev_plan = state.get("itinerary_plan") or {}
         retry_count = prev_plan.get("retry_count", 0)
         observer_reason = prev_plan.get("observer_reason", "")
-
-        if retry_count == 0:
-            print(f"\n--- 🧠 PLANNING: {destination} · {trip_days} days ---")
-        else:
-            print(f"\n--- 🔄 REPLANNING (attempt {retry_count}/{MAX_RETRIES}): {observer_reason} ---")
+        
+        plan_md = f"🧠 **PLANNING:** `{destination}` · `{trip_days} days`\n"
+        if retry_count > 0:
+            plan_md = f"🔄 **REPLANNING (attempt {retry_count}/{MAX_RETRIES}):**\n*{observer_reason}*\n"
 
         if retry_count >= MAX_RETRIES:
-            print("--- ❌ MAX RETRIES REACHED. Passing to Fallback. ---")
             return {
                 "itinerary_feasible": False,
                 "itinerary_fallback_reason": observer_reason or "max_retries_exceeded",
+                "messages": [AIMessage(content="❌ **MAX RETRIES REACHED. Passing to Fallback.**", name="planner_log")],
             }
 
         user_msg = (
@@ -86,13 +82,13 @@ class ItineraryPlannerNode:
             ])
             plan.retry_count = retry_count
         except Exception as e:
-            logger.error("Planner LLM failed: %s — using default plan", e)
+            plan_md += f"\n❌ **Planner LLM failed:** {e} — using default plan\n"
             plan = _default_plan(destination, origin, trip_days, retry_count)
 
-        print("📝 Execution Plan:")
+        plan_md += "\n📝 **Execution Plan:**\n"
         for step in plan.steps:
             day_tag = f" (Day {step.day})" if step.day else ""
-            print(f"  [{step.step_id}] {step.step_type}{day_tag}")
+            plan_md += f"* **[{step.step_id}]** `{step.step_type}`{day_tag}\n"
 
         return {
             "current_step_index": 0,
@@ -104,6 +100,7 @@ class ItineraryPlannerNode:
             },
             "itinerary_feasible": True,
             "itinerary_fallback_reason": None,
+            "messages": [AIMessage(content=plan_md.strip(), name="planner_log")],
         }
 
 

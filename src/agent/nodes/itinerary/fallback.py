@@ -22,7 +22,6 @@ State updates:
 from __future__ import annotations
 
 import json
-import logging
 from typing import Optional
 
 from langchain_core.language_models import BaseChatModel
@@ -30,8 +29,6 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from agent.nodes.itinerary.itinerary_tools import search_outbound_flights, search_hotels
 from agent.state import AgentState
-
-logger = logging.getLogger(__name__)
 
 CULTURAL_SIMILARITY_PROMPT = """You are a travel geography expert.
 Given a destination city, suggest exactly 3 alternative cities that are:
@@ -58,9 +55,6 @@ class ItineraryFallbackNode:
         trip_days = state.get("trip_days", 3)
         plan_state = state.get("itinerary_plan") or {}
         results = plan_state.get("step_results", {})
-
-        logger.info("Fallback triggered: reason=%s dest=%s", reason, destination)
-        print(f"\n--- 🛟 FALLBACK: {reason} ---")
 
         if "budget" in reason.lower() or "exceeded" in reason.lower():
             return self._handle_budget(results, budget, trip_days, destination, origin, plan_state)
@@ -91,7 +85,6 @@ class ItineraryFallbackNode:
             est_cost = (base_cost + realistic_hotel * new_days) * 1.15
             
             if budget and est_cost <= budget * 1.05:
-                print(f"✅ Fallback: adjusting trip from {trip_days} → {new_days} days")
                 
                 # 🔥   2 (Caching):       
                 #    -Executor      !
@@ -111,7 +104,8 @@ class ItineraryFallbackNode:
                         "retry_count": 0,
                         "observer_reason": "",
                         "step_results": cleared_results
-                    }
+                    },
+                    "messages": [AIMessage(content=f"✅ **Fallback:** adjusting trip from `{trip_days}` ➔ `{new_days}` days", name="fallback_log")]
                 }
 
         # Try +$500 budget bump
@@ -119,7 +113,6 @@ class ItineraryFallbackNode:
         est_cost = (base_cost + realistic_hotel * trip_days) * 1.15
         
         if est_cost <= bumped * 1.05:
-            print(f"✅ Fallback: bumping budget ${budget} → ${bumped}")
             return {
                 "total_budget": bumped,
                 "itinerary_fallback_action": "budget_bumped_500",
@@ -128,12 +121,12 @@ class ItineraryFallbackNode:
                 "itinerary_plan": {
                     **plan_state,
                     "retry_count": 0,
-                    "observer_reason": ""
-                }
+                    "observer_reason": "",
+                },
+                "messages": [AIMessage(content=f"✅ **Fallback:** bumping budget `${budget}` ➔ `${bumped}`", name="fallback_log")],
             }
 
         # Nothing worked → alternatives
-        print("⚠️ Budget adjustment impossible even with bumps. Suggesting alternatives.")
         return self._suggest_alternatives(destination, origin, bumped, trip_days)
     # ── Alternative city suggester ─────────────────────────────────────────
 
@@ -170,7 +163,6 @@ class ItineraryFallbackNode:
         final = validated or alternatives[:3]
         md = _render_alternatives(destination, final, origin, budget, trip_days)
 
-        print(f"💡 Suggesting alternatives: {final}")
         return {
             "itinerary_fallback_action": "suggested_alternatives",
             "itinerary_fallback_alternatives": final,

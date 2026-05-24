@@ -21,7 +21,6 @@ This means the replanning loop never wastes tokens on format issues.
 from __future__ import annotations
 
 import json
-import logging
 import math
 from datetime import datetime
 from typing import Optional
@@ -33,7 +32,6 @@ from agent.nodes.itinerary.schemas import ExecutionPlan, ObserverOutput, FinalRe
 from agent.nodes.itinerary.schedule_engine import haversine_km, GeoPoint, WALK_MAX_KM
 from agent.state import AgentState
 
-logger = logging.getLogger(__name__)
 MAX_RETRIES = 3
 
 # ── LLM prompt (only for final markdown generation) ────────────────────────
@@ -297,7 +295,6 @@ class ItineraryObserverNode:
 
             if isinstance(last_result, dict) and last_result.get("error"):
                 error_msg = last_result["error"]
-                print(f"\n--- ⚠️ OBSERVER: Step failure: {error_msg} ---")
                 return self._trigger_replan(plan_state, retry_count, error_msg)
 
         # ── 2. Not done yet: continue ──
@@ -305,7 +302,6 @@ class ItineraryObserverNode:
             return {"itinerary_feasible": True, "observer_action": "continue"}
 
         # ── 3. All steps done — Layer 1 validation ──
-        print("\n--- 🔍 OBSERVER: Running structural validation (Layer 1)... ---")
         budget = state.get("total_budget", 0)
         trip_days = state.get("trip_days", 3)
 
@@ -316,19 +312,11 @@ class ItineraryObserverNode:
         hard_errors = [e for e in errors if e.code in hard_codes]
         soft_warnings = [e for e in errors if e.code not in hard_codes]
 
-        if soft_warnings:
-            print(f"⚠️  Soft warnings ({len(soft_warnings)}): "
-                  + " | ".join(str(e) for e in soft_warnings))
-
         if hard_errors:
             reason = "; ".join(str(e) for e in hard_errors)
-            print(f"\n--- ❌ OBSERVER: Hard validation failures: {reason} ---")
             return self._trigger_replan(plan_state, retry_count, reason)
 
-        print("✅ Layer 1 validation passed.")
-
         # ── 4. Layer 2 — LLM quality review + markdown generation ──
-        print("\n--- 🧐 OBSERVER: Running LLM quality review (Layer 2)... ---")
         try:
             summary = _build_summary(results, budget, trip_days)
             output = self.llm.invoke([
@@ -338,17 +326,13 @@ class ItineraryObserverNode:
             #     
             content = output.content.strip()
         except Exception as e:
-            print(f"\n❌ OBSERVER LLM crashed: {e}")
             content = ""
 
         if content.startswith("REJECT:"):
             reason = content.replace("REJECT:", "").strip()
-            print(f"\n--- ⚠️ LLM Review: {reason} ---")
             return self._trigger_replan(plan_state, retry_count, reason)
 
         # ── 5. Success ──
-        print("\n--- 🎉 OBSERVER: Plan approved! ---")
-
         if content and not content.startswith("REJECT:"):
            
             if content.startswith("```"):
@@ -370,7 +354,6 @@ class ItineraryObserverNode:
         
         # 1.    (MAX_RETRIES)
         if new_retry >= MAX_RETRIES:
-            print(f"--- ❌ MAX RETRIES ({MAX_RETRIES}) reached. Passing to Fallback. ---")
             
             # -Edge      
             hard_stop_reason = f"max_retries_exceeded: {reason}"
@@ -383,11 +366,11 @@ class ItineraryObserverNode:
                     **plan_state,
                     "retry_count": new_retry,
                     "observer_reason": hard_stop_reason,
-                }
+                },
+                "messages": [AIMessage(content=f"❌ **OBSERVER:** MAX RETRIES ({MAX_RETRIES}) reached. Passing to Fallback.\n*Reason: {reason}*", name="observer_log")],
             }
 
         # 2. (Replan)
-        print(f"--- 🔄 TRIGGERING REPLANNER (attempt {new_retry}/{MAX_RETRIES}) ---")
         updates = {
             "itinerary_feasible": False,
             "itinerary_fallback_reason": reason,
@@ -396,6 +379,7 @@ class ItineraryObserverNode:
                 "retry_count": new_retry,
                 "observer_reason": reason,
             },
+            "messages": [AIMessage(content=f"🔄 **TRIGGERING REPLANNER (attempt {new_retry}/{MAX_RETRIES}):**\n*{reason}*", name="observer_log")],
         }
         
         if revised and hasattr(revised, "adjustments"):
