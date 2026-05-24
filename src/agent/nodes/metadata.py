@@ -73,6 +73,8 @@ class MetadataNode:
 
         old_origin = state.get("current_city", "").lower() if state.get("current_city") else ""
         old_dest = state.get("destination_city", "").lower() if state.get("destination_city") else ""
+        old_budget = state.get("total_budget")
+        old_days = state.get("trip_days")
 
         if metadata.current_city is not None:
             updates["current_city"] = metadata.current_city.split(",")[0].strip()
