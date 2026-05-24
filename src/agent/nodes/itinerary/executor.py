@@ -146,9 +146,9 @@ class ItineraryExecutorNode:
     def _build_day(self, step, results, destination, trip_days, prefs):
         day_num = step.day or 1
 
-        outbound = _first(results, "fetch_flights")
-        ret = _first(results, "fetch_return_flights")
-        hotel_raw = _first(results, "fetch_hotels")
+        outbound = _cheapest(results, "fetch_flights")
+        ret = _cheapest(results, "fetch_return_flights")
+        hotel_raw = _cheapest(results, "fetch_hotels")
 
         # fetch_activities now returns a dict with "activities" and "selection"
         acts_result = _first_dict(results, "fetch_activities")
@@ -220,22 +220,32 @@ class ItineraryExecutorNode:
     # ── Budget verifier ────────────────────────────────────────────────────
 
     def _verify_budget(self, results, budget, trip_days):
-        # 🔥 עכשיו אנחנו לוקחים את הזול ביותר מתוך ה-Cache, לא סתם את הראשון!
         outbound = _cheapest(results, "fetch_flights")
         ret      = _cheapest(results, "fetch_return_flights")
         hotel    = _cheapest(results, "fetch_hotels")
 
-        activity_cost = sum(
-            v.get("day_cost", 0) for k, v in results.items()
-            if k.startswith("build_day_schedule") and isinstance(v, dict)
-        )
+        actual_activities_cost = 0.0
+        actual_meals_cost = 0.0
+
+        for k, v in results.items():
+            if k.startswith("build_day_schedule") and isinstance(v, dict):
+                slots = v.get("slots", [])
+                for slot in slots:
+                    cost = float(slot.get("estimated_cost", 0))
+                    if slot.get("slot_type") == "meal":
+                        actual_meals_cost += cost
+                    else:
+                        actual_activities_cost += cost
+
+        exact_meal_per_day = actual_meals_cost / trip_days if trip_days > 0 else 0
+
         return calculate_trip_cost.invoke({
             "flight_price":                  (outbound or {}).get("price", 0) if isinstance(outbound, dict) else 0,
             "return_flight_price":           (ret or {}).get("price", 0) if isinstance(ret, dict) else 0,
             "hotel_price_per_night":         (hotel or {}).get("price_per_night", 0) if isinstance(hotel, dict) else 0,
             "trip_days":                     trip_days,
-            "estimated_activities_budget":   activity_cost,
-            "estimated_meals_budget_per_day": DEFAULT_MEALS_PER_DAY,
+            "estimated_activities_budget":   actual_activities_cost,
+            "estimated_meals_budget_per_day": exact_meal_per_day,
         })
 
 

@@ -169,7 +169,6 @@ class ItineraryFallbackNode:
                 pass  # skip unavailable
 
         final = validated or alternatives[:3]
-        md = _render_alternatives(destination, final, origin, budget, trip_days)
 
         print(f"💡 Suggesting alternatives: {final}")
         return {
@@ -225,23 +224,3 @@ def _realistic_hotel_night(results: dict) -> float:
                 top_3 = prices[:3] # ניקח את 3 הזולים ביותר
                 return sum(top_3) / len(top_3)
     return 0.0
-def _render_alternatives(
-    original: str, alternatives: list[str], origin: str,
-    budget: float, trip_days: int,
-) -> str:
-    lines = [
-        "# 🗺️ Alternative Destinations\n",
-        f"Unfortunately we couldn't build a complete itinerary for **{original}** "
-        f"within your constraints (${budget} · {trip_days} days).\n",
-        "Here are culturally similar alternatives with available flights:\n",
-    ]
-    emojis = ["1️⃣", "2️⃣", "3️⃣"]
-    for i, city in enumerate(alternatives):
-        lines.append(f"## {emojis[i]} {city}")
-        lines.append(f"Direct or connecting flights available from **{origin}**. "
-                     f"Similar culture and travel vibe to {original}.\n")
-    lines += [
-        "---",
-        "💬 Reply with a city name and I'll plan your full itinerary!",
-    ]
-    return "\n".join(lines)

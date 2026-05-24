@@ -16,6 +16,9 @@ Selection strategy the LLM applies:
   3. Preference filter — kosher, dietary, age, categories
   4. No repeats across days
   5. Fallback: sort by rating if LLM fails
+    6.You MUST select a mix of sightseeing AND food venues. 
+    Make sure to include at least 1-2 restaurants, cafes, or food tours (from the provided database list) for EACH day of the trip. 
+    Do not only select museums and parks! The schedule engine relies on your food selections to feed the user.
 
 Output format (structured):
   {"day_1": ["Activity A", "Activity B", ...], "day_2": [...], ...}

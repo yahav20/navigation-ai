@@ -373,9 +373,9 @@ def seed_travel(conn: sqlite3.Connection) -> None:
         
         ("Le Jules Verne (Eiffel Tower)", ["Air Conditioned", "Wheelchair Accessible"]),
         ("L'As du Fallafel", ["Kosher", "Vegetarian Options", "Vegan Options", "Family Friendly"]),
-        ("Café de Flore", ["Vegetarian Options", "Air Conditioned"]),
-        ("Bouillon Chartier", ["Family Friendly", "Air Conditioned"]),
-        ("Bateaux Parisiens Dinner Cruise", ["Air Conditioned", "Wheelchair Accessible", "Vegetarian Options"]),
+        ("Café de Flore", ["Vegetarian Options", "Kosher", "Air Conditioned"]),
+        ("Bouillon Chartier", ["Family Friendly", "Kosher", "Air Conditioned"]),
+        ("Bateaux Parisiens Dinner Cruise", ["Air Conditioned", "Wheelchair Accessible", "Kosher", "Vegetarian Options"]),
         ("Macaron Baking Class", ["Air Conditioned", "Family Friendly", "Vegetarian Options"]),
         ("Jardin du Luxembourg", ["Wheelchair Accessible", "Family Friendly", "Pet Friendly"]),
         ("Sainte-Chapelle", ["Wheelchair Accessible"]),
