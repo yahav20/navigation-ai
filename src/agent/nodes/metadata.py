@@ -71,13 +71,27 @@ class MetadataNode:
             *recent_messages,
         ])
 
+        old_origin = state.get("current_city", "").lower() if state.get("current_city") else ""
+        old_dest = state.get("destination_city", "").lower() if state.get("destination_city") else ""
+
         if metadata.current_city is not None:
             updates["current_city"] = metadata.current_city.split(",")[0].strip()
         if metadata.destination_city is not None:
             updates["destination_city"] = metadata.destination_city.split(",")[0].strip()
         if metadata.budget is not None:
             updates["total_budget"] = metadata.budget
+            if old_budget is not None and metadata.budget != old_budget:
+                updates["travel_plan"] = {}
+                updates["itinerary_plan"] = {}
+                updates["flight_options"] = []
+                updates["has_flights"] = False
+
         if metadata.trip_days is not None:
             updates["trip_days"] = metadata.trip_days
+            if old_days is not None and metadata.trip_days != old_days:
+                updates["travel_plan"] = {}
+                updates["itinerary_plan"] = {}
+                updates["flight_options"] = []
+                updates["has_flights"] = False
 
         return updates

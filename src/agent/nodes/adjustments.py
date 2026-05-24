@@ -90,5 +90,6 @@ class AdjustmentsNode:
         updates["flight_options"] = []
         updates["has_flights"] = False
         updates["travel_plan"] = {}
+        updates["itinerary_plan"] = {}
 
         return updates
