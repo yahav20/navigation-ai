@@ -18,7 +18,7 @@ class SQLiteActivityQueriesMixin:
             (city.strip().lower(),),
         )
         if not rows:
-            return [{"message": f"No available activities found in {city}."}]
+            return []
 
         return [dict(row) for row in rows]
     

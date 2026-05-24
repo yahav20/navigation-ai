@@ -44,8 +44,8 @@ class RouterNode:
         INTENT DEFINITIONS & DIFFERENCES:
         1. 'recommendations': User wants ideas, but DOES NOT have a specific destination yet. ("Where should I go for a beach trip?")
         2. 'new_travel_plan' (Info & Feasibility): User explicitly names a destination and wants to check flights, hotels, or costs, BUT they DO NOT ask for a daily schedule. ("I want to visit Rome, what are the flights?", "Let's check options for Madrid")
-        3. 'build_itinerary' (Full Execution): User EXPLICITLY asks for a detailed, day-by-day itinerary, schedule, or full plan for a destination. ("Build a 3-day itinerary for Rome", "Create a daily schedule", "Plan a full trip to London")
-        4. 'update_travel_plan': User wants to change parameters (destination, budget, origin) of a trip, WITHOUT asking for a daily schedule. ("Change destination to Paris", "Increase budget to $1000")
+        3. 'build_itinerary' (Full Execution): User EXPLICITLY asks for a detailed, day-by-day itinerary, schedule, OR asks to "replan" the entire trip (even if they are changing destination or budget at the same time). Examples: "Build a 3-day itinerary for Rome", "replan for Paris with $700", "create full plan".
+        4. 'update_travel_plan': User wants to change parameters (destination, budget, origin) of a trip, BUT DOES NOT ask for a daily schedule or a full replan. They just want to check feasibility/flights. Examples: "Change destination to Paris", "Increase budget to $1000".
         5. 'general_chat': Theoretical or specific travel questions (culture, weather, tips) not related to active planning.
 
         User message: "{last_msg.content}"
@@ -68,5 +68,13 @@ class RouterNode:
                 final_intent = "recommendations"
             else:
                 final_intent = "new_travel_plan"
+
+        # Guardrail 4: Override update to build_itinerary if planning is explicitly requested
+        if final_intent == "update_travel_plan":
+            content_lower = last_msg.content.lower()
+            # If the user used planning/replanning trigger words, force route to Planner
+            trigger_words = ["replan", "full plan", "schedule", "לוז", "תכנון מלא", "תבנה לי"]
+            if any(word in content_lower for word in trigger_words):
+                final_intent = "build_itinerary"
 
         return {"intent": final_intent}
