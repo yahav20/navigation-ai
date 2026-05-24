@@ -218,7 +218,7 @@ def seed_travel(conn: sqlite3.Connection) -> None:
     flights = [
     ("tel aviv", "paris", "El Al", 350, "LY321", "2026-06-01 08:00:00", "2026-06-01 11:50:00", 290, "Available", 4.5),
     ("tel aviv", "paris", "Air France", 420, "AF123", "2026-06-01 09:30:00", "2026-06-01 13:00:00", 270, "Available", 4.5),
-    ("tel aviv", "paris", "EasyJet", 180, "U2111", "2026-06-01 14:00:00", "2026-06-01 18:30:00", 270, "Available", 4.5), # אופציית לואו-קוסט
+    ("tel aviv", "paris", "EasyJet", 180, "U2111", "2026-06-01 14:00:00", "2026-06-01 18:30:00", 270, "Available", 4.5),
     ("paris", "tel aviv", "El Al", 355, "LY322", "2026-06-04 15:00:00", "2026-06-04 20:50:00", 295, "Available", 4.8),
     ("paris", "tel aviv", "Air France", 400, "AF126", "2026-06-04 10:00:00", "2026-06-04 15:30:00", 270, "Available", 4.5),
     ("paris", "tel aviv", "EasyJet", 150, "U2112", "2026-06-04 21:00:00", "2026-06-05 02:30:00", 270, "Available", 4.5),
@@ -302,12 +302,12 @@ def seed_travel(conn: sqlite3.Connection) -> None:
         ("paris", "Latin Quarter Food Tour", json.dumps(["Food", "Walking", "Outdoor"]), 65, 0, 48.8500, 2.3499, 180, "11:00", "15:00", "1,2,3,4,5,6,7", "AFTERNOON", True, True, 4.8),
         
         ("paris", "Le Jules Verne (Eiffel Tower)", json.dumps(["Food", "Fine Dining", "Indoor"]), 150, 0, 48.8584, 2.2945, 120, "12:00", "23:00", "1,2,3,4,5,6,7", "EVENING", True, True, 4.8),
-        ("paris", "L'As du Fallafel", json.dumps(["Food", "Street Food", "Casual"]), 15, 0, 48.8574, 2.3598, 45, "11:00", "23:30", "1,2,3,4,5,7", "AFTERNOON", True, False, 4.7), # סגור בשבת
+        ("paris", "L'As du Fallafel", json.dumps(["Food", "Street Food", "Casual"]), 15, 0, 48.8574, 2.3598, 45, "11:00", "23:30", "1,2,3,4,5,7", "AFTERNOON", True, False, 4.7), #  
         ("paris", "Café de Flore", json.dumps(["Food", "Cafe", "Breakfast"]), 25, 0, 48.8542, 2.3326, 60, "07:30", "01:30", "1,2,3,4,5,6,7", "MORNING", True, False, 4.4),
         ("paris", "Arc de Triomphe", json.dumps(["Sightseeing", "Landmark", "Outdoor"]), 13, 0, 48.8738, 2.2950, 60, "10:00", "22:30", "1,2,3,4,5,6,7", "AFTERNOON", False, False, 4.7),
         ("paris", "Sainte-Chapelle", json.dumps(["Historic", "Culture", "Indoor"]), 11, 0, 48.8554, 2.3450, 60, "09:00", "17:00", "1,2,3,4,5,6,7", "MORNING", False, True, 4.8),
         ("paris", "Bouillon Chartier", json.dumps(["Food", "Restaurant", "Casual"]), 20, 0, 48.8718, 2.3433, 90, "11:30", "00:00", "1,2,3,4,5,6,7", "EVENING", True, False, 4.3),
-        ("paris", "Centre Pompidou", json.dumps(["Culture", "Museum", "Indoor"]), 15, 0, 48.8606, 2.3522, 120, "11:00", "21:00", "1,3,4,5,6,7", "AFTERNOON", True, False, 4.5), # סגור בשלישי
+        ("paris", "Centre Pompidou", json.dumps(["Culture", "Museum", "Indoor"]), 15, 0, 48.8606, 2.3522, 120, "11:00", "21:00", "1,3,4,5,6,7", "AFTERNOON", True, False, 4.5), #  
         ("paris", "Jardin du Luxembourg", json.dumps(["Nature", "Park", "Outdoor"]), 0, 0, 48.8462, 2.3371, 90, "08:00", "18:00", "1,2,3,4,5,6,7", "AFTERNOON", False, False, 4.8),
         ("paris", "Bateaux Parisiens Dinner Cruise", json.dumps(["Food", "Sightseeing", "Boat"]), 90, 0, 48.8616, 2.3266, 150, "20:30", "23:00", "1,2,3,4,5,6,7", "NIGHT", True, True, 4.6),
         ("paris", "Angelina Paris (Rivoli)", json.dumps(["Food", "Cafe", "Dessert"]), 30, 0, 48.8651, 2.3283, 60, "08:00", "19:00", "1,2,3,4,5,6,7", "MORNING", True, False, 4.5),

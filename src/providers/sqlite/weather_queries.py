@@ -8,7 +8,6 @@ class SQLiteWeatherQueriesMixin:
         """Return average weather for a given city. If season is provided, filters by it."""
         city = city.strip().lower()
 
-        # אם נשלחה עונה ספציפית (למשל מתוך כלי ה-AI)
         if season:
             rows = self._query(
                 """SELECT w.season, w.temperature
@@ -20,8 +19,7 @@ class SQLiteWeatherQueriesMixin:
             if not rows:
                 return {"message": f"No weather data found for {season} in {city}."}
             return {"season": rows[0]["season"], "temperature": rows[0]["temperature"]}
-            
-        # אם לא נשלחה עונה (למשל מתוך ה-FlightSearchNode שמביא הכל)
+
         else:
             # 1. find city id
             rows = self._query(

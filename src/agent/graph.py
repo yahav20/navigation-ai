@@ -35,7 +35,7 @@ from agent.nodes.security_gate import security_gate_node
 from agent.state import AgentState
 from tools.rec_tools import rec_tools
 
-# ייבוא הצמתים ופונקציות הניתוב של ה-Itinerary Agent החדש:
+#      -Itinerary Agent :
 from agent.nodes.itinerary.planner import ItineraryPlannerNode
 from agent.nodes.itinerary.executor import ItineraryExecutorNode
 from agent.nodes.itinerary.observer import ItineraryObserverNode
@@ -72,7 +72,7 @@ def build_graph(
     formatter_alternative = FormatterAlternativeNode(extraction_model)
     router_node = RouterNode(extraction_model)
 
-    # יצירת צמתי ה-Itinerary
+    #   -Itinerary
     itinerary_planner_node = ItineraryPlannerNode(response_model)
     itinerary_executor_node = ItineraryExecutorNode(response_model)
     itinerary_observer_node = ItineraryObserverNode(response_model)
@@ -104,7 +104,7 @@ def build_graph(
     builder.add_node("formatter_alternative", formatter_alternative)
     builder.add_node("summary", summary_node)
 
-    # הוספת צמתי ה-Itinerary לגרף במקום ה-stub
+    #   -Itinerary-stub
     builder.add_node("itinerary_planner", itinerary_planner_node)
     builder.add_node("itinerary_executor", itinerary_executor_node)
     builder.add_node("itinerary_observer", itinerary_observer_node)
@@ -139,7 +139,7 @@ def build_graph(
             "extract_metadata": "extract_metadata",
             "adjustments": "adjustments",
             "rec_agent": "rec_agent",
-            "itinerary_planner": "itinerary_planner",  # שונה מ-itinerary_agent
+            "itinerary_planner": "itinerary_planner",  #  -itinerary_agent
             "general_chat": "general_chat",
             END: END,
         },
@@ -148,7 +148,7 @@ def build_graph(
     builder.add_edge("extract_metadata", "enrichment")
     builder.add_edge("adjustments", "enrichment")
     
-    # עדכון המעבר מ-enrichment: ניתן לנווט עכשיו גם ל-flight_search וגם ל-itinerary_planner
+    #   -enrichment:     -flight_search  -itinerary_planner
     builder.add_conditional_edges(
         "enrichment", 
         after_enrichment, 
@@ -179,7 +179,7 @@ def build_graph(
     builder.add_edge("formatter_alternative", "summary")
     builder.add_edge("formatter", "summary")
 
-    # ----- חיווט מסלול ה-Itinerary (Plan & Execute) -----
+    # -----   -Itinerary (Plan & Execute) -----
     builder.add_conditional_edges(
         "itinerary_planner", 
         after_itinerary_planner,
@@ -194,10 +194,10 @@ def build_graph(
         "itinerary_observer", 
         after_itinerary_observer,
         {
-            "itinerary_executor": "itinerary_executor",  # להמשך ה-Step-by-Step
-            "itinerary_planner": "itinerary_planner",    # במקרה של שגיאה (Replanner)
-            "itinerary_fallback": "itinerary_fallback",  # שגיאה קריטית
-            "itinerary_formatter": "itinerary_formatter" # סיום בהצלחה!
+            "itinerary_executor": "itinerary_executor",  
+            "itinerary_planner": "itinerary_planner",    
+            "itinerary_fallback": "itinerary_fallback",   
+            "itinerary_formatter": "itinerary_formatter" 
         }
     )
     
@@ -205,12 +205,11 @@ def build_graph(
         "itinerary_fallback", 
         after_itinerary_fallback,
         {
-            "itinerary_planner": "itinerary_planner",    # תוקן, אפשר לנסות שוב
-            "itinerary_formatter": "itinerary_formatter" # אין ברירה, מציגים אלטרנטיבות
+            "itinerary_planner": "itinerary_planner",    
+            "itinerary_formatter": "itinerary_formatter"
         }
     )
     
-    # בסיום העיצוב, הולכים ל-Summary כדי לסיים את הריצה ולשמור הקשר
     builder.add_edge("itinerary_formatter", "summary")
     # ----------------------------------------------------
 

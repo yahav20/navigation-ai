@@ -335,13 +335,12 @@ class ItineraryObserverNode:
                 SystemMessage(content=OBSERVER_SYSTEM),
                 HumanMessage(content=summary),
             ])
-            # שולפים את הטקסט החופשי מהמודל
+            #     
             content = output.content.strip()
         except Exception as e:
             print(f"\n❌ OBSERVER LLM crashed: {e}")
             content = ""
 
-        # ── בדיקה האם המודל החליט לדחות את התוכנית ──
         if content.startswith("REJECT:"):
             reason = content.replace("REJECT:", "").strip()
             print(f"\n--- ⚠️ LLM Review: {reason} ---")
@@ -350,15 +349,13 @@ class ItineraryObserverNode:
         # ── 5. Success ──
         print("\n--- 🎉 OBSERVER: Plan approved! ---")
 
-        # אם התוכן לא ריק ולא מתחיל ב-REJECT, זה המארקדאון המוכן שלנו!
         if content and not content.startswith("REJECT:"):
-            # ננקה עטיפות Markdown למקרה שהמודל הוסיף ```markdown 
+           
             if content.startswith("```"):
                 markdown = content.split("```")[1].lstrip("markdown").strip().rstrip("```").strip()
             else:
                 markdown = content
         else:
-            # במקרה של קריסה אמיתית, נשתמש בגיבוי של הפייתון
             markdown = _generate_fallback_markdown(results, trip_days, budget)
 
         return {
@@ -371,17 +368,17 @@ class ItineraryObserverNode:
     def _trigger_replan(self, plan_state, retry_count, reason, revised=None):
         new_retry = retry_count + 1
         
-        # 1. טיפול בעצירה מוחלטת (MAX_RETRIES)
+        # 1.    (MAX_RETRIES)
         if new_retry >= MAX_RETRIES:
             print(f"--- ❌ MAX RETRIES ({MAX_RETRIES}) reached. Passing to Fallback. ---")
             
-            # קידומת שמבטיחה שה-Edge יזהה מיד שזו שגיאת מקסימום ניסיונות
+            # -Edge      
             hard_stop_reason = f"max_retries_exceeded: {reason}"
             
             return {
                 "itinerary_feasible": False,
                 "itinerary_fallback_reason": hard_stop_reason,
-                # 🔥 התיקון: עדכון מלא של התוכנית כדי שה-Edge לא יקרא state ישן
+            
                 "itinerary_plan": {
                     **plan_state,
                     "retry_count": new_retry,
@@ -389,7 +386,7 @@ class ItineraryObserverNode:
                 }
             }
 
-        # 2. טיפול רגיל בריפלן (Replan)
+        # 2. (Replan)
         print(f"--- 🔄 TRIGGERING REPLANNER (attempt {new_retry}/{MAX_RETRIES}) ---")
         updates = {
             "itinerary_feasible": False,
@@ -418,7 +415,6 @@ class ItineraryObserverNode:
 def _generate_fallback_markdown(results: dict, trip_days: int, budget: float) -> str:
     lines = ["# ✈️ Your Trip Itinerary\n"]
     
-    # ── חילוץ נתוני הטיסות (הטיסה הזולה ביותר נמצאת תמיד במקום ה-0) ──
     out_key = next((k for k in results if k.startswith("fetch_flights")), None)
     ret_key = next((k for k in results if k.startswith("fetch_return_flights")), None)
     
@@ -430,12 +426,12 @@ def _generate_fallback_markdown(results: dict, trip_days: int, budget: float) ->
         for title, flight in [("Outbound", outbound), ("Return", return_fl)]:
             if not flight:
                 continue
-            # תמיכה בטיסות קונקשן שכוללות את המערך 'route'
+            #  'route'
             if "route" in flight:
                 lines.append(f"**{title} Flight (Connecting):**")
                 for leg in flight["route"]:
                     lines.append(f"- {leg.get('airline')} {leg.get('flight')} | {leg.get('from')} → {leg.get('to')} | Dep: {leg.get('departure_time')} - Arr: {leg.get('arrival_time')}")
-            # תמיכה בטיסות ישירות
+             
             else:
                 lines.append(f"**{title} Flight (Direct):** {flight.get('airline')} {flight.get('flight_number')} | Dep: {flight.get('departure_time')} - Arr: {flight.get('arrival_time')}")
         lines.append("")

@@ -243,7 +243,7 @@ class DayScheduleBuilder:
             cursor = self._insert_breakfast(cfg, cursor)
             self._last_food_time = cursor  # breakfast just happened
 
-        # ── 1. הפרדת המסעדות מהאטרקציות ──
+        
         meal_candidates = [act for act in candidates if act.is_meal_venue]
         regular_candidates = [act for act in candidates if not act.is_meal_venue]
 
@@ -256,7 +256,7 @@ class DayScheduleBuilder:
 
             # ─ Hunger check: inject meal before activity if needed ─
             if self._is_hungry(cursor) and not act.food_available:
-                # מעבירים את המיקום ואת רשימת המסעדות הפנויות
+                    
                 cursor, location = self._inject_meal(cursor, departure_anchor, location, meal_candidates)
                 if cursor >= departure_anchor:
                     break
@@ -330,7 +330,7 @@ class DayScheduleBuilder:
             used_names.add(act.name)
 
         # ── Final dinner ──
-        # מוודאים שהשעה היא לפחות 18:00 לפני שמוסיפים ארוחת ערב
+        #     18:00    
         if not self._had_dinner and cursor < departure_anchor and cursor.hour >= 18:
             cursor, location = self._inject_dinner(cursor, departure_anchor, location, cfg, meal_candidates)
 
@@ -402,10 +402,10 @@ class DayScheduleBuilder:
         """Inject lunch or dinner depending on time of day, using real DB venues if available."""
         is_dinner = cursor.hour >= 17 or self._had_lunch
 
-        # 1. מנסים למצוא מסעדה אמיתית מה-DB
+        # 1.-DB
         for i, meal in enumerate(meal_candidates):
             opening_hr = int(meal.opening_time.split(":")[0])
-            # סינון קל: לא ניקח קרוז ערב לצהריים, ולא ניקח בית קפה של בוקר לערב
+            
             if not is_dinner and opening_hr >= 17: continue
             if is_dinner and meal.closing_time < "18:00": continue
 
@@ -431,9 +431,9 @@ class DayScheduleBuilder:
             else: self._had_lunch = True
             
             self._last_food_time = end
-            return end, meal_pt # מעדכן את המיקום למסעדה!
+            return end, meal_pt
 
-        # 2. גיבוי - אם נגמרו המסעדות ב-DB, שמים בלוק גנרי
+        # 2. -DB,   
         if cursor.hour < 15 and not self._had_lunch:
             name, cost, dur = "Lunch", MEAL_COSTS["lunch"], LUNCH_DURATION
             self._had_lunch = True
@@ -452,9 +452,9 @@ class DayScheduleBuilder:
 
 
     def _inject_dinner(self, cursor: datetime, hard_limit: datetime, location: GeoPoint, cfg: "DayConfig", meal_candidates: list[ActivityCandidate]) -> tuple[datetime, GeoPoint]:
-        # 1. מנסים למצוא מסעדה אמיתית מה-DB
+        # 1. -DB
         for i, meal in enumerate(meal_candidates):
-            if meal.closing_time < "18:00": continue # מדלגים על מקומות שסגורים בערב
+            if meal.closing_time < "18:00": continue     
             
             meal_candidates.pop(i)
             meal_pt = GeoPoint(meal.lat, meal.lng, meal.name)
@@ -475,7 +475,6 @@ class DayScheduleBuilder:
             self._last_food_time = end
             return end, meal_pt
 
-        # 2. גיבוי - מסעדה גנרית קרובה למלון
         hotel = GeoPoint(cfg.hotel_lat, cfg.hotel_lng, cfg.hotel_name)
         mode, t_min, t_cost = transit_plan(location, hotel)
         dinner_start = cursor + timedelta(minutes=t_min)

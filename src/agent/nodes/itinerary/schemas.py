@@ -22,8 +22,8 @@ class PlanStep(BaseModel):
         "build_day_schedule",
         "verify_budget",
     ]
-    description: str          # human-readable, e.g. "Day 2: museums + kosher lunch"
-    day: Optional[int] = None # set for build_day_schedule steps
+    description: str         
+    day: Optional[int] = None
 
 
 class ExecutionPlan(BaseModel):

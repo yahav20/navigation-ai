@@ -323,14 +323,13 @@ def _normalize_time(raw: str) -> str:
         raw = raw.split(" ")[1]
     # 'HH:MM:SS' → 'HH:MM'
     return raw[:5]
-# הוסיף את זה למטה באזור ה-Helpers ב-executor.py
+
 def _cheapest(results: dict, prefix: str) -> Optional[dict]:
     k = _find_key(results, prefix)
     if not k:
         return None
     
     v = results[k]
-    # אם זה לא רשימה (למשל dict שמכיל רשימה בפנים)
     if isinstance(v, dict) and "hotels" in v:
         items = v["hotels"]
     elif isinstance(v, list):
@@ -338,11 +337,10 @@ def _cheapest(results: dict, prefix: str) -> Optional[dict]:
     else:
         return v if isinstance(v, dict) and not v.get("error") else None
 
-    # סינון שגיאות ומציאת הפריט הזול ביותר
+
     valid_items = [item for item in items if isinstance(item, dict) and "price" in item or "price_per_night" in item]
     
     if not valid_items:
         return items[0] if items else None
         
-    # מחזיר את הפריט עם המחיר הנמוך ביותר
     return min(valid_items, key=lambda x: float(x.get("price", x.get("price_per_night", 9999))))
