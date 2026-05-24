@@ -28,3 +28,11 @@ class AgentState(TypedDict):
     travel_plan: NotRequired[dict]           # curated TravelPlan dump produced by TravelAgentNode for the formatter
     itinerary_plan: NotRequired[dict]        # curated day-by-day itinerary produced by itinerary agent
     intent: str                    # intent classification
+    
+    # --- New Fields for Step-by-Step Itinerary Execution ---
+    current_step_index: NotRequired[int]              # Tracks which step the Executor should run next
+    itinerary_feasible: NotRequired[bool]             # True if the plan is progressing successfully, False if failure occurred
+    itinerary_fallback_reason: NotRequired[str]       # The error message/reason that triggered the Replanner or Fallback
+    observer_action: NotRequired[str]                 # Edge routing signal from Observer: "continue", "complete", etc.
+    itinerary_fallback_action: NotRequired[str]       # The action taken by the Fallback node (e.g., "adjusted_days", "suggested_alternatives")
+    itinerary_fallback_alternatives: NotRequired[list[str]] # List of alternative cities suggested by Fallback

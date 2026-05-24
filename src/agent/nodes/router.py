@@ -54,11 +54,16 @@ class RouterNode:
 
         final_intent = classification.intent
 
-        # Deterministic Guardrail: Can't start a new direct plan without a destination
+        # Deterministic Guardrail 1: Can't start a new direct plan without a destination
         if final_intent == "new_travel_plan" and not classification.has_explicit_destination:
             final_intent = "recommendations"
 
-        # Guardrail: If user tries to update but no active trip exists, convert to new plan
+        # Deterministic Guardrail 2: Can't build a detailed itinerary without ANY destination
+        # (Must have either an explicit destination in the message OR an active trip destination in the state)
+        if final_intent == "build_itinerary" and not classification.has_explicit_destination and not state.get("destination_city"):
+             final_intent = "recommendations"
+
+        # Guardrail 3: If user tries to update but no active trip exists, convert to new plan
         # Exception: if we were in a recommendations flow, keep it as recommendations
         if final_intent == "update_travel_plan" and not has_active_trip:
             if state.get("intent") == "recommendations":

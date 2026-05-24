@@ -9,8 +9,17 @@ from agent.state import AgentState
 # Routing Function 1: From Enrichment
 # ---------------------------------------------------------
 def after_enrichment(state: AgentState) -> str:
-    """Route to deterministic flight search when enrichment is complete."""
-    return "flight_search" if state.get("enrichment_complete", False) else END
+    """Route to flight search or itinerary planner when enrichment is complete."""
+
+    if not state.get("enrichment_complete", False):
+        return END
+        
+    intent = state.get("intent", "other")
+    
+    if intent == "build_itinerary":
+        return "itinerary_planner"
+        
+    return "flight_search"
 
 
 def after_flight_search(state: AgentState) -> str:
@@ -30,6 +39,7 @@ def after_adjustments(state: AgentState) -> str:
     if state.get("is_adjustment"):
         return "enrichment"
     return "extract_metadata"
+
 
 def after_security_gate(state: AgentState) -> str:
     """Route to router if safe, or skip directly to summary if blocked."""
@@ -52,7 +62,7 @@ def after_router(state: AgentState) -> str:
     elif intent == "recommendations":
         return "rec_agent"
     elif intent == "build_itinerary":
-        return "itinerary_agent"
+        return "extract_metadata"
     elif intent == "general_chat":
         return "general_chat"
     else:
@@ -60,7 +70,6 @@ def after_router(state: AgentState) -> str:
 
 
 CHAT_MAX_STEPS = 2
-
 
 def chat_should_continue(state: AgentState) -> str:
     """Route to chat_tools if the agent issued tool calls, otherwise go to summary."""
@@ -77,7 +86,6 @@ def chat_should_continue(state: AgentState) -> str:
 
 
 REC_MAX_STEPS = 4
-
 
 def rec_should_continue(state: AgentState) -> str:
     """Route to rec_tools if the agent issued tool calls, otherwise send to rec_formatter.

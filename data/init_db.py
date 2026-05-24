@@ -2,6 +2,7 @@
 
 import csv
 import io
+import json
 import os
 import sqlite3
 import urllib.request
@@ -55,19 +56,46 @@ CREATE TABLE hotels (
     stars           INTEGER NOT NULL,
     min_age         INTEGER DEFAULT 0,
     hotel_type      TEXT CHECK (hotel_type IN ('Luxury', 'Family', 'Romantic', 'Backpacker', 'Business')),
-    distance_from_center_km REAL
+    distance_from_center_km REAL,
+    amenities TEXT, 
+    is_kosher BOOLEAN DEFAULT FALSE,
+    latitude REAL,
+    longitude REAL
 );
 CREATE INDEX idx_hotels_city ON hotels(city_id);
 
 CREATE TABLE activities (
-    id       INTEGER PRIMARY KEY AUTOINCREMENT,
-    city_id  INTEGER NOT NULL REFERENCES cities(id),
-    name     TEXT    NOT NULL,
-    category TEXT    NOT NULL,
-    price    INTEGER NOT NULL,
-    min_age  INTEGER DEFAULT 0
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    city_id INTEGER NOT NULL REFERENCES cities(id),
+    name TEXT NOT NULL,
+    categories TEXT NOT NULL, 
+    price INTEGER NOT NULL,
+    min_age INTEGER DEFAULT 0,
+    latitude REAL,
+    longitude REAL,
+    avg_duration_minutes INTEGER,
+    opening_time TEXT,
+    closing_time TEXT,
+    operating_days TEXT, 
+    best_time_of_day TEXT, 
+    food_available BOOLEAN DEFAULT FALSE,
+    requires_booking BOOLEAN DEFAULT FALSE,
+    rating REAL
 );
 CREATE INDEX idx_activities_city ON activities(city_id);
+
+CREATE TABLE activity_features (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT UNIQUE NOT NULL
+);
+
+CREATE TABLE activity_feature_mapping (
+    activity_id INTEGER NOT NULL,
+    feature_id INTEGER NOT NULL,
+    PRIMARY KEY (activity_id, feature_id),
+    FOREIGN KEY (activity_id) REFERENCES activities(id) ON DELETE CASCADE,
+    FOREIGN KEY (feature_id) REFERENCES activity_features(id) ON DELETE CASCADE
+);
 
 CREATE TABLE best_time_to_visit (
     id      INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -175,7 +203,7 @@ def resolve_city(conn: sqlite3.Connection, name: str, alpha2: str) -> int:
 
 
 def seed_travel(conn: sqlite3.Connection) -> None:
-    # key → (city name as it appears in world_cities, ISO alpha-2)
+
     city_keys = {
         "tel aviv":  ("Tel Aviv",      "IL"),
         "paris":     ("Paris",         "FR"),
@@ -188,89 +216,32 @@ def seed_travel(conn: sqlite3.Connection) -> None:
     ids = {key: resolve_city(conn, name, alpha2) for key, (name, alpha2) in city_keys.items()}
 
     flights = [
-    ("tel aviv", "paris", "El Al", 350, "LY321",
-     "2026-06-01 08:00:00", "2026-06-01 11:50:00",
-     290, "Available", 4.5),
-
-    ("tel aviv", "paris", "Air France", 420, "AF123",
-     "2026-06-01 09:30:00", "2026-06-01 13:00:00",
-     270, "Available", 4.5),
-
-    ("tel aviv", "london", "British Airways", 450, "BA164",
-     "2026-06-01 07:30:00", "2026-06-01 11:00:00",
-     330, "Limited", 5.0),
-
-    ("tel aviv", "london", "Virgin Atlantic", 390, "VS100",
-     "2026-06-01 10:00:00", "2026-06-01 13:30:00",
-     300, "Available", 5.0),
-
-    ("tel aviv", "tokyo", "El Al", 950, "LY091",
-     "2026-06-01 22:00:00", "2026-06-02 14:30:00",
-     690, "Available", 11.5),
-
-    ("tel aviv", "tokyo", "Emirates", 820, "EK312",
-     "2026-06-01 23:30:00", "2026-06-02 18:30:00",
-     780, "Available", 13.0),
-
-    ("tel aviv", "new york", "United", 750, "UA445",
-     "2026-06-01 16:00:00", "2026-06-01 21:00:00",
-     660, "Limited", 11.0),
-
-    ("tel aviv", "berlin", "Lufthansa", 280, "LH909",
-     "2026-06-01 06:30:00", "2026-06-01 09:00:00",
-     210, "Available", 3.5),
-
-    ("tel aviv", "berlin", "Ryanair", 110, "FR101",
-     "2026-06-01 12:00:00", "2026-06-01 14:30:00",
-     210, "Available", 3.5),
-
-    ("tel aviv", "amsterdam", "KLM", 410, "KL456",
-     "2026-06-01 11:00:00", "2026-06-01 14:30:00",
-     270, "Available", 4.5),
-
-    ("london", "paris", "Air France", 120, "AF124",
-     "2026-06-01 12:00:00", "2026-06-01 14:15:00",
-     75, "Available", 1.25),
-
-     ("paris", "tel aviv", "El Al", 355, "LY322",
-     "2026-06-02 08:00:00", "2026-06-02 11:50:00",
-     295, "Available", 5.0),
-
-    ("paris", "london", "Air France", 120, "AF125",
-     "2026-06-01 13:00:00", "2026-06-01 14:15:00",
-     75, "Available", 1.25),
-
-    ("london", "tokyo", "JAL", 890, "JL402",
-     "2026-06-01 19:00:00", "2026-06-02 15:00:00",
-     780, "Available", 12.0),
-
-    ("london", "new york", "Virgin Atlantic", 550, "VS001",
-     "2026-06-01 15:00:00", "2026-06-01 18:30:00",
-     450, "Limited", 7.5),
-
-    ("new york", "london", "Virgin Atlantic", 550, "VS002",
-     "2026-06-01 19:00:00", "2026-06-02 07:00:00",
-     420, "Available", 7.0),
-
-    ("new york", "paris", "Air France", 480, "AF200",
-     "2026-06-01 18:30:00", "2026-06-02 07:45:00",
-     435, "Available", 7.5),
-
-    ("new york", "amsterdam", "Delta", 500, "DL300",
-     "2026-06-01 20:00:00", "2026-06-02 09:30:00",
-     450, "Available", 7.5),
-
-    ("london", "berlin", "Ryanair", 60, "FR555",
-     "2026-06-02 10:00:00", "2026-06-02 12:00:00",
-     120, "Available", 2.0),
-
-    ("paris", "berlin", "Lufthansa", 160, "LH111",
-     "2026-06-02 11:30:00", "2026-06-02 13:15:00",
-     105, "Available", 1.75),
-
-    ("amsterdam", "berlin", "EasyJet", 80, "U2444",
-     "2026-06-02 13:00:00", "2026-06-02 14:20:00",
-     80, "Available", 1.33),
+    ("tel aviv", "paris", "El Al", 350, "LY321", "2026-06-01 08:00:00", "2026-06-01 11:50:00", 290, "Available", 4.5),
+    ("tel aviv", "paris", "Air France", 420, "AF123", "2026-06-01 09:30:00", "2026-06-01 13:00:00", 270, "Available", 4.5),
+    ("tel aviv", "paris", "EasyJet", 180, "U2111", "2026-06-01 14:00:00", "2026-06-01 18:30:00", 270, "Available", 4.5),
+    ("paris", "tel aviv", "El Al", 355, "LY322", "2026-06-04 15:00:00", "2026-06-04 20:50:00", 295, "Available", 4.8),
+    ("paris", "tel aviv", "Air France", 400, "AF126", "2026-06-04 10:00:00", "2026-06-04 15:30:00", 270, "Available", 4.5),
+    ("paris", "tel aviv", "EasyJet", 150, "U2112", "2026-06-04 21:00:00", "2026-06-05 02:30:00", 270, "Available", 4.5),
+    ("tel aviv", "london", "British Airways", 450, "BA164","2026-06-01 07:30:00", "2026-06-01 11:00:00",330, "Limited", 5.0),
+    ("tel aviv", "london", "Virgin Atlantic", 390, "VS100","2026-06-01 10:00:00", "2026-06-01 13:30:00", 300, "Available", 5.0),
+    ("tel aviv", "tokyo", "El Al", 950, "LY091","2026-06-01 22:00:00", "2026-06-02 14:30:00",690, "Available", 11.5),
+    ("tel aviv", "tokyo", "Emirates", 820, "EK312", "2026-06-01 23:30:00", "2026-06-02 18:30:00",780, "Available", 13.0),
+    ("tel aviv", "new york", "United", 750, "UA445","2026-06-01 16:00:00", "2026-06-01 21:00:00",660, "Limited", 11.0),
+    ("tel aviv", "berlin", "Lufthansa", 280, "LH909","2026-06-01 06:30:00", "2026-06-01 09:00:00",210, "Available", 3.5),
+    ("tel aviv", "berlin", "Ryanair", 110, "FR101","2026-06-01 12:00:00", "2026-06-01 14:30:00",210, "Available", 3.5),
+    ("tel aviv", "amsterdam", "KLM", 410, "KL456","2026-06-01 11:00:00", "2026-06-01 14:30:00",270, "Available", 4.5),
+    ("london", "paris", "Air France", 120, "AF124","2026-06-01 12:00:00", "2026-06-01 14:15:00",75, "Available", 1.25),
+    ("paris", "tel aviv", "El Al", 355, "LY322","2026-06-02 08:00:00", "2026-06-02 11:50:00",295, "Available", 5.0),
+    ("paris", "london", "Air France", 120, "AF125","2026-06-01 13:00:00", "2026-06-01 14:15:00",75, "Available", 1.25),
+    ("london", "tokyo", "JAL", 890, "JL402","2026-06-01 19:00:00", "2026-06-02 15:00:00",780, "Available", 12.0),
+    ("london", "new york", "Virgin Atlantic", 550, "VS001","2026-06-01 15:00:00", "2026-06-01 18:30:00",450, "Limited", 7.5),
+    ("new york", "london", "Virgin Atlantic", 550, "VS002","2026-06-01 19:00:00", "2026-06-02 07:00:00",420, "Available", 7.0),
+    ("new york", "paris", "Air France", 480, "AF200","2026-06-01 18:30:00", "2026-06-02 07:45:00",435, "Available", 7.5),
+    ("new york", "amsterdam", "Delta", 500, "DL300","2026-06-01 20:00:00", "2026-06-02 09:30:00",450, "Available", 7.5),
+    ("london", "berlin", "Ryanair", 60, "FR555","2026-06-02 10:00:00", "2026-06-02 12:00:00",120, "Available", 2.0),
+    ("paris", "berlin", "Lufthansa", 160, "LH111","2026-06-02 11:30:00", "2026-06-02 13:15:00",105, "Available", 1.75),
+    ("amsterdam", "berlin", "EasyJet", 80, "U2444","2026-06-02 13:00:00", "2026-06-02 14:20:00",80, "Available", 1.33),
+    
     ]
     conn.executemany(
         """
@@ -294,82 +265,138 @@ def seed_travel(conn: sqlite3.Connection) -> None:
         ],
     )
 
-    # (city, name, price_per_night, stars, min_age, hotel_type, distance_from_center_km)
     hotels = [
-        ("paris", "Hotel de Ville", 150, 3, 0, "Family", 1.0),
-        ("paris", "Luxury Ritz", 600, 5, 18, "Luxury", 0.2),
-        ("paris", "Ibis Budget Paris", 85, 2, 0, "Backpacker", 3.0),
+        ("paris", "Hotel de Ville", 150, 3, 0, "Family", 1.0, json.dumps(["WiFi", "Family Rooms"]), False, 48.8566, 2.3522),
+        ("paris", "Luxury Ritz", 600, 5, 18, "Luxury", 0.2, json.dumps(["Pool", "Spa", "Gym", "Bar"]), False, 48.8680, 2.3280),
+        ("paris", "Ibis Budget Paris", 80, 2, 0, "Backpacker", 3.5, json.dumps(["WiFi", "Vending Machine"]), False, 48.8825, 2.3222),
+        ("paris", "Le Marais Boutique (Kosher)", 220, 4, 0, "Romantic", 0.5, json.dumps(["WiFi", "Terrace"]), True, 48.8575, 2.3588),
+        
+        ("london", "The Savoy", 450, 5, 18, "Luxury", 0.5, json.dumps(["Pool", "Gym", "River View"]), False, 51.5100, -0.1200),
+        ("london", "Premier Inn London", 120, 3, 0, "Business", 2.5, json.dumps(["WiFi", "Restaurant"]), False, 51.5300, -0.1250),
+        
+        ("tokyo", "Park Hyatt Tokyo", 700, 5, 18, "Luxury", 1.5, json.dumps(["Pool", "Spa", "City View"]), False, 35.6853, 139.6912),
+        
+        ("new york", "The Plaza", 850, 5, 21, "Luxury", 0.1, json.dumps(["Spa", "Gym", "Room Service"]), False, 40.7644, -73.9745),
+        
+        ("berlin", "Hilton Berlin", 220, 4, 18, "Business", 0.5, json.dumps(["Pool", "Gym", "Executive Lounge"]), False, 52.5126, 13.3916),
+        
+        ("amsterdam", "Canal Boutique Hotel", 180, 4, 18, "Romantic", 0.7, json.dumps(["WiFi", "Bicycle Rental"]), False, 52.3670, 4.8870),
 
-        ("london", "The Savoy", 450, 5, 18, "Luxury", 0.5),
-        ("london", "Premier Inn London", 120, 3, 0, "Business", 2.5),
-
-        ("tokyo", "Shibuya Capsule", 50, 2, 18, "Backpacker", 1.0),
-        ("tokyo", "Park Hyatt Tokyo", 700, 5, 18, "Luxury", 1.5),
-
-        ("new york", "The Plaza", 850, 5, 21, "Luxury", 0.1),
-        ("new york", "Broadway Hotel", 190, 3, 18, "Family", 1.2),
-
-        ("berlin", "Berlin Central Hostel", 40, 1, 18, "Backpacker", 2.0),
-        ("berlin", "Hilton Berlin", 220, 4, 18, "Business", 0.5),
-
-        ("amsterdam", "Canal Boutique Hotel", 180, 4, 18, "Romantic", 0.7),
-
-        ("tel aviv", "The Norman", 500, 5, 21, "Luxury", 0.8),
+        ("tel aviv", "The Norman", 500, 5, 21, "Luxury", 0.8, json.dumps(["Rooftop Pool", "Spa", "Fine Dining"]), False, 32.0645, 34.7744),
+        ("tel aviv", "Dan Tel Aviv", 350, 5, 0, "Family", 0.1, json.dumps(["Pool", "Beachfront", "Kids Club"]), True, 32.0792, 34.7672),
     ]
+    
     conn.executemany(
-        """
-        INSERT INTO hotels (
-            city_id,
-            name,
-            price_per_night,
-            stars,
-            min_age,
-            hotel_type,
-            distance_from_center_km
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        """,
-        [
-            (ids[c], n, p, s, ma, t, dist)
-            for c, n, p, s, ma, t, dist in hotels
-        ],
+        """INSERT INTO hotels (city_id, name, price_per_night, stars, min_age, hotel_type, distance_from_center_km,  amenities, is_kosher, latitude, longitude) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        [(ids[c], n, p, s, ma, t, dist, am, kos, lat, lng) for c, n, p, s, ma, t, dist, am, kos, lat, lng in hotels],
     )
 
     activities = [
-        ("paris", "Louvre Museum", "Culture", 20, 0),
-        ("paris", "Eiffel Tower", "Sightseeing", 35, 0),
-        ("paris", "Disneyland Paris", "Family", 95, 0),
+        ("paris", "Louvre Museum", json.dumps(["Culture", "Museum", "Indoor"]), 20, 0, 48.8606, 2.3376, 180, "09:00", "18:00", "1,3,4,5,6,7", "MORNING", True, True, 4.8),
+        ("paris", "Eiffel Tower", json.dumps(["Sightseeing", "Landmark", "Outdoor"]), 35, 0, 48.8584, 2.2945, 120, "09:30", "23:45", "1,2,3,4,5,6,7", "SUNSET", True, True, 4.7),
+        ("paris", "Disneyland Paris", json.dumps(["Family", "Theme Park", "Outdoor"]), 95, 0, 48.8722, 2.7758, 480, "09:30", "21:00", "1,2,3,4,5,6,7", "MORNING", True, True, 4.5),
+        ("paris", "Seine River Cruise", json.dumps(["Sightseeing", "Relaxing", "Outdoor"]), 15, 0, 48.8616, 2.3266, 60, "10:00", "22:00", "1,2,3,4,5,6,7", "SUNSET", False, False, 4.6),
+        ("paris", "Montmartre Walking Tour", json.dumps(["Culture", "Walking", "Outdoor"]), 0, 0, 48.8867, 2.3431, 120, "10:00", "16:00", "1,2,3,4,5,6,7", "MORNING", False, False, 4.7),
+        ("paris", "Palace of Versailles", json.dumps(["Historic", "Day Trip", "Indoor", "Outdoor"]), 45, 0, 48.8049, 2.1204, 300, "09:00", "18:30", "2,3,4,5,6,7", "MORNING", True, True, 4.8),
+        ("paris", "Musee d'Orsay", json.dumps(["Culture", "Museum", "Indoor"]), 18, 0, 48.8599, 2.3266, 150, "09:30", "18:00", "2,3,4,5,6,7", "AFTERNOON", True, True, 4.9),
+        ("paris", "Latin Quarter Food Tour", json.dumps(["Food", "Walking", "Outdoor"]), 65, 0, 48.8500, 2.3499, 180, "11:00", "15:00", "1,2,3,4,5,6,7", "AFTERNOON", True, True, 4.8),
+        
+        ("paris", "Le Jules Verne (Eiffel Tower)", json.dumps(["Food", "Fine Dining", "Indoor"]), 150, 0, 48.8584, 2.2945, 120, "12:00", "23:00", "1,2,3,4,5,6,7", "EVENING", True, True, 4.8),
+        ("paris", "L'As du Fallafel", json.dumps(["Food", "Street Food", "Casual"]), 15, 0, 48.8574, 2.3598, 45, "11:00", "23:30", "1,2,3,4,5,7", "AFTERNOON", True, False, 4.7), #  
+        ("paris", "Café de Flore", json.dumps(["Food", "Cafe", "Breakfast"]), 25, 0, 48.8542, 2.3326, 60, "07:30", "01:30", "1,2,3,4,5,6,7", "MORNING", True, False, 4.4),
+        ("paris", "Arc de Triomphe", json.dumps(["Sightseeing", "Landmark", "Outdoor"]), 13, 0, 48.8738, 2.2950, 60, "10:00", "22:30", "1,2,3,4,5,6,7", "AFTERNOON", False, False, 4.7),
+        ("paris", "Sainte-Chapelle", json.dumps(["Historic", "Culture", "Indoor"]), 11, 0, 48.8554, 2.3450, 60, "09:00", "17:00", "1,2,3,4,5,6,7", "MORNING", False, True, 4.8),
+        ("paris", "Bouillon Chartier", json.dumps(["Food", "Restaurant", "Casual"]), 20, 0, 48.8718, 2.3433, 90, "11:30", "00:00", "1,2,3,4,5,6,7", "EVENING", True, False, 4.3),
+        ("paris", "Centre Pompidou", json.dumps(["Culture", "Museum", "Indoor"]), 15, 0, 48.8606, 2.3522, 120, "11:00", "21:00", "1,3,4,5,6,7", "AFTERNOON", True, False, 4.5), #  
+        ("paris", "Jardin du Luxembourg", json.dumps(["Nature", "Park", "Outdoor"]), 0, 0, 48.8462, 2.3371, 90, "08:00", "18:00", "1,2,3,4,5,6,7", "AFTERNOON", False, False, 4.8),
+        ("paris", "Bateaux Parisiens Dinner Cruise", json.dumps(["Food", "Sightseeing", "Boat"]), 90, 0, 48.8616, 2.3266, 150, "20:30", "23:00", "1,2,3,4,5,6,7", "NIGHT", True, True, 4.6),
+        ("paris", "Angelina Paris (Rivoli)", json.dumps(["Food", "Cafe", "Dessert"]), 30, 0, 48.8651, 2.3283, 60, "08:00", "19:00", "1,2,3,4,5,6,7", "MORNING", True, False, 4.5),
+        ("paris", "Catacombs of Paris", json.dumps(["History", "Unique", "Indoor"]), 29, 10, 48.8338, 2.3324, 90, "09:45", "20:30", "2,3,4,5,6,7", "AFTERNOON", False, True, 4.6),
+        ("paris", "Macaron Baking Class", json.dumps(["Activity", "Food", "Class"]), 55, 12, 48.8732, 2.3291, 90, "10:00", "18:00", "1,2,3,4,5,6", "AFTERNOON", True, True, 4.7),
 
-        ("london", "London Eye", "Sightseeing", 30, 0),
-        ("london", "British Museum", "Culture", 0, 0),
-        ("london", "Pub Crawl", "Nightlife", 30, 18),
-
-        ("tokyo", "Robot Cafe", "Entertainment", 60, 12),
-        ("tokyo", "Mount Fuji Day Trip", "Nature", 120, 0),
-
-        ("new york", "Statue of Liberty", "Sightseeing", 25, 0),
-
-        ("berlin", "Berlin Wall Tour", "History", 15, 0),
-        ("berlin", "Techno Club Entry", "Nightlife", 25, 18),
-
-        ("amsterdam", "Rijksmuseum", "Culture", 22, 0),
-        ("amsterdam", "Canal Boat Tour", "Sightseeing", 18, 0),
+        ("london", "London Eye", json.dumps(["Sightseeing", "Viewpoint"]), 30, 0, 51.5033, -0.1195, 60, "10:00", "20:30", "1,2,3,4,5,6,7", "SUNSET", False, True, 4.5),
+        ("london", "British Museum", json.dumps(["Culture", "Museum", "Indoor"]), 0, 0, 51.5194, -0.1270, 150, "10:00", "17:00", "1,2,3,4,5,6,7", "MORNING", True, False, 4.8),
+        ("london", "Pub Crawl", json.dumps(["Nightlife", "Bar", "Social"]), 30, 18, 51.5126, -0.1325, 240, "19:00", "23:59", "4,5,6", "NIGHT", True, True, 4.4),
+        ("tokyo", "Robot Cafe", json.dumps(["Entertainment", "Unique", "Indoor"]), 60, 12, 35.6943, 139.7028, 90, "15:00", "23:00", "1,2,3,4,5,6,7", "EVENING", True, True, 4.1),
+        ("tokyo", "Mount Fuji Day Trip", json.dumps(["Nature", "Day Trip", "Outdoor"]), 120, 0, 35.3606, 138.7274, 600, "08:00", "18:00", "1,2,3,4,5,6,7", "MORNING", True, True, 4.9),
+        ("new york", "Statue of Liberty", json.dumps(["Sightseeing", "Historic", "Outdoor"]), 25, 0, 40.6892, -74.0445, 180, "09:00", "17:00", "1,2,3,4,5,6,7", "MORNING", True, True, 4.7),
+        ("berlin", "Berlin Wall Tour", json.dumps(["History", "Walking", "Outdoor"]), 15, 0, 52.5351, 13.3902, 120, "10:00", "14:00", "1,2,3,4,5,6,7", "MORNING", False, False, 4.6),
+        ("berlin", "Techno Club Entry", json.dumps(["Nightlife", "Club", "Indoor"]), 25, 18, 52.5108, 13.4318, 300, "23:59", "08:00", "5,6", "NIGHT", False, False, 4.4),
+        ("amsterdam", "Rijksmuseum", json.dumps(["Culture", "Museum", "Indoor"]), 22, 0, 52.3600, 4.8852, 150, "09:00", "17:00", "1,2,3,4,5,6,7", "AFTERNOON", True, True, 4.8),
+        ("amsterdam", "Canal Boat Tour", json.dumps(["Sightseeing", "Relaxing", "Outdoor"]), 18, 0, 52.3780, 4.9000, 75, "10:00", "21:00", "1,2,3,4,5,6,7", "SUNSET", False, True, 4.5),
     ]
     conn.executemany(
         """
         INSERT INTO activities (
-            city_id,
-            name,
-            category,
-            price,
-            min_age
+            city_id, name, categories, price, min_age,
+            latitude, longitude, avg_duration_minutes,
+            opening_time, closing_time, operating_days,
+            best_time_of_day, food_available, requires_booking, rating
         )
-        VALUES (?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [
-            (ids[c], n, cat, p, ma)
-            for c, n, cat, p, ma in activities
+            (ids[c], n, cat, p, ma, lat, lng, dur, op, cl, days, bt, food, book, rat)
+            for c, n, cat, p, ma, lat, lng, dur, op, cl, days, bt, food, book, rat in activities
         ],
+    )
+    
+    feature_names = [
+        "Kosher", 
+        "Vegan Options", 
+        "Vegetarian Options", 
+        "Wheelchair Accessible", 
+        "Pet Friendly", 
+        "Air Conditioned",
+        "Guided Tour",
+        "Family Friendly"
+    ]
+    
+    conn.executemany(
+        "INSERT INTO activity_features (name) VALUES (?)",
+        [(name,) for name in feature_names]
+    )
+    
+    feature_ids = {name: fid for fid, name in conn.execute("SELECT id, name FROM activity_features")}
+    
+    activity_ids = {name: aid for aid, name in conn.execute("SELECT id, name FROM activities")}
+    
+   
+    activity_features_map = [
+        ("Louvre Museum", ["Wheelchair Accessible", "Air Conditioned", "Guided Tour"]),
+        ("Eiffel Tower", ["Wheelchair Accessible"]),
+        ("Disneyland Paris", ["Wheelchair Accessible", "Vegetarian Options", "Family Friendly"]),
+        ("Seine River Cruise", ["Wheelchair Accessible", "Family Friendly"]),
+        ("Palace of Versailles", ["Wheelchair Accessible", "Guided Tour"]),
+        ("Musee d'Orsay", ["Wheelchair Accessible", "Air Conditioned", "Vegetarian Options"]),
+        ("Latin Quarter Food Tour", ["Vegetarian Options", "Guided Tour", "Vegan Options"]),
+        
+        ("Le Jules Verne (Eiffel Tower)", ["Air Conditioned", "Wheelchair Accessible"]),
+        ("L'As du Fallafel", ["Kosher", "Vegetarian Options", "Vegan Options", "Family Friendly"]),
+        ("Café de Flore", ["Vegetarian Options", "Kosher", "Air Conditioned"]),
+        ("Bouillon Chartier", ["Family Friendly", "Kosher", "Air Conditioned"]),
+        ("Bateaux Parisiens Dinner Cruise", ["Air Conditioned", "Wheelchair Accessible", "Kosher", "Vegetarian Options"]),
+        ("Macaron Baking Class", ["Air Conditioned", "Family Friendly", "Vegetarian Options"]),
+        ("Jardin du Luxembourg", ["Wheelchair Accessible", "Family Friendly", "Pet Friendly"]),
+        ("Sainte-Chapelle", ["Wheelchair Accessible"]),
+        ("Centre Pompidou", ["Wheelchair Accessible", "Air Conditioned"]),
+
+        ("London Eye", ["Wheelchair Accessible", "Air Conditioned"]),
+        ("Mount Fuji Day Trip", ["Guided Tour"]),
+        ("Rijksmuseum", ["Wheelchair Accessible", "Air Conditioned", "Vegetarian Options"]),        
+    ]
+    mapping_insert_data = []
+    for activity_name, feats in activity_features_map:
+        act_id = activity_ids.get(activity_name)
+        if act_id:
+            for feat in feats:
+                feat_id = feature_ids.get(feat)
+                if feat_id:
+                    mapping_insert_data.append((act_id, feat_id))
+                    
+    conn.executemany(
+        "INSERT INTO activity_feature_mapping (activity_id, feature_id) VALUES (?, ?)",
+        mapping_insert_data
     )
 
     transport = [

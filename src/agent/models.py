@@ -50,7 +50,7 @@ class FlightLeg(BaseModel):
 
     from_city: str = Field(description="Origin city for this leg (from `route[i].from`)")
     to_city: str = Field(description="Destination city for this leg (from `route[i].to`)")
-    airline: str = Field(description="Operating airline for this leg")
+    airline: str | None = Field(default=None, description="Operating airline for this leg")
     flight_number: str = Field(description="Flight number for this leg (from `route[i].flight`)")
 
 
@@ -58,7 +58,7 @@ class FlightPick(BaseModel):
     """A curated flight option highlighted to the traveller."""
 
     label: str = Field(description="Flight number(s) from the payload, e.g. 'DL1' or 'AA123 + BA456'")
-    airline: str = Field(description="Primary airline name from the payload")
+    airline: str | None = Field(default=None, description="Primary airline name from the payload")
     price: float = Field(description="Total flight price in USD from the payload")
     description: str = Field(description="One short line explaining why this flight is recommended")
     legs: list[FlightLeg] = Field(
@@ -119,6 +119,8 @@ class IntentClassification(BaseModel):
         "recommendations",
         "build_itinerary",
         "general_chat",
+        "itinerary",         
+        "update_itinerary"   
     ] = Field(
         description=(
             "Classify the user's intent strictly following these rules:\n"

@@ -5,10 +5,11 @@ class SQLiteFlightQueriesMixin:
     def fetch_flights(self, origin: str, destination: str) -> list:
         """Return flights from origin to destination, falling back to other cities in the same country."""
         rows = self._query(
-            """SELECT oc.name  AS origin_city,
-                      dc.name  AS destination_city,
-                      co.name  AS destination_country,
-                      f.airline, f.price, f.flight_number, f.availability
+            """SELECT oc.name AS origin_city,
+       dc.name AS destination_city,
+       co.name AS destination_country,
+       f.airline, f.price, f.flight_number, f.availability,
+       f.departure_time, f.arrival_time, f.duration_minutes
                FROM flights f
                JOIN cities oc  ON f.origin_city_id      = oc.id
                JOIN cities dc  ON f.destination_city_id = dc.id
@@ -43,7 +44,8 @@ class SQLiteFlightQueriesMixin:
             """SELECT oc.name  AS origin_city,
                       dc.name  AS destination_city,
                       co.name  AS destination_country,
-                      f.airline, f.price, f.flight_number, f.availability
+                      f.airline, f.price, f.flight_number, f.availability,
+                      f.departure_time, f.arrival_time, f.duration_minutes
                FROM flights f
                JOIN cities oc  ON f.origin_city_id      = oc.id
                JOIN cities dc  ON f.destination_city_id = dc.id

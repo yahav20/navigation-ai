@@ -6,7 +6,15 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode
 
-from agent.edge import after_flight_search, after_enrichment, after_router, chat_should_continue, rec_should_continue , after_travel_agent, after_security_gate
+from agent.edge import (
+    after_flight_search, 
+    after_enrichment, 
+    after_router, 
+    chat_should_continue, 
+    rec_should_continue, 
+    after_travel_agent, 
+    after_security_gate
+)
 from agent.llm import get_models
 from agent.nodes.adjustments import AdjustmentsNode
 from agent.nodes.enrichment import EnrichmentNode
@@ -27,9 +35,17 @@ from agent.nodes.security_gate import security_gate_node
 from agent.state import AgentState
 from tools.rec_tools import rec_tools
 
-
-def itinerary_agent_stub(state: AgentState) -> dict:
-    return {"messages": [("ai", "Itinerary agent is under construction!")]}
+#      -Itinerary Agent :
+from agent.nodes.itinerary.planner import ItineraryPlannerNode
+from agent.nodes.itinerary.executor import ItineraryExecutorNode
+from agent.nodes.itinerary.observer import ItineraryObserverNode
+from agent.nodes.itinerary.fallback import ItineraryFallbackNode
+from agent.nodes.itinerary.formatter import ItineraryFormatterNode
+from agent.nodes.itinerary.itinerary_edges import (
+    after_itinerary_planner,
+    after_itinerary_observer,
+    after_itinerary_fallback,
+)
 
 
 def build_graph(
@@ -56,6 +72,13 @@ def build_graph(
     formatter_alternative = FormatterAlternativeNode(extraction_model)
     router_node = RouterNode(extraction_model)
 
+    #   -Itinerary
+    itinerary_planner_node = ItineraryPlannerNode(response_model)
+    itinerary_executor_node = ItineraryExecutorNode(response_model)
+    itinerary_observer_node = ItineraryObserverNode(response_model)
+    itinerary_fallback_node = ItineraryFallbackNode(response_model)
+    itinerary_formatter_node = ItineraryFormatterNode()
+
     # 2. Create nodes for the recommendation path (uses its own model)
     rec_model_with_tools, rec_extraction_model = get_models(provider, mode="recommendation")
     rec_agent_node = RecommendationAgentNode(rec_model_with_tools, rec_extraction_model)
@@ -80,7 +103,13 @@ def build_graph(
     builder.add_node("alternative_destination", alternative_destination_node)
     builder.add_node("formatter_alternative", formatter_alternative)
     builder.add_node("summary", summary_node)
-    builder.add_node("itinerary_agent", itinerary_agent_stub)
+
+    #   -Itinerary-stub
+    builder.add_node("itinerary_planner", itinerary_planner_node)
+    builder.add_node("itinerary_executor", itinerary_executor_node)
+    builder.add_node("itinerary_observer", itinerary_observer_node)
+    builder.add_node("itinerary_fallback", itinerary_fallback_node)
+    builder.add_node("itinerary_formatter", itinerary_formatter_node)
 
     # Recommendation nodes
     builder.add_node("rec_agent", rec_agent_node)
@@ -110,7 +139,7 @@ def build_graph(
             "extract_metadata": "extract_metadata",
             "adjustments": "adjustments",
             "rec_agent": "rec_agent",
-            "itinerary_agent": "itinerary_agent",
+            "itinerary_planner": "itinerary_planner",  #  -itinerary_agent
             "general_chat": "general_chat",
             END: END,
         },
@@ -118,7 +147,18 @@ def build_graph(
 
     builder.add_edge("extract_metadata", "enrichment")
     builder.add_edge("adjustments", "enrichment")
-    builder.add_conditional_edges("enrichment", after_enrichment, {"flight_search": "flight_search", END: END})
+    
+    #   -enrichment:     -flight_search  -itinerary_planner
+    builder.add_conditional_edges(
+        "enrichment", 
+        after_enrichment, 
+        {
+            "flight_search": "flight_search", 
+            "itinerary_planner": "itinerary_planner",
+            END: END
+        }
+    )
+    
     builder.add_conditional_edges(
         "flight_search",
         after_flight_search,
@@ -138,7 +178,41 @@ def build_graph(
     builder.add_edge("alternative_destination", "formatter_alternative")
     builder.add_edge("formatter_alternative", "summary")
     builder.add_edge("formatter", "summary")
-    builder.add_edge("itinerary_agent", "summary")
+
+    # -----   -Itinerary (Plan & Execute) -----
+    builder.add_conditional_edges(
+        "itinerary_planner", 
+        after_itinerary_planner,
+        {
+            "itinerary_executor": "itinerary_executor",
+            "itinerary_fallback": "itinerary_fallback"
+        }
+    )
+    builder.add_edge("itinerary_executor", "itinerary_observer")
+    
+    builder.add_conditional_edges(
+        "itinerary_observer", 
+        after_itinerary_observer,
+        {
+            "itinerary_executor": "itinerary_executor",  
+            "itinerary_planner": "itinerary_planner",    
+            "itinerary_fallback": "itinerary_fallback",   
+            "itinerary_formatter": "itinerary_formatter" 
+        }
+    )
+    
+    builder.add_conditional_edges(
+        "itinerary_fallback", 
+        after_itinerary_fallback,
+        {
+            "itinerary_planner": "itinerary_planner",    
+            "itinerary_formatter": "itinerary_formatter"
+        }
+    )
+    
+    builder.add_edge("itinerary_formatter", "summary")
+    # ----------------------------------------------------
+
     builder.add_edge("summary", END)
 
     # 5. Define edges — recommendation path
