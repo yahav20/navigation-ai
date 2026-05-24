@@ -69,19 +69,23 @@ def search_outbound_flights(origin: str, destination: str) -> list[dict]:
     """
     Search for available outbound flights from origin to destination.
     Returns a list of flights sorted cheapest first.
-    Each flight has: flight_number, airline, price, departure_time, arrival_time,
-    duration_minutes, availability.
     """
     try:
         flights = _fetch_flights(origin, destination)
-        available = [
-            f for f in flights
-            if str(f.get("availability", "")).lower() == "available"
-        ]
-        return sorted(available, key=lambda f: f.get("price", 9999))
+        available = []
+        
+        for f in flights:
+            if "flight_number" in f:
+                if str(f.get("availability", "")).lower() == "available":
+                    available.append(f)
+            elif "route" in f:
+         
+                f["price"] = f.get("total_price") 
+                available.append(f)
+                
+        return sorted(available, key=lambda f: f.get("price", f.get("total_price", 9999)))
     except Exception as e:
         raise ToolException(f"search_outbound_flights failed: {e}")
-
 
 @tool
 def search_return_flights(origin: str, destination: str) -> list[dict]:
@@ -91,14 +95,20 @@ def search_return_flights(origin: str, destination: str) -> list[dict]:
     """
     try:
         flights = _fetch_return_flights(origin, destination)
-        available = [
-            f for f in flights
-            if str(f.get("availability", "")).lower() == "available"
-        ]
-        return sorted(available, key=lambda f: f.get("price", 9999))
+        available = []
+        
+        for f in flights:
+            if "flight_number" in f:
+                if str(f.get("availability", "")).lower() == "available":
+                    available.append(f)
+            elif "route" in f:
+               
+                f["price"] = f.get("total_price") 
+                available.append(f)
+                
+        return sorted(available, key=lambda f: f.get("price", f.get("total_price", 9999)))
     except Exception as e:
         raise ToolException(f"search_return_flights failed: {e}")
-
 
 @tool
 def search_hotels(

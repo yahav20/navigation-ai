@@ -49,6 +49,15 @@ You receive a structured trip plan. Your tasks:
 Markdown format for FinalResponse:
 # ✈️ Your [N]-Day {destination} Itinerary
 
+## 🛫 Flight Details
+**Outbound Flight:** [Direct/Connecting] | [Airlines] | Departure: [Time] | Arrival: [Time]
+*(If connecting, briefly list the route e.g., TLV -> ATH -> BER and times)*
+**Return Flight:** [Direct/Connecting] | [Airlines] | Departure: [Time] | Arrival: [Time]
+*(If connecting, briefly list the route and times)*
+
+## 🏨 Accommodation
+**Hotel:** [Hotel Name] 
+
 ## 📅 Day 1 — [Theme]
 | Time | Activity | Duration | Cost |
 |------|----------|----------|------|
@@ -246,14 +255,28 @@ def _check_budget(results: dict, budget: float, trip_days: int) -> Optional[Vali
 # Observer Node
 # ---------------------------------------------------------------------------
 
+# def _build_summary(results: dict, budget: float, trip_days: int) -> str:
+#     lines = [f"Trip: {trip_days} days | Budget: ${budget}"]
+#     for key, val in results.items():
+#         if isinstance(val, dict) and not val.get("error"):
+#             lines.append(f"--- {key.upper()} ---")
+#             lines.append(json.dumps(val, ensure_ascii=False))
+#     return "\n".join(lines)
 def _build_summary(results: dict, budget: float, trip_days: int) -> str:
     lines = [f"Trip: {trip_days} days | Budget: ${budget}"]
+    
     for key, val in results.items():
-        if isinstance(val, dict) and not val.get("error"):
-            lines.append(f"--- {key.upper()} ---")
-            lines.append(json.dumps(val, ensure_ascii=False))
+        if not isinstance(val, dict) or val.get("error"):
+            continue
+            
+        if key.startswith("fetch_flights") or key.startswith("fetch_return_flights"):
+            if isinstance(val, list) and val:
+                val = val[0] 
+        
+        lines.append(f"--- {key.upper()} ---")
+        lines.append(json.dumps(val, ensure_ascii=False))
+        
     return "\n".join(lines)
-
 
 class ItineraryObserverNode:
     def __init__(self, llm: BaseChatModel) -> None:
@@ -394,6 +417,29 @@ class ItineraryObserverNode:
 
 def _generate_fallback_markdown(results: dict, trip_days: int, budget: float) -> str:
     lines = ["# ✈️ Your Trip Itinerary\n"]
+    
+    # ── חילוץ נתוני הטיסות (הטיסה הזולה ביותר נמצאת תמיד במקום ה-0) ──
+    out_key = next((k for k in results if k.startswith("fetch_flights")), None)
+    ret_key = next((k for k in results if k.startswith("fetch_return_flights")), None)
+    
+    outbound = results[out_key][0] if out_key and isinstance(results[out_key], list) and results[out_key] else {}
+    return_fl = results[ret_key][0] if ret_key and isinstance(results[ret_key], list) and results[ret_key] else {}
+
+    if outbound or return_fl:
+        lines.append("## 🛫 Flight Details")
+        for title, flight in [("Outbound", outbound), ("Return", return_fl)]:
+            if not flight:
+                continue
+            # תמיכה בטיסות קונקשן שכוללות את המערך 'route'
+            if "route" in flight:
+                lines.append(f"**{title} Flight (Connecting):**")
+                for leg in flight["route"]:
+                    lines.append(f"- {leg.get('airline')} {leg.get('flight')} | {leg.get('from')} → {leg.get('to')} | Dep: {leg.get('departure_time')} - Arr: {leg.get('arrival_time')}")
+            # תמיכה בטיסות ישירות
+            else:
+                lines.append(f"**{title} Flight (Direct):** {flight.get('airline')} {flight.get('flight_number')} | Dep: {flight.get('departure_time')} - Arr: {flight.get('arrival_time')}")
+        lines.append("")
+
     for d in range(1, trip_days + 1):
         key = next((k for k in results if k.startswith("build_day_schedule")
                     and isinstance(results[k], dict)
