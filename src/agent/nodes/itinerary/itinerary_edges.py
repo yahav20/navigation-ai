@@ -26,23 +26,35 @@ def after_itinerary_planner(state: AgentState) -> str:
 
 def after_itinerary_observer(state: AgentState) -> str:
     """
-    Route from Observer based on the validation outcome.
-    
-    The Observer acts as the System Controller and explicitly sets 'observer_action' 
-    to one of four states: "continue", "replan", "fallback", or "complete".
+    Four outcomes:
+      1. Still running  → back to executor
+      2. Done & valid   → formatter
+      3. No flights     → alternative_destination (skip replanning entirely)
+      4. Failed         → planner (retry) OR fallback (hard stop)
     """
-    action = state.get("observer_action", "complete")
-    
-    if action == "continue":
-        # Step was valid, but plan has more steps. Loop back to Executor.
+    feasible = state.get("itinerary_feasible", False)
+    action   = state.get("observer_action", "")
+    reason   = state.get("itinerary_fallback_reason", "") or ""
+
+    plan_state  = state.get("itinerary_plan") or {}
+    retry_count = plan_state.get("retry_count", 0)
+
+    # ── Success ──
+    if feasible and action == "complete":
+        return "itinerary_formatter"
+
+    # ── Mid-execution: next step ──
+    if feasible and action == "continue":
         return "itinerary_executor"
-        
-    elif action == "replan":
-        # Step failed or soft validation failed. Loop back to Planner.
-        return "itinerary_planner"
-        
-    elif action == "fallback":
-        # Repeated failures reached MAX_RETRIES. Hard stop.
+
+    # ── No flights: go directly to alternative_destination node ──
+    if action == "no_flights":
+        return "alternative_destination"
+
+    # ── Failure path ──
+    
+    # Hard stop 1: The Observer explicitly passed the 'max_retries_exceeded' flag
+    if MAX_RETRIES_REASON in reason:
         return "itinerary_fallback"
         
     else:

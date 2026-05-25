@@ -139,7 +139,6 @@ def build_graph(
             "extract_metadata": "extract_metadata",
             "adjustments": "adjustments",
             "rec_agent": "rec_agent",
-            "itinerary_planner": "itinerary_planner",  #  -itinerary_agent
             "general_chat": "general_chat",
             END: END,
         },
@@ -197,7 +196,8 @@ def build_graph(
             "itinerary_executor": "itinerary_executor",  
             "itinerary_planner": "itinerary_planner",    
             "itinerary_fallback": "itinerary_fallback",   
-            "itinerary_formatter": "itinerary_formatter" 
+            "itinerary_formatter": "itinerary_formatter",
+            "alternative_destination": "alternative_destination",  # no-flights early exit
         }
     )
     
