@@ -83,16 +83,37 @@ def select_activities_per_day(
     if not activities:
         return {f"day_{d}": [] for d in range(1, trip_days + 1)}
 
+    # 1. חובה: מיון לפי דירוג כדי שה-25 שניקח יהיו הטובים ביותר
+    sorted_activities = sorted(activities, key=lambda a: -a.get("rating", 0))
+
+    # 2. הכיווץ החכם שלך (Payload Minification)
+    compact_activities = [
+        {
+            "name": a.get("name"),
+            "categories": a.get("categories"),
+            "price": a.get("price"),
+            "rating": a.get("rating"),
+            "area": a.get("area"), # מצוין בשביל ה-Geographic Clustering!
+            "best_time_of_day": a.get("best_time_of_day"),
+            "food_available": a.get("food_available"),
+        }
+        for a in sorted_activities[:25]
+    ]
+
+    # 3. יצירת ההודעה הרזה והחסכונית בטוקנים
     user_msg = (
         f"Destination: {destination}\n"
         f"Trip duration: {trip_days} days\n"
         f"User preferences: {json.dumps(prefs, ensure_ascii=False)}\n\n"
         f"Available activities:\n"
-        + json.dumps(activities, ensure_ascii=False, indent=2)
+        + json.dumps(compact_activities, ensure_ascii=False, indent=2)
     )
 
     try:
-        raw = llm.invoke([
+        # אפשר להשאיר את הגבלת הטוקנים של התשובה כדי להיות סופר-בטוחים
+        small_llm = llm.bind(max_tokens=600)
+        
+        raw = small_llm.invoke([
             SystemMessage(content=SELECTOR_SYSTEM),
             HumanMessage(content=user_msg),
         ]).content.strip()
@@ -106,7 +127,6 @@ def select_activities_per_day(
             normalised: dict[str, list[str]] = {}
             for d in range(1, trip_days + 1):
                 key = f"day_{d}"
-                # Accept "day_1", "1", "Day 1", etc.
                 val = (
                     result.get(key)
                     or result.get(str(d))
@@ -116,11 +136,11 @@ def select_activities_per_day(
                 normalised[key] = val if isinstance(val, list) else []
             return normalised
     except Exception as e:
+        print(f"DEBUG LLM Activity Selector failed: {e}")
         pass
 
     # ── Fallback: round-robin by rating ──
-    sorted_acts = sorted(activities, key=lambda a: -a.get("rating", 0))
-    names = [a["name"] for a in sorted_acts]
+    names = [a["name"] for a in sorted_activities]
     result = {}
     for d in range(1, trip_days + 1):
         result[f"day_{d}"] = names[(d - 1) * 5: d * 5]
