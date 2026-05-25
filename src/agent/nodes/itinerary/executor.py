@@ -209,7 +209,9 @@ class ItineraryExecutorNode:
             result = self._run_fetch_activities(step, results, history, ctx, trip_days)
 
         elif step.step_type == "build_day_schedule":
-            result = self._run_build_day(step, results, destination, trip_days)
+            current_plan_keys = {f"{s.step_type}_{s.step_id}" for s in plan.steps}
+            result = self._run_build_day(step, results, destination, trip_days,
+                                         current_plan_keys)
 
         elif step.step_type == "verify_budget":
             result = self._run_verify_budget(results, budget, trip_days)
@@ -415,7 +417,8 @@ class ItineraryExecutorNode:
     # ── build_day_schedule handler (pure Python — no LLM thought) ──────────
 
     def _run_build_day(
-        self, step, results: dict, destination: str, trip_days: int
+        self, step, results: dict, destination: str, trip_days: int,
+        current_plan_keys: set[str],
     ) -> dict:
         day_num = step.day or 1
         action  = f"build_day_schedule (Day {day_num})"
@@ -448,9 +451,11 @@ class ItineraryExecutorNode:
             all_activities = acts_data.get("activities", [])
             selection      = acts_data.get("selection", {})
 
-        # Activities for this day (exclude already-scheduled)
+        # Activities for this day (exclude already-scheduled in THIS plan run only —
+        # stale build_day_schedule_* results from prior plan attempts use renumbered
+        # step_ids and would otherwise pollute `used`, emptying day candidates).
         day_names  = selection.get(f"day_{day_num}", [])
-        used       = _used_activities(results)
+        used       = _used_activities(results, current_plan_keys)
         day_names  = [n for n in day_names if n not in used]
         candidates = resolve_candidates(all_activities, day_names)
 
@@ -816,9 +821,11 @@ def _cheapest_data(results: dict, prefix: str) -> Optional[dict]:
     return min(priced, key=_price) if priced else (items[0] if items else None)
 
 
-def _used_activities(results: dict) -> set:
+def _used_activities(results: dict, current_plan_keys: set[str]) -> set:
     used: set[str] = set()
-    for wrapped in results.values():
+    for key, wrapped in results.items():
+        if key not in current_plan_keys:
+            continue
         day_data = _inner_data(wrapped)
         if not isinstance(day_data, dict):
             continue
