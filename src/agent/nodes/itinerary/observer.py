@@ -72,7 +72,10 @@ from agent.state import AgentState
 MAX_RETRIES = 3   # replan cycles before hard-stop to Fallback
 
 # ── Critical fetch steps: empty result = immediate replan ─────────────────
-CRITICAL_FETCH_STEPS = {"fetch_flights", "fetch_return_flights", "fetch_hotels"}
+# Note: empty flights/return_flights are handled separately by the no-flights
+# early exit below, which routes to `alternative_destination` instead of
+# replanning (no point retrying when the route has zero flights at all).
+CRITICAL_FETCH_STEPS = {"fetch_hotels"}
 
 # ── Hard validation error codes: always trigger replan ────────────────────
 HARD_ERROR_CODES = {"OVERLAP", "ZERO_DURATION", "EMPTY_DAY", "BUDGET_EXCEEDED", "NO_FLIGHTS", "NO_HOTELS"}
