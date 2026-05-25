@@ -77,9 +77,26 @@ class MetadataNode:
         old_days = state.get("trip_days")
 
         if metadata.current_city is not None:
-            updates["current_city"] = metadata.current_city.split(",")[0].strip()
+            new_origin = metadata.current_city.split(",")[0].strip()
+            updates["current_city"] = new_origin
+            # If origin changed, invalidate old plans
+            if old_origin and new_origin.lower() != old_origin:
+                updates["travel_plan"] = {}
+                updates["itinerary_plan"] = {}
+                updates["flight_options"] = []
+                updates["has_flights"] = False
+
         if metadata.destination_city is not None:
-            updates["destination_city"] = metadata.destination_city.split(",")[0].strip()
+            new_dest = metadata.destination_city.split(",")[0].strip()
+            updates["destination_city"] = new_dest
+            # If destination changed, invalidate old plans
+            if old_dest and new_dest.lower() != old_dest:
+                updates["travel_plan"] = {}
+                updates["itinerary_plan"] = {}
+                updates["alternative_destinations"] = []
+                updates["flight_options"] = []
+                updates["has_flights"] = False
+
         if metadata.budget is not None:
             updates["total_budget"] = metadata.budget
             if old_budget is not None and metadata.budget != old_budget:
