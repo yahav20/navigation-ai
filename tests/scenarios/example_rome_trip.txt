@@ -1,0 +1,7 @@
+# Example scenario: Full trip planning flow
+# Each line is one user prompt. Lines starting with # are ignored.
+
+I live in Tel Aviv and want to visit Rome for 4 days with a budget of $1500
+Build my daily schedule
+What is the best time to visit Rome?
+Replan for Paris instead
