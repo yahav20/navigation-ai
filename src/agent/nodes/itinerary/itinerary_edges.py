@@ -48,10 +48,11 @@ def after_itinerary_planner(state: AgentState) -> str:
 
 def after_itinerary_observer(state: AgentState) -> str:
     """
-    Three outcomes:
+    Four outcomes:
       1. Still running  → back to executor
       2. Done & valid   → formatter
-      3. Failed         → planner (retry) OR fallback (hard stop)
+      3. No flights     → alternative_destination (skip replanning entirely)
+      4. Failed         → planner (retry) OR fallback (hard stop)
     """
     feasible = state.get("itinerary_feasible", False)
     action   = state.get("observer_action", "")
@@ -67,6 +68,10 @@ def after_itinerary_observer(state: AgentState) -> str:
     # ── Mid-execution: next step ──
     if feasible and action == "continue":
         return "itinerary_executor"
+
+    # ── No flights: go directly to alternative_destination node ──
+    if action == "no_flights":
+        return "alternative_destination"
 
     # ── Failure path ──
     

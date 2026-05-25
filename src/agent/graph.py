@@ -196,7 +196,8 @@ def build_graph(
             "itinerary_executor": "itinerary_executor",  
             "itinerary_planner": "itinerary_planner",    
             "itinerary_fallback": "itinerary_fallback",   
-            "itinerary_formatter": "itinerary_formatter" 
+            "itinerary_formatter": "itinerary_formatter",
+            "alternative_destination": "alternative_destination",  # no-flights early exit
         }
     )
     

@@ -297,6 +297,28 @@ class ItineraryObserverNode:
                 error_msg = last_result["error"]
                 return self._trigger_replan(plan_state, retry_count, error_msg)
 
+            # ── No-flights early exit: skip replanning entirely ──
+            # If fetch_flights returned an empty list, there are no flights
+            # to this destination at all. Replanning won't help — route
+            # directly to the alternative_destination node.
+            if last_step["step_type"] in ("fetch_flights", "fetch_return_flights"):
+                is_empty = (
+                    (isinstance(last_result, list) and len(last_result) == 0)
+                    or (isinstance(last_result, dict) and not last_result)
+                    or last_result is None
+                )
+                if is_empty:
+                    flight_type = "outbound" if last_step["step_type"] == "fetch_flights" else "return"
+                    return {
+                        "itinerary_feasible": False,
+                        "itinerary_fallback_reason": f"no_{flight_type}_flights",
+                        "observer_action": "no_flights",
+                        "messages": [AIMessage(
+                            content=f"✈️ **No {flight_type} flights found** — routing to alternative destinations.",
+                            name="observer_log",
+                        )],
+                    }
+
         # ── 2. Not done yet: continue ──
         if current_index < len(plan_steps):
             return {"itinerary_feasible": True, "observer_action": "continue"}
