@@ -1,4 +1,3 @@
-# src/agent/nodes/itinerary/fallback.py
 """
 ItineraryFallbackNode — v2
 ==========================
@@ -22,12 +21,12 @@ State updates:
 from __future__ import annotations
 
 import json
-from typing import Optional
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-from agent.nodes.itinerary.itinerary_tools import search_outbound_flights, search_hotels
+# Import the updated tools
+from .itinerary_tools import fetch_flights
 from agent.state import AgentState
 
 CULTURAL_SIMILARITY_PROMPT = """You are a travel geography expert.
@@ -56,26 +55,25 @@ class ItineraryFallbackNode:
         plan_state = state.get("itinerary_plan") or {}
         results = plan_state.get("step_results", {})
 
+        # If the fallback reason specifically mentions budget issues
         if "budget" in reason.lower() or "exceeded" in reason.lower():
             return self._handle_budget(results, budget, trip_days, destination, origin, plan_state)
 
+        # For all other hard failures (no flights, no hotels, max retries)
         return self._suggest_alternatives(destination, origin, budget, trip_days)
+
 
     # ── Budget handler ─────────────────────────────────────────────────────
 
-
-   # ── Budget handler ─────────────────────────────────────────────────────
-
-    def _handle_budget(self, results, budget, trip_days, destination, origin, plan_state):
+    def _handle_budget(self, results: dict, budget: float, trip_days: int, destination: str, origin: str, plan_state: dict) -> dict:
         min_flight = _cheapest_price(results, "fetch_flights")
         min_ret = _cheapest_price(results, "fetch_return_flights")
         
-        #     
         realistic_hotel = _realistic_hotel_night(results)
 
-        base_cost = min_flight + min_ret  # flights are fixed
+        base_cost = min_flight + min_ret  # flights are fixed costs
 
-        # Try ±1, ±2, ±3 days
+        # Try ±1, ±2, ±3 days to find a configuration that fits the budget
         for delta in [-1, -2, -3, 1, 2, 3]:
             new_days = trip_days + delta
             
@@ -86,11 +84,12 @@ class ItineraryFallbackNode:
             
             if budget and est_cost <= budget * 1.05:
                 
-                # 🔥   2 (Caching):       
-                #    -Executor      !
+                # Caching: Preserve expensive fetch results, discard day builds
                 cleared_results = {
                     k: v for k, v in results.items() 
-                    if not k.startswith("fetch_return_flights") and not k.startswith("fetch_hotels")
+                    if k.startswith("fetch_flights") 
+                    or k.startswith("fetch_return_flights") 
+                    or k.startswith("fetch_hotels")
                 }
 
                 return {
@@ -98,17 +97,20 @@ class ItineraryFallbackNode:
                     "itinerary_fallback_action": f"days_adjusted_to_{new_days}",
                     "itinerary_feasible": True,
                     "itinerary_fallback_alternatives": [],
-                    # 🔥   1 (Retry Loop):       
+                    # Retry Loop Setup
                     "itinerary_plan": {
                         **plan_state,
                         "retry_count": 0,
                         "observer_reason": "",
                         "step_results": cleared_results
                     },
-                    "messages": [AIMessage(content=f"✅ **Fallback:** adjusting trip from `{trip_days}` ➔ `{new_days}` days", name="fallback_log")]
+                    "messages": [AIMessage(
+                        content=f"✅ **Fallback:** adjusting trip from `{trip_days}` ➔ `{new_days}` days", 
+                        name="fallback_log"
+                    )]
                 }
 
-        # Try +$500 budget bump
+        # Try +$500 budget bump if day adjustments don't work
         bumped = budget + 500
         est_cost = (base_cost + realistic_hotel * trip_days) * 1.15
         
@@ -123,14 +125,18 @@ class ItineraryFallbackNode:
                     "retry_count": 0,
                     "observer_reason": "",
                 },
-                "messages": [AIMessage(content=f"✅ **Fallback:** bumping budget `${budget}` ➔ `${bumped}`", name="fallback_log")],
+                "messages": [AIMessage(
+                    content=f"✅ **Fallback:** bumping budget `${budget}` ➔ `${bumped}`", 
+                    name="fallback_log"
+                )],
             }
 
-        # Nothing worked → alternatives
+        # Nothing worked → Drop down to suggest alternatives
         return self._suggest_alternatives(destination, origin, bumped, trip_days)
+
     # ── Alternative city suggester ─────────────────────────────────────────
 
-    def _suggest_alternatives(self, destination, origin, budget, trip_days):
+    def _suggest_alternatives(self, destination: str, origin: str, budget: float, trip_days: int) -> dict:
         prompt = (
             f"Destination: {destination}\nOrigin: {origin}\n"
             f"Trip days: {trip_days}\nBudget: ${budget or 'flexible'}"
@@ -150,11 +156,11 @@ class ItineraryFallbackNode:
         except Exception:
             alternatives = []
 
-        # Validate: check flights available for each
+        # Validate: check if flights are actually available for each suggestion
         validated: list[str] = []
         for city in alternatives[:3]:
             try:
-                flights = search_outbound_flights.invoke({"origin": origin, "destination": city})
+                flights = fetch_flights.invoke({"origin": origin, "destination": city})
                 if flights:
                     validated.append(city)
             except Exception:
@@ -176,35 +182,35 @@ class ItineraryFallbackNode:
 # Helpers
 # ---------------------------------------------------------------------------
 
+def _unwrap(val: dict) -> list | dict:
+    """Helper to unwrap the v3 Executor StepExecutionResult."""
+    if not isinstance(val, dict):
+        return val
+    if "status" in val and "data" in val:
+        return val["data"]
+    return val
+
+
 def _cheapest_price(results: dict, prefix: str) -> float:
     for k, v in results.items():
         if k.startswith(prefix):
-            items = v if isinstance(v, list) else [v]
-            prices = [f.get("price", 9999) for f in items if isinstance(f, dict)]
+            unwrapped = _unwrap(v)
+            items = unwrapped if isinstance(unwrapped, list) else [unwrapped]
+            prices = [f.get("price", f.get("total_price", 9999)) for f in items if isinstance(f, dict)]
             if prices:
                 return min(prices)
     return 0.0
 
-
-def _cheapest_hotel_night(results: dict) -> float:
-    for k, v in results.items():
-        if k.startswith("fetch_hotels"):
-            # v may be {"activities": ..., "hotels": ...} or a list
-            hotels = v if isinstance(v, list) else []
-            if isinstance(v, dict):
-                hotels = v.get("hotels", [])
-            prices = [h.get("price_per_night", 9999) for h in hotels if isinstance(h, dict)]
-            if prices:
-                return min(prices)
-    return 0.0
 
 def _realistic_hotel_night(results: dict) -> float:
-    
     for k, v in results.items():
         if k.startswith("fetch_hotels"):
-            hotels = v if isinstance(v, list) else []
-            if isinstance(v, dict):
-                hotels = v.get("hotels", [])
+            unwrapped = _unwrap(v)
+            
+            # Unwrapped might be a list of hotels, or a dict wrapping {"hotels": [...]}
+            hotels = unwrapped if isinstance(unwrapped, list) else []
+            if isinstance(unwrapped, dict):
+                hotels = unwrapped.get("hotels", [])
             
             prices = [float(h.get("price_per_night", 9999)) for h in hotels if isinstance(h, dict)]
             
@@ -213,6 +219,8 @@ def _realistic_hotel_night(results: dict) -> float:
                 top_3 = prices[:3]
                 return sum(top_3) / len(top_3)
     return 0.0
+
+
 def _render_alternatives(
     original: str, alternatives: list[str], origin: str,
     budget: float, trip_days: int,
@@ -225,7 +233,9 @@ def _render_alternatives(
     ]
     emojis = ["1️⃣", "2️⃣", "3️⃣"]
     for i, city in enumerate(alternatives):
-        lines.append(f"## {emojis[i]} {city}")
+        # Prevent index out of bounds if more than 3 alternatives bypass the slicing somehow
+        emoji = emojis[i] if i < len(emojis) else "📍"
+        lines.append(f"## {emoji} {city}")
         lines.append(f"Direct or connecting flights available from **{origin}**. "
                      f"Similar culture and travel vibe to {original}.\n")
     lines += [

@@ -39,13 +39,14 @@ class RouterNode:
         - Origin: {state.get("current_city", "None")}
         - Destination: {state.get("destination_city", "None")}
         - Budget: {state.get("total_budget", "None")}
+        - Days: {state.get("trip_days", "None")}
 
-        Examples:
-        - "I live in Paris and want to fly somewhere." -> recommendations
-        - "Book me a trip to Rome for 3 days" -> new_travel_plan
-        - "Plan a day-by-day schedule for my 3 days in Rome" -> build_itinerary
-        - "Change my budget to $500." -> update_travel_plan
-        - "Do I need a visa for Japan?" -> general_chat
+        INTENT DEFINITIONS & DIFFERENCES:
+        1. 'recommendations': User wants ideas, but DOES NOT have a specific destination yet. ("Where should I go for a beach trip?")
+        2. 'new_travel_plan' (Info & Feasibility): User explicitly names a destination and wants to check flights, hotels, or costs, BUT they DO NOT ask for a daily schedule. ("I want to visit Rome, what are the flights?", "Let's check options for Madrid")
+        3. 'build_itinerary' (Full Execution): User EXPLICITLY asks for a detailed, day-by-day itinerary, schedule, OR asks to "replan" the entire trip (even if they are changing destination or budget at the same time). Examples: "Build a 3-day itinerary for Rome", "replan for Paris with $700", "create full plan".
+        4. 'update_travel_plan': User wants to change parameters (destination, budget, origin) of a trip, BUT DOES NOT ask for a daily schedule or a full replan. They just want to check feasibility/flights. Examples: "Change destination to Paris", "Increase budget to $1000".
+        5. 'general_chat': Theoretical or specific travel questions (culture, weather, tips) not related to active planning.
 
         User message: "{last_msg.content}"
         """
@@ -54,21 +55,26 @@ class RouterNode:
 
         final_intent = classification.intent
 
-        # Deterministic Guardrail 1: Can't start a new direct plan without a destination
-        if final_intent == "new_travel_plan" and not classification.has_explicit_destination:
-            final_intent = "recommendations"
+        # Guardrail 1: Both high-level planning and micro-planning require a destination.
+        # If the user asks for a plan or itinerary but we don't have a destination, route to recommendations.
+        if final_intent in ["new_travel_plan", "build_itinerary"]:
+            has_dest = classification.has_explicit_destination or state.get("destination_city")
+            if not has_dest:
+                final_intent = "recommendations"
 
-        # Deterministic Guardrail 2: Can't build a detailed itinerary without ANY destination
-        # (Must have either an explicit destination in the message OR an active trip destination in the state)
-        if final_intent == "build_itinerary" and not classification.has_explicit_destination and not state.get("destination_city"):
-             final_intent = "recommendations"
-
-        # Guardrail 3: If user tries to update but no active trip exists, convert to new plan
-        # Exception: if we were in a recommendations flow, keep it as recommendations
+        # Guardrail 2: If user tries to update but no active trip exists, convert to new plan
         if final_intent == "update_travel_plan" and not has_active_trip:
             if state.get("intent") == "recommendations":
                 final_intent = "recommendations"
             else:
                 final_intent = "new_travel_plan"
+
+        # Guardrail 4: Override update to build_itinerary if planning is explicitly requested
+        if final_intent == "update_travel_plan":
+            content_lower = last_msg.content.lower()
+            # If the user used planning/replanning trigger words, force route to Planner
+            trigger_words = ["replan", "full plan", "schedule", "לוז", "תכנון מלא", "תבנה לי"]
+            if any(word in content_lower for word in trigger_words):
+                final_intent = "build_itinerary"
 
         return {"intent": final_intent}
