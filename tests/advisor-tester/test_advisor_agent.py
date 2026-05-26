@@ -409,6 +409,73 @@ TESTS: list[TestCase] = [
         ),
     ]),
 
+    # =========================================================
+    # SECTION E — Replanner decision-making
+    # These tests verify the replanner's loop, pruning, and
+    # graceful-failure behaviour (the defining feature of the
+    # Plan-and-Execute architecture).
+    # =========================================================
+
+    TestCase("E1", "E", "Three-step plan — replanner iterates twice before finishing", [
+        TurnSpec(
+            "I'm visiting Lisbon next summer. What activities are there, "
+            "how many days should I stay, and what's the weather in summer?",
+            must_have_tools=["fetch_activities", "get_trip_duration_advisor", "get_average_weather"],
+            must_have_tool_args=[
+                {"tool_name": "fetch_activities",
+                 "arg_key": "city", "arg_value": "Lisbon"},
+                {"tool_name": "get_trip_duration_advisor",
+                 "arg_key": "city", "arg_value": "Lisbon"},
+                {"tool_name": "get_average_weather",
+                 "arg_key": "season", "arg_value": "Summer"},
+            ],
+            min_tools=3,
+            max_tools=3,
+            must_show_cities=["Lisbon"],
+            note="Three distinct asks → 3 steps → replanner loops twice with 'Continuing' before finishing",
+        ),
+    ]),
+
+    TestCase("E2", "E", "Replanner prunes get_best_time when get_city_overview already covers it", [
+        TurnSpec(
+            "Give me a complete overview of Amsterdam — what it's like, "
+            "what to do there, and specifically the best months to visit.",
+            must_have_tools=["get_city_overview"],
+            must_not_have_tools=["get_best_time_to_visit", "find_destinations_by_tag",
+                                 "find_destinations_by_vibe", "get_reachable_destinations"],
+            max_tools=2,
+            must_show_cities=["Amsterdam"],
+            note="city_overview already includes best-visit months — either the planner or replanner "
+                 "must suppress a redundant get_best_time_to_visit call",
+        ),
+    ]),
+
+    TestCase("E3", "E", "Graceful handling when a city does not exist in the database", [
+        TurnSpec(
+            "I'm planning a trip to Eldorado — what activities are there?",
+            must_have_tools=["fetch_activities"],
+            must_have_tool_args=[{"tool_name": "fetch_activities",
+                                  "arg_key": "city", "arg_value": "Eldorado"}],
+            max_tools=2,
+            response_must_not_contain=["Error", "Exception", "traceback"],
+            note="Non-existent city → empty result → replanner finishes gracefully, "
+                 "formatter provides a polite 'no data' response without crashing",
+        ),
+    ]),
+
+    TestCase("E4", "E", "Replanner continues across two different-city steps and covers both in response", [
+        TurnSpec(
+            "I want to compare Rome and Barcelona. "
+            "Tell me how many days I should spend in each city.",
+            must_have_tools=["get_trip_duration_advisor"],
+            min_tools=2,
+            max_tools=2,
+            must_show_cities=["Rome", "Barcelona"],
+            note="Two get_trip_duration_advisor calls for different cities — replanner must continue "
+                 "after the first and recognise the second is not redundant",
+        ),
+    ]),
+
 ]
 
 
