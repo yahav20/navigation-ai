@@ -29,6 +29,49 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from .itinerary_tools import fetch_flights
 from agent.state import AgentState
 
+# ── Termination invariant ──────────────────────────────────────────────────
+# The number of times Fallback may hand control back to the Planner before it
+# gives up and suggests alternatives. This counter lives in
+# `itinerary_plan["recovery_attempts"]`, is incremented on every retry hand-back,
+# and is NEVER reset by Planner/Observer/Fallback. It is the single monotonic
+# measure that guarantees the Fallback↔Planner cycle terminates.
+MAX_RECOVERY_ATTEMPTS = 2
+
+# Only genuine budget overages may be remedied by adjusting days / bumping budget.
+# Every other failure class (quality rejects, empty days, missing flights/hotels)
+# cannot be fixed by those levers, so it routes straight to alternatives.
+BUDGET_ERROR_CODES = {"BUDGET_EXCEEDED"}
+
+
+def _parse_reason(reason_raw: str) -> tuple[str, str]:
+    """
+    Resolve the structured error code from the fallback reason.
+
+    The reason is either a JSON replan-context blob (written by the Observer) or
+    a plain string. Returns the *effective* error code to dispatch on: for a
+    MAX_RETRIES wrapper this is the `original_error_code` that actually caused
+    the failure, so a quality reject that exhausted its retries is not mistaken
+    for a budget problem.
+    """
+    if not reason_raw:
+        return "UNKNOWN", ""
+    try:
+        ctx = json.loads(reason_raw)
+    except (json.JSONDecodeError, TypeError):
+        # Plain string — classify only the unambiguous budget signal.
+        text = reason_raw.lower()
+        if "budget" in text:
+            return "BUDGET_EXCEEDED", ""
+        return "UNKNOWN", ""
+    if not isinstance(ctx, dict):
+        return "UNKNOWN", ""
+    code = ctx.get("error_code", "UNKNOWN")
+    if code == "MAX_RETRIES":
+        # Unwrap to the failure that actually triggered the retry exhaustion.
+        return ctx.get("original_error_code") or "UNKNOWN", ctx.get("error_message", "")
+    return code, ctx.get("error_message", "")
+
+
 CULTURAL_SIMILARITY_PROMPT = """You are a travel geography expert.
 Given a destination city, suggest exactly 3 alternative cities that are:
 1. In the SAME cultural/geographic region.
@@ -47,7 +90,7 @@ class ItineraryFallbackNode:
         self.llm = llm
 
     def __call__(self, state: AgentState) -> dict:
-        reason = state.get("itinerary_fallback_reason", "unknown")
+        reason = state.get("itinerary_fallback_reason", "") or ""
         destination = state.get("destination_city", "")
         origin = state.get("current_city", "")
         budget = state.get("total_budget", 0)
@@ -55,40 +98,59 @@ class ItineraryFallbackNode:
         plan_state = state.get("itinerary_plan") or {}
         results = plan_state.get("step_results", {})
 
-        # If the fallback reason specifically mentions budget issues
-        if "budget" in reason.lower() or "exceeded" in reason.lower():
-            return self._handle_budget(results, budget, trip_days, destination, origin, plan_state)
+        # ── Termination invariant ──────────────────────────────────────────
+        # recovery_attempts only ever grows (Planner/Observer carry it, never
+        # reset it). Once we have already handed back to the Planner the maximum
+        # number of times, stop trying to repair and suggest alternatives — this
+        # is what guarantees the Fallback↔Planner cycle cannot run forever.
+        recovery_attempts = plan_state.get("recovery_attempts", 0)
+        if recovery_attempts >= MAX_RECOVERY_ATTEMPTS:
+            return self._suggest_alternatives(destination, origin, budget, trip_days)
 
-        # For all other hard failures (no flights, no hotels, max retries)
+        # ── Dispatch on the structured error code, not a substring scan ─────
+        error_code, _ = _parse_reason(reason)
+        if error_code in BUDGET_ERROR_CODES:
+            return self._handle_budget(
+                results, budget, trip_days, destination, origin,
+                plan_state, recovery_attempts,
+            )
+
+        # Quality rejects, empty days, missing flights/hotels, unknown failures:
+        # none are fixable by day/budget adjustment → suggest alternatives.
         return self._suggest_alternatives(destination, origin, budget, trip_days)
 
 
     # ── Budget handler ─────────────────────────────────────────────────────
 
-    def _handle_budget(self, results: dict, budget: float, trip_days: int, destination: str, origin: str, plan_state: dict) -> dict:
+    def _handle_budget(
+        self, results: dict, budget: float, trip_days: int, destination: str,
+        origin: str, plan_state: dict, recovery_attempts: int,
+    ) -> dict:
         min_flight = _cheapest_price(results, "fetch_flights")
         min_ret = _cheapest_price(results, "fetch_return_flights")
-        
+
         realistic_hotel = _realistic_hotel_night(results)
 
         base_cost = min_flight + min_ret  # flights are fixed costs
 
-        # Try ±1, ±2, ±3 days to find a configuration that fits the budget
-        for delta in [-1, -2, -3, 1, 2, 3]:
+        # Only REDUCE days: a budget overage is never cured by adding nights, and
+        # searching downward makes the day count a strictly-decreasing measure so
+        # the search cannot oscillate (the old ±delta list toggled 2↔1 forever).
+        for delta in (-1, -2, -3):
             new_days = trip_days + delta
-            
-            if new_days < 1 or new_days == trip_days:
+
+            if new_days < 1:
                 continue
-                
+
             est_cost = (base_cost + realistic_hotel * new_days) * 1.15
-            
+
             if budget and est_cost <= budget * 1.05:
-                
+
                 # Caching: Preserve expensive fetch results, discard day builds
                 cleared_results = {
-                    k: v for k, v in results.items() 
-                    if k.startswith("fetch_flights") 
-                    or k.startswith("fetch_return_flights") 
+                    k: v for k, v in results.items()
+                    if k.startswith("fetch_flights")
+                    or k.startswith("fetch_return_flights")
                     or k.startswith("fetch_hotels")
                 }
 
@@ -100,12 +162,18 @@ class ItineraryFallbackNode:
                     # Retry Loop Setup
                     "itinerary_plan": {
                         **plan_state,
+                        # Reset BOTH planner counters so the hand-back actually
+                        # produces a fresh plan instead of bouncing off the
+                        # Planner's MAX_REPLANS hard-stop right back to here.
                         "retry_count": 0,
+                        "replan_count": 0,
                         "observer_reason": "",
-                        "step_results": cleared_results
+                        # Advance the monotonic termination invariant.
+                        "recovery_attempts": recovery_attempts + 1,
+                        "step_results": cleared_results,
                     },
                     "messages": [AIMessage(
-                        content=f"✅ **Fallback:** adjusting trip from `{trip_days}` ➔ `{new_days}` days", 
+                        content=f"✅ **Fallback:** adjusting trip from `{trip_days}` ➔ `{new_days}` days",
                         name="fallback_log"
                     )]
                 }
@@ -113,7 +181,7 @@ class ItineraryFallbackNode:
         # Try +$500 budget bump if day adjustments don't work
         bumped = budget + 500
         est_cost = (base_cost + realistic_hotel * trip_days) * 1.15
-        
+
         if est_cost <= bumped * 1.05:
             return {
                 "total_budget": bumped,
@@ -123,10 +191,12 @@ class ItineraryFallbackNode:
                 "itinerary_plan": {
                     **plan_state,
                     "retry_count": 0,
+                    "replan_count": 0,
                     "observer_reason": "",
+                    "recovery_attempts": recovery_attempts + 1,
                 },
                 "messages": [AIMessage(
-                    content=f"✅ **Fallback:** bumping budget `${budget}` ➔ `${bumped}`", 
+                    content=f"✅ **Fallback:** bumping budget `${budget}` ➔ `${bumped}`",
                     name="fallback_log"
                 )],
             }

@@ -77,7 +77,7 @@ def build_graph(
     itinerary_executor_node = ItineraryExecutorNode(response_model)
     itinerary_observer_node = ItineraryObserverNode(response_model)
     itinerary_fallback_node = ItineraryFallbackNode(response_model)
-    itinerary_formatter_node = ItineraryFormatterNode()
+    itinerary_formatter_node = ItineraryFormatterNode(response_model)
 
     # 2. Create nodes for the recommendation path (uses its own model)
     rec_model_with_tools, rec_extraction_model = get_models(provider, mode="recommendation")

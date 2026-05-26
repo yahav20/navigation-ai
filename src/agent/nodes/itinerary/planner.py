@@ -407,6 +407,10 @@ class ItineraryPlannerNode:
                 "retry_count": retry_count,
                 "replan_count": replan_count + 1,
                 "observer_reason": "",
+                # Carry the fallback's monotonic recovery counter through the
+                # rebuilt plan dict — it is the loop's termination invariant and
+                # must never reset just because the Planner regenerated a plan.
+                "recovery_attempts": prev_plan.get("recovery_attempts", 0),
             },
             "itinerary_feasible": True,
             "itinerary_fallback_reason": None,

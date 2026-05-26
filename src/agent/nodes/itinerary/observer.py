@@ -718,6 +718,7 @@ class ItineraryObserverNode:
         if new_retry >= MAX_RETRIES:
             hard_reason = json.dumps({
                 "error_code": "MAX_RETRIES",
+                "original_error_code": error_code,
                 "error_message": f"max_retries_exceeded after {new_retry} attempts. Last error: {error_message}",
                 "failed_step": failed_step,
                 "replan_hint": replan_hint,
