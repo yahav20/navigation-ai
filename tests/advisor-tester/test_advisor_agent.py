@@ -466,7 +466,8 @@ def check_turn(
     skip_response_checks: bool = False,
 ) -> list[Check]:
     checks: list[Check] = []
-    plan = state.get("advisor_plan") or []
+    # advisor_plan is cleared to [] after execution — check what was actually run instead
+    plan = state.get("advisor_last_tool_results") or []
     tools_in_plan = [step.get("tool_name", "") for step in plan]
     shown_cities = [c.lower() for c in (state.get("advisor_shown_cities") or [])]
 

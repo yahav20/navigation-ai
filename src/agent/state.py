@@ -26,6 +26,7 @@ class AgentState(TypedDict):
     plan : list[str]               # list of steps the agent plans to take, updated by the agent_core node
     intent: str                    # intent classification
     advisor_plan: list                 # list of {tool_name, args} dicts produced by advisor_planner
-    advisor_last_tool_results: list    # [{tool_name, args, result}] from the most recent executor run
+    advisor_last_tool_results: list    # [{tool_name, args, result}] accumulated within the current turn
     advisor_shown_cities: list         # accumulates every city name presented to the user across advisor turns
+    advisor_replan_count: int          # number of replan cycles completed in the current turn
 

@@ -403,9 +403,13 @@ class AdvisorPlannerNode:
         ])
 
         sanitized = _sanitize_plan(plan.steps)
+        plan_steps = [
+            {"tool_name": step.tool_name, "args": _step_to_args(step)}
+            for step in sanitized
+        ]
+        print(f"\n[Planner] Created plan: {[s['tool_name'] for s in plan_steps]}")
         return {
-            "advisor_plan": [
-                {"tool_name": step.tool_name, "args": _step_to_args(step)}
-                for step in sanitized
-            ]
+            "advisor_plan": plan_steps,
+            "advisor_last_tool_results": [],   # reset accumulated results for new turn
+            "advisor_replan_count": 0,          # reset replan counter for new turn
         }

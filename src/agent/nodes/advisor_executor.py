@@ -1,19 +1,14 @@
-"""Executor node — runs the planned tool calls and builds the DATA COLLECTED block."""
+"""Executor node — runs ONE planned tool call and accumulates results for the current turn."""
 import json
-from concurrent.futures import ThreadPoolExecutor
 from typing import Any
-
-from langchain_core.messages import AIMessage
 
 from agent.state import AgentState
 from tools.advisor_tools import advisor_tools
 
 _tool_map = {t.name: t for t in advisor_tools}
 
-# Tools where an empty result warrants a fallback attempt
 _DISCOVERY_TOOLS = frozenset({"find_destinations_by_tag", "find_destinations_by_vibe"})
 
-# When a discovery tool returns nothing, try the sibling tool with a safe default arg
 _FALLBACK: dict[str, tuple[str, dict]] = {
     "find_destinations_by_tag":  ("find_destinations_by_vibe", {"category": "Sightseeing"}),
     "find_destinations_by_vibe": ("find_destinations_by_tag",  {"tag": "city-break"}),
@@ -44,8 +39,8 @@ def _run_step(tool_name: str, args: dict) -> Any:
         return {"message": f"Error calling {tool_name}: {exc}"}
 
 
-def _format_result(tool_name: str, args: dict, result: Any) -> str:
-    """Render a single tool result as a labeled text block."""
+def format_tool_result(tool_name: str, args: dict, result: Any) -> str:
+    """Render a single tool result as a labeled text block (shared with replanner)."""
     args_str = ", ".join(f'{k}="{v}"' for k, v in args.items())
     header = f"[{tool_name}({args_str})]"
 
@@ -95,74 +90,43 @@ def _format_result(tool_name: str, args: dict, result: Any) -> str:
 # ---------------------------------------------------------------------------
 
 class AdvisorExecutorNode:
-    """Execute planned tool calls in parallel and emit a DATA COLLECTED block."""
+    """Execute the first planned tool call and append the result to accumulated state."""
 
     def __call__(self, state: AgentState) -> dict:
         plan = state.get("advisor_plan") or []
+        past_results = list(state.get("advisor_last_tool_results") or [])
 
         if not plan:
-            content = "DATA COLLECTED:\n- No data gathered (plan was empty).\nREADY FOR FORMATTING."
-            return {
-                "messages": [AIMessage(content=content)],
-                "advisor_last_tool_results": [],
-            }
+            return {"advisor_last_tool_results": past_results}
 
-        # --- Run all steps in parallel (all are independent DB reads) ---
-        with ThreadPoolExecutor(max_workers=len(plan)) as executor:
-            raw_results = list(executor.map(
-                lambda step: _run_step(step["tool_name"], step.get("args", {})),
-                plan,
-            ))
+        step = plan[0]
+        tool_name = step["tool_name"]
+        args = step.get("args", {})
 
-        # --- Fallback: if every result is empty and the plan had a discovery tool,
-        #     try the paired fallback tool once ---
-        all_empty = all(_is_empty(r) for r in raw_results)
-        if all_empty:
-            for step in plan:
-                tool_name = step["tool_name"]
-                if tool_name in _FALLBACK:
-                    fb_name, fb_args = _FALLBACK[tool_name]
-                    fb_result = _run_step(fb_name, fb_args)
-                    if not _is_empty(fb_result):
-                        # Prepend the fallback block before the (empty) originals
-                        fallback_block = (
-                            f"[no results for original query — showing general options via {fb_name}]\n"
-                            + "\n".join(
-                                _format_result(fb_name, fb_args, fb_result).split("\n")[1:]
-                            )
-                        )
-                        blocks = [fallback_block] + [
-                            _format_result(plan[i]["tool_name"], plan[i].get("args", {}), raw_results[i])
-                            for i in range(len(plan))
-                        ]
-                        tool_results = [
-                            {"tool_name": fb_name, "args": fb_args, "result": fb_result},
-                            *[
-                                {"tool_name": plan[i]["tool_name"], "args": plan[i].get("args", {}), "result": raw_results[i]}
-                                for i in range(len(plan))
-                            ],
-                        ]
-                        body = "\n\n".join(blocks)
-                        content = f"DATA COLLECTED:\n{body}\nREADY FOR FORMATTING."
-                        return {
-                            "messages": [AIMessage(content=content)],
-                            "advisor_last_tool_results": tool_results,
-                        }
-                    break  # only try one fallback
+        # Guard: skip if this exact call was already executed this turn
+        already_ran = any(
+            r["tool_name"] == tool_name and r["args"] == args
+            for r in past_results
+        )
+        if already_ran:
+            print(f"\n[Executor] Skipping duplicate call: {tool_name}({args})")
+            return {"advisor_last_tool_results": past_results}
 
-        # --- Normal path: format results in plan order ---
-        blocks = [
-            _format_result(step["tool_name"], step.get("args", {}), result)
-            for step, result in zip(plan, raw_results)
-        ]
-        tool_results = [
-            {"tool_name": step["tool_name"], "args": step.get("args", {}), "result": result}
-            for step, result in zip(plan, raw_results)
-        ]
+        print(f"\n[Executor] Executing: {tool_name}({args})")
+        result = _run_step(tool_name, args)
 
-        body = "\n\n".join(blocks)
-        content = f"DATA COLLECTED:\n{body}\nREADY FOR FORMATTING."
-        return {
-            "messages": [AIMessage(content=content)],
-            "advisor_last_tool_results": tool_results,
-        }
+        # Fallback: if this step returned empty and it's a discovery tool, try the sibling once
+        if _is_empty(result) and tool_name in _DISCOVERY_TOOLS:
+            fb_name, fb_args = _FALLBACK[tool_name]
+            fb_already_ran = any(
+                r["tool_name"] == fb_name and r["args"] == fb_args
+                for r in past_results
+            )
+            if not fb_already_ran:
+                fb_result = _run_step(fb_name, fb_args)
+                if not _is_empty(fb_result):
+                    print(f"\n[Executor] Fallback triggered: {fb_name}({fb_args})")
+                    past_results.append({"tool_name": fb_name, "args": fb_args, "result": fb_result})
+
+        past_results.append({"tool_name": tool_name, "args": args, "result": result})
+        return {"advisor_last_tool_results": past_results}

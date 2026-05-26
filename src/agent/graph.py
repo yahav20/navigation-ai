@@ -21,6 +21,7 @@ from agent.nodes.node_alternative import (
 from agent.nodes.advisor_planner import AdvisorPlannerNode
 from agent.nodes.advisor_executor import AdvisorExecutorNode
 from agent.nodes.advisor_formatter import AdvisorFormatterNode
+from agent.nodes.advisor_replanner import AdvisorReplannerNode
 from agent.nodes.summary import SummaryNode
 from agent.state import AgentState
 from tools import core_tools
@@ -53,6 +54,7 @@ def build_graph(
     _, advisor_extraction_model = get_models(provider, mode="advisor")
     advisor_planner_node = AdvisorPlannerNode(advisor_extraction_model)
     advisor_executor_node = AdvisorExecutorNode()
+    advisor_replanner_node = AdvisorReplannerNode(advisor_extraction_model)
     advisor_formatter_node = AdvisorFormatterNode(advisor_extraction_model)
 
     # 3. Build the graph
@@ -73,6 +75,7 @@ def build_graph(
     # Advisor nodes
     builder.add_node("advisor_planner", advisor_planner_node)
     builder.add_node("advisor_executor", advisor_executor_node)
+    builder.add_node("advisor_replanner", advisor_replanner_node)
     builder.add_node("advisor_formatter", advisor_formatter_node)
 
     # 4. Define edges — travel planning path
@@ -107,9 +110,13 @@ def build_graph(
     builder.add_edge("formatter", "summary")
     builder.add_edge("summary", END)
 
-    # 5. Define edges — advisor path
+    # 5. Define edges — advisor path (Plan-and-Execute loop)
+    def _after_advisor_replan(state: AgentState) -> str:
+        return "advisor_formatter" if not state.get("advisor_plan") else "advisor_executor"
+
     builder.add_edge("advisor_planner", "advisor_executor")
-    builder.add_edge("advisor_executor", "advisor_formatter")
+    builder.add_edge("advisor_executor", "advisor_replanner")
+    builder.add_conditional_edges("advisor_replanner", _after_advisor_replan)
     builder.add_edge("advisor_formatter", "summary")
 
     if checkpointer is None:
