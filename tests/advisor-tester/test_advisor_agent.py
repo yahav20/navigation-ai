@@ -242,13 +242,16 @@ TESTS: list[TestCase] = [
         ),
     ]),
 
-    TestCase("B4", "B", "Multi-city duration: Rome and Amsterdam", [
+    TestCase("B4", "B", "Multi-city duration: London and Amsterdam", [
         TurnSpec(
-            "I want to visit both Rome and Amsterdam. How should I split my time?",
+            "I want to visit both London and Amsterdam. How should I split my time?",
             must_have_tools=["get_trip_duration_advisor"],
-            min_tools=2,
-            max_tools=2,
-            must_show_cities=["Rome", "Amsterdam"],
+            must_have_tool_args=[{"tool_name": "get_trip_duration_advisor",
+                                  "arg_key": "city", "arg_value": ["London", "Amsterdam"]}],
+            max_tools=1,
+            must_show_cities=["London", "Amsterdam"],
+            note="Multi-city → planner passes city=['London','Amsterdam'], single IN(...) query, "
+                 "both cities have duration data in the DB",
         ),
     ]),
 
@@ -444,16 +447,17 @@ TESTS: list[TestCase] = [
         ),
     ]),
 
-    TestCase("E4", "E", "Replanner continues across two different-city steps and covers both in response", [
+    TestCase("E4", "E", "Single batched call covers both cities in response", [
         TurnSpec(
-            "I want to compare Rome and Barcelona. "
+            "I want to compare Berlin and Tokyo. "
             "Tell me how many days I should spend in each city.",
             must_have_tools=["get_trip_duration_advisor"],
-            min_tools=2,
-            max_tools=2,
-            must_show_cities=["Rome", "Barcelona"],
-            note="Two get_trip_duration_advisor calls for different cities, replanner must continue "
-                 "after the first and recognise the second is not redundant",
+            must_have_tool_args=[{"tool_name": "get_trip_duration_advisor",
+                                  "arg_key": "city", "arg_value": ["Berlin", "Tokyo"]}],
+            max_tools=1,
+            must_show_cities=["Berlin", "Tokyo"],
+            note="Planner passes city=['Berlin','Tokyo'] — one IN(...) query, one replanner pass. "
+                 "Both cities have duration data in the DB.",
         ),
     ]),
 
@@ -608,9 +612,14 @@ def run_turn(graph, config: dict, message: str) -> tuple[dict, str]:
 # ---------------------------------------------------------------------------
 
 def _arg_matches(actual, expected) -> bool:
-    """Compare tool arg values flexibly (handles numeric strings)."""
+    """Compare tool arg values flexibly (handles numeric strings and lists)."""
     if actual == expected:
         return True
+    # List comparison: order-independent, case-insensitive element match
+    if isinstance(expected, list):
+        if not isinstance(actual, list) or len(actual) != len(expected):
+            return False
+        return sorted(str(a).strip().lower() for a in actual) == sorted(str(e).strip().lower() for e in expected)
     try:
         return float(actual) == float(expected)
     except (TypeError, ValueError):

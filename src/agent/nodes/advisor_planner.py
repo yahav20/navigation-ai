@@ -64,9 +64,13 @@ ToolName = Literal[
 
 class PlannedToolCall(BaseModel):
     tool_name: ToolName = Field(description="Exact name of the tool to call")
-    city: str | None = Field(default=None, description=(
-        "City name — required for get_city_overview, get_trip_duration_advisor, "
-        "fetch_activities, get_best_time_to_visit, get_average_weather"
+    city: str | list[str] | None = Field(default=None, description=(
+        "City name(s). Pass a plain string for single-city tools. "
+        "For get_trip_duration_advisor only: pass a LIST of city names when the user asks "
+        "about multiple cities at once (e.g. ['Rome', 'Amsterdam']) — this fetches all "
+        "durations in one query instead of separate calls. "
+        "Required for: get_city_overview, get_trip_duration_advisor, "
+        "fetch_activities, get_best_time_to_visit, get_average_weather."
     ))
     tag: str | None = Field(default=None, description=(
         "City tag — required for find_destinations_by_tag. "
@@ -319,8 +323,10 @@ RULE 0 — BUDGET WITHOUT ORIGIN (check this FIRST before any other rule):
    -> Add fetch_activities as a second tool ONLY if the user explicitly asks "what can I do there?"
    -> Maximum 2 tools total for city-overview questions
 
-9. User asks how many days for a city:
-   -> Plan: get_trip_duration_advisor (city=<city>) for each city mentioned, no other tools
+9. User asks how many days for one or more cities:
+   -> Plan EXACTLY ONE tool: get_trip_duration_advisor with city=<city> for a single city,
+      or city=["Rome", "Amsterdam"] (a list) when multiple cities are mentioned.
+   -> Never plan multiple separate get_trip_duration_advisor calls — use a single call with a list.
 
 10. User asks "what budget do I need?" or "how much would it cost?":
     -> If trip_days is known: find_destinations_within_budget (origin=<city>, total_budget=99999, trip_days=<d>)

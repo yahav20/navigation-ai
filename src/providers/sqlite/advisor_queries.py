@@ -156,8 +156,32 @@ class AdvisorQueriesMixin:
             return [{"message": f"No destinations found from '{origin}' within a ${budget:.0f} budget for {trip_days} days."}]
         return rows
 
-    def get_recommended_duration(self, city: str) -> dict:
-        """Return the recommended trip length and notes for a city."""
+    def get_recommended_duration(self, city: str | list[str]) -> dict | list[dict]:
+        """Return the recommended trip length and notes for one or more cities.
+
+        Pass a single city name for a dict result, or a list of city names for a list result.
+        Uses a single IN (...) query when multiple cities are requested.
+        """
+        if isinstance(city, list):
+            cities = [c.strip().lower() for c in city]
+            placeholders = ", ".join("?" * len(cities))
+            rows = self._query(
+                f"""SELECT c.name AS city, rd.min_days, rd.max_days, rd.notes
+                       FROM recommended_duration rd
+                       JOIN cities c ON rd.city_id = c.id
+                      WHERE LOWER(c.name) IN ({placeholders})""",
+                tuple(cities),
+            )
+            if not rows:
+                return [{"message": f"No duration data found for: {', '.join(city)}."}]
+            found = {r["city"].lower() for r in rows}
+            results = list(rows)
+            for original in city:
+                if original.strip().lower() not in found:
+                    results.append({"message": f"No duration advisor found for '{original}'."})
+            return results
+
+        # --- single city (original behaviour) ---
         rows = self._query(
             """SELECT rd.min_days, rd.max_days, rd.notes
                FROM recommended_duration rd
