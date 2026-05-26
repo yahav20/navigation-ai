@@ -145,7 +145,8 @@ TESTS: list[TestCase] = [
             must_have_tool_args=[{"tool_name": "find_destinations_by_vibe",
                                   "arg_key": "category", "arg_value": "Nature"}],
             must_not_have_tools=["get_reachable_destinations"],
-            max_tools=1,
+            max_tools=2,
+            note="Replanner may add find_destinations_by_tag as a substitute if vibe returns empty",
         ),
     ]),
 
@@ -394,9 +395,6 @@ TESTS: list[TestCase] = [
 
     # =========================================================
     # SECTION E, Replanner decision-making
-    # These tests verify the replanner's loop, pruning, and
-    # graceful-failure behaviour (the defining feature of the
-    # Plan-and-Execute architecture).
     # =========================================================
 
     TestCase("E1", "E", "Three-step plan, replanner iterates twice before finishing", [
@@ -456,6 +454,102 @@ TESTS: list[TestCase] = [
             must_show_cities=["Rome", "Barcelona"],
             note="Two get_trip_duration_advisor calls for different cities, replanner must continue "
                  "after the first and recognise the second is not redundant",
+        ),
+    ]),
+
+    # =========================================================
+    # SECTION F, Replanner fallback substitution
+    # =========================================================
+
+    TestCase("F1", "F", "[Baseline] Vibe returns data — replanner does NOT substitute", [
+        TurnSpec(
+            "I want a cultural city to visit, where should I go?",
+            must_have_tools=["find_destinations_by_vibe"],
+            must_have_tool_args=[{"tool_name": "find_destinations_by_vibe",
+                                  "arg_key": "category", "arg_value": "Culture"}],
+            must_not_have_tools=["find_destinations_by_tag", "get_reachable_destinations"],
+            max_tools=1,
+            note="Culture has 3 cities in DB → vibe returns data → replanner sees 'data returned' "
+                 "and does NOT insert the sibling tag tool. max_tools=1 enforces this.",
+        ),
+    ]),
+
+    TestCase("F2", "F", "[Baseline] Tag returns data — replanner does NOT substitute", [
+        TurnSpec(
+            "I'm looking for a romantic destination, any ideas?",
+            must_have_tools=["find_destinations_by_tag"],
+            must_have_tool_args=[{"tool_name": "find_destinations_by_tag",
+                                  "arg_key": "tag", "arg_value": "romantic"}],
+            must_not_have_tools=["find_destinations_by_vibe", "get_reachable_destinations"],
+            max_tools=1,
+            note="romantic tag has 2 cities in DB → tag returns data → replanner does NOT substitute. "
+                 "If tag returned empty, replanner would add find_destinations_by_vibe(category='Sightseeing').",
+        ),
+    ]),
+
+    TestCase("F3", "F", "[Substitution allowed] Sparse vibe — fallback fires if Entertainment empty", [
+        TurnSpec(
+            "I want to go somewhere fun with lots of entertainment, where should I travel?",
+            must_have_tools=["find_destinations_by_vibe"],
+            must_have_tool_args=[{"tool_name": "find_destinations_by_vibe",
+                                  "arg_key": "category", "arg_value": "Entertainment"}],
+            must_not_have_tools=["get_reachable_destinations"],
+            max_tools=2,
+            response_must_not_contain=["Error", "Exception", "no destinations found"],
+            note="Entertainment has only 1 city (Tokyo) in DB. max_tools=2 allows the replanner "
+                 "to insert find_destinations_by_tag if Entertainment ever returns empty. "
+                 "Response must be useful regardless of whether substitution fires.",
+        ),
+    ]),
+
+    TestCase("F4", "F", "[Substitution allowed] Sparse vibe — fallback fires if Family empty", [
+        TurnSpec(
+            "We're a family with two young kids, where should we go on holiday?",
+            must_have_tools=["find_destinations_by_vibe"],
+            must_have_tool_args=[{"tool_name": "find_destinations_by_vibe",
+                                  "arg_key": "category", "arg_value": "Family"}],
+            must_not_have_tools=["get_reachable_destinations", "fetch_activities"],
+            max_tools=2,
+            response_must_not_contain=["Error", "Exception"],
+            note="Family has only 1 city (Paris) in DB — very sparse. If it ever returns empty, "
+                 "replanner substitutes find_destinations_by_tag (likely tag='safe'). "
+                 "max_tools=2 keeps the test valid either way.",
+        ),
+    ]),
+
+    TestCase("F5", "F", "[Substitution quality] Fallback response still contains useful destination info", [
+        TurnSpec(
+            "Where should I go for a nature and outdoor adventure?",
+            must_have_one_of=["find_destinations_by_vibe", "find_destinations_by_tag"],
+            must_not_have_tools=["get_reachable_destinations"],
+            max_tools=2,
+            response_must_not_contain=["Error", "Exception", "no results found",
+                                       "unfortunately", "unable to find"],
+            note="Whether the primary tool (vibe: Nature) returns data OR the replanner substitutes "
+                 "the sibling tag (nature-nearby), the final response must recommend real destinations. "
+                 "This test validates the end-to-end quality of the fallback path.",
+        ),
+    ]),
+
+    TestCase("F6", "F", "[Multi-turn] Fallback context does not bleed into the next question", [
+        TurnSpec(
+            "Where can I go for a nature trip?",
+            must_have_one_of=["find_destinations_by_vibe", "find_destinations_by_tag"],
+            max_tools=2,
+            note="Turn 1: nature query — vibe runs; replanner may or may not substitute. "
+                 "Whichever tool ran, the result is recorded in advisor_last_tool_results.",
+        ),
+        TurnSpec(
+            "What is the weather like in Paris in summer?",
+            must_have_tools=["get_average_weather"],
+            must_have_tool_args=[{"tool_name": "get_average_weather",
+                                  "arg_key": "city", "arg_value": "Paris"},
+                                 {"tool_name": "get_average_weather",
+                                  "arg_key": "season", "arg_value": "Summer"}],
+            must_not_have_tools=["find_destinations_by_vibe", "find_destinations_by_tag"],
+            max_tools=1,
+            note="Turn 2: fresh specific question — planner must NOT re-run any discovery tools "
+                 "from the previous turn. Fallback context must not bleed.",
         ),
     ]),
 

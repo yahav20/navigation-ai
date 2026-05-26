@@ -136,7 +136,7 @@ _AVAILABLE_CATEGORIES = "Culture, Entertainment, Family, History, Nature, Nightl
 
 _AVAILABLE_TAGS = (
     "alternative, art, beach, budget-friendly, canals, city-break, cultural, cycling, "
-    "entertainment, expensive, fashion, foodie, historic, iconic, liberal, luxury, "
+    "eco-friendly, entertainment, expensive, fashion, foodie, historic, iconic, liberal, luxury, "
     "mediterranean, modern, multicultural, nature-nearby, nightlife, rainy, romantic, "
     "safe, shopping, student-friendly, sunny, technology, theatre, unique, walkable"
 )

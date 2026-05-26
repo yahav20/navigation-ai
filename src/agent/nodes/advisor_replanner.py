@@ -9,6 +9,8 @@ from agent.nodes.advisor_executor import _is_empty, format_tool_result
 
 MAX_REPLAN_STEPS = 5
 
+_DISCOVERY_TOOLS = frozenset({"find_destinations_by_vibe", "find_destinations_by_tag"})
+
 
 # ---------------------------------------------------------------------------
 # Decision schema
@@ -61,7 +63,34 @@ Return EMPTY steps when:
 - All planned steps have been executed
 - The data is complete enough to answer the question without the remaining steps
 
-NEVER add steps that were not in the remaining plan.
+ADDING NEW STEPS — ONE EXCEPTION ONLY:
+Never add steps that were not in the remaining plan, EXCEPT for this case:
+
+Discovery tool substitution: if find_destinations_by_vibe OR find_destinations_by_tag
+returned empty (no results), you MAY insert the sibling discovery tool as the next step.
+  - find_destinations_by_vibe returned empty → add find_destinations_by_tag with a semantically close tag
+  - find_destinations_by_tag returned empty → add find_destinations_by_vibe with a semantically close category
+
+Available categories (find_destinations_by_vibe): Culture, Entertainment, Family, History, Nature, Nightlife, Sightseeing
+Available tags (find_destinations_by_tag): alternative, art, beach, budget-friendly, canals, city-break,
+  cultural, cycling, entertainment, expensive, fashion, foodie, historic, iconic, liberal, luxury,
+  mediterranean, modern, multicultural, nature-nearby, nightlife, rainy, romantic, safe, shopping,
+  student-friendly, sunny, technology, theatre, unique, walkable
+
+Substitution examples:
+  category="Nature"      → tag="nature-nearby"
+  category="Family"      → tag="safe"
+  category="Culture"     → tag="cultural"
+  category="History"     → tag="historic"
+  category="Nightlife"   → tag="nightlife"
+  category="Sightseeing" → tag="iconic"
+  tag="romantic"         → category="Sightseeing"
+  tag="beach"            → category="Sightseeing"
+  tag="foodie"           → category="Entertainment"
+  tag="nightlife"        → category="Nightlife"
+  tag="eco-friendly"     → category="Nature"
+
+Only substitute once. If the substitute also returned empty, return an empty steps list — do not keep trying.
 """
 
 
@@ -86,8 +115,25 @@ class AdvisorReplannerNode:
         # plan[0] was just executed — compute remaining steps
         remaining_plan = plan[1:] if plan else []
 
-        # --- Forced finish: plan exhausted or step-count guard triggered ---
-        if not remaining_plan or replan_count >= MAX_REPLAN_STEPS:
+        # --- Check whether the just-executed step was a discovery tool that returned empty.
+        # If so, the LLM must get a chance to substitute the sibling even if no steps remain.
+        needs_substitution_check = False
+        if plan and past_results:
+            last_executed_name = plan[0]["tool_name"]
+            last_result_entry  = past_results[-1]
+            sibling = {"find_destinations_by_vibe": "find_destinations_by_tag",
+                       "find_destinations_by_tag":  "find_destinations_by_vibe"}.get(last_executed_name)
+            sibling_already_ran = any(r["tool_name"] == sibling for r in past_results) if sibling else True
+            if (last_executed_name in _DISCOVERY_TOOLS
+                    and last_result_entry["tool_name"] == last_executed_name
+                    and _is_empty(last_result_entry["result"])
+                    and not sibling_already_ran):
+                needs_substitution_check = True
+                print(f"\n[Replanner] '{last_executed_name}' returned empty — "
+                      f"checking whether to substitute sibling tool.")
+
+        # --- Forced finish: plan exhausted with no substitution needed, or step-count guard ---
+        if (not remaining_plan and not needs_substitution_check) or replan_count >= MAX_REPLAN_STEPS:
             if replan_count >= MAX_REPLAN_STEPS:
                 print(f"\n[Replanner] Step limit reached ({MAX_REPLAN_STEPS}). Forcing finish.")
             else:
@@ -114,12 +160,20 @@ class AdvisorReplannerNode:
             for s in remaining_plan
         )
 
+        substitution_instruction = (
+            "\n\nIMPORTANT: The last discovery tool returned empty and no remaining steps exist. "
+            "You MUST insert the sibling discovery tool with a semantically appropriate argument. "
+            "Do NOT return an empty list here — that would leave the user with no results."
+            if needs_substitution_check and not remaining_plan else ""
+        )
+
         prompt = (
             f"Original question: {user_question}\n\n"
             f"Steps already executed:\n{past_summary}\n\n"
-            f"Remaining steps:\n{remaining_summary}\n\n"
+            f"Remaining steps:\n{remaining_summary if remaining_summary else '(none)'}\n\n"
             "Return the remaining steps to execute (pruned of redundant ones), "
             "or an empty list if the data collected is already sufficient."
+            f"{substitution_instruction}"
         )
 
         try:

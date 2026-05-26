@@ -7,13 +7,6 @@ from tools.advisor_tools import advisor_tools
 
 _tool_map = {t.name: t for t in advisor_tools}
 
-_DISCOVERY_TOOLS = frozenset({"find_destinations_by_tag", "find_destinations_by_vibe"})
-
-_FALLBACK: dict[str, tuple[str, dict]] = {
-    "find_destinations_by_tag":  ("find_destinations_by_vibe", {"category": "Sightseeing"}),
-    "find_destinations_by_vibe": ("find_destinations_by_tag",  {"tag": "city-break"}),
-}
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -114,22 +107,6 @@ class AdvisorExecutorNode:
 
         print(f"\n[Executor] Executing: {tool_name}({args})")
         result = _run_step(tool_name, args)
-
-        # Fallback: if this step returned empty and it's a discovery tool, try the sibling once.
-        # When fallback succeeds, store the result under the ORIGINAL tool's name/args so
-        # the plan tool count stays accurate (the fallback is a transparent retry, not a new step).
-        if _is_empty(result) and tool_name in _DISCOVERY_TOOLS:
-            fb_name, fb_args = _FALLBACK[tool_name]
-            fb_already_ran = any(
-                r["tool_name"] == fb_name and r["args"] == fb_args
-                for r in past_results
-            )
-            if not fb_already_ran:
-                fb_result = _run_step(fb_name, fb_args)
-                if not _is_empty(fb_result):
-                    print(f"\n[Executor] Fallback triggered: {fb_name}({fb_args})")
-                    past_results.append({"tool_name": tool_name, "args": args, "result": fb_result})
-                    return {"advisor_last_tool_results": past_results}
 
         past_results.append({"tool_name": tool_name, "args": args, "result": result})
         return {"advisor_last_tool_results": past_results}

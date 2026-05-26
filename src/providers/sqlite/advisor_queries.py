@@ -14,7 +14,10 @@ class AdvisorQueriesMixin:
                FROM activities a
                JOIN cities c ON a.city_id = c.id
                JOIN countries co ON c.country_id = co.id
-              WHERE LOWER(a.category) = LOWER(?)
+              WHERE EXISTS (
+                  SELECT 1 FROM json_each(a.categories)
+                  WHERE LOWER(value) = LOWER(?)
+              )
               GROUP BY c.id
               ORDER BY activity_count DESC""",
             (category.strip(),),
