@@ -121,19 +121,28 @@ class IntentClassification(BaseModel):
         "general_chat",
     ] = Field(
         description=(
-            "Classify the user's intent:\n"
-            "- 'new_travel_plan': Starting a brand new trip from scratch, OR transitioning from "
-            "advisor browsing to actual trip planning (e.g. 'plan this trip', 'let's book this', "
-            "'I want to go there', 'book it', 'sounds good, let's go').\n"
-            "- 'update_travel_plan': Changing parameters (budget, days, destination) of an EXISTING trip.\n"
-            "- 'advisor': Asking where to go, what to do, attractions, food, or weather. "
-            "Also covers refining search parameters (budget, days) within an ACTIVE ADVISOR FLOW "
-            "when the user is still browsing — NOT when they want to start actual trip planning.\n"
-            "- 'build_itinerary': User explicitly asks for a DAY-BY-DAY chronological schedule or a time-based routing of attractions.\n"
-            "- 'general_chat': Greetings, casual chat, or general travel questions.\n"
+            "Classify the user's intent. When in doubt, choose 'advisor'.\n"
+            "- 'advisor': The DEFAULT for ALL travel-related queries. Use this for: destination ideas "
+            "('where should I go?'), activities in a city, weather, city profiles, best time to visit, "
+            "trip duration advice, budget exploration, travel recommendations, ANY travel information query. "
+            "Also covers refining search parameters within an ACTIVE ADVISOR FLOW.\n"
+            "- 'new_travel_plan': ONLY when the user commits to a SPECIFIC destination and wants to CHECK "
+            "or BOOK flights, hotels, or costs. (e.g. 'I want to fly to Rome', 'show me hotels in Madrid', "
+            "'let\\'s plan a trip to Tokyo'). Do NOT use just because a city is mentioned.\n"
+            "- 'update_travel_plan': Changing parameters (budget, days, destination) of an ALREADY-PLANNED trip.\n"
+            "- 'build_itinerary': ONLY when user EXPLICITLY requests a day-by-day schedule or itinerary. "
+            "Trigger phrases: 'build an itinerary', 'plan my days', 'day-by-day schedule'. "
+            "Questions like 'how should I split my time' or 'how many days per city' are 'advisor', NOT 'build_itinerary'.\n"
+            "- 'general_chat': ONLY for pure non-travel conversation — greetings ('hello', 'hi', 'thanks'), "
+            "'what can you do?', completely off-topic chat. NEVER use for ANY travel-related question.\n"
         )
     )
     has_explicit_destination: bool = Field(
         default=False,
-        description="True ONLY if the user explicitly names a destination city or country in their message."
+        description=(
+            "True ONLY if the user explicitly names a DESTINATION city (where they want TO GO or VISIT), "
+            "not their origin/current/departure city. "
+            "Example: 'I want to fly to Rome' → True (Rome is destination). "
+            "'I\\'m flying FROM Tel Aviv' → False (Tel Aviv is origin, not destination)."
+        )
     )

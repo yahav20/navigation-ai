@@ -18,15 +18,17 @@ class _RelevanceCheck(BaseModel):
 _RELEVANCE_PROMPT = """Determine if the new user question is a follow-up to the previous
 conversation, or a completely fresh, unrelated question.
 
-Follow-up (is_followup=True):
-- Asks for more detail about cities or topics already discussed
-- Uses references like "tell me more", "what about...", "also", "and what about X"
-- Continues the same travel scenario (same origin, same vibe, same trip)
+Follow-up (is_followup=True) — ALL of the following must be true:
+- References a SPECIFIC CITY or topic already discussed (e.g. "tell me more about Paris", "when is Berlin cold?")
+- Uses explicit back-references: "tell me more", "what about...", "also", "and what about X", "of those", "from the list"
+- Clearly continues the EXACT SAME travel scenario with no change in goal
 
-New question (is_followup=False):
-- Different origin city with no connection to the previous topic
-- Completely unrelated travel scenario
-- No reference back to anything discussed before
+New question (is_followup=False) — any of these is enough:
+- A DESTINATION DISCOVERY question ("where should I go?", "recommend me somewhere", "where can I travel?",
+  "where should I fly?", "what's a good destination?") → ALWAYS False, even if origin/budget were mentioned before
+- Changes the TYPE of query (e.g. previous was city info; now asking for destination recommendations)
+- No explicit reference to anything discussed before
+- Could stand completely alone without the previous context
 
 When in doubt, return False."""
 

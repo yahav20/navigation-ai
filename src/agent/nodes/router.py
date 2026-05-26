@@ -41,12 +41,20 @@ class RouterNode:
         - Budget: {state.get("total_budget", "None")}
         - Days: {state.get("trip_days", "None")}
 
-        INTENT DEFINITIONS & DIFFERENCES:
-        1. 'advisor': User wants destination ideas or travel info but does NOT have a specific destination yet, OR is asking about activities, weather, or food for a city. ("Where should I go for a beach trip?", "What's there to do in Tokyo?")
-        2. 'new_travel_plan' (Info & Feasibility): User explicitly names a destination and wants to check flights, hotels, or costs, BUT they DO NOT ask for a daily schedule. ("I want to visit Rome, what are the flights?", "Let's check options for Madrid")
-        3. 'build_itinerary' (Full Execution): User EXPLICITLY asks for a detailed, day-by-day itinerary, schedule, OR asks to "replan" the entire trip (even if they are changing destination or budget at the same time). Examples: "Build a 3-day itinerary for Rome", "replan for Paris with $700", "create full plan".
-        4. 'update_travel_plan': User wants to change parameters (destination, budget, origin) of a trip, BUT DOES NOT ask for a daily schedule or a full replan. They just want to check feasibility/flights. Examples: "Change destination to Paris", "Increase budget to $1000".
-        5. 'general_chat': Greetings, casual chat, or general travel questions not related to active planning.
+        INTENT DEFINITIONS & DIFFERENCES (when in doubt, pick 'advisor'):
+        1. 'advisor': The DEFAULT for all travel questions. Use this for: "where should I go?",
+           destination ideas, activities in a city, weather, city overviews, trip duration,
+           budget exploration, travel recommendations — anything that is asking for travel INFO.
+           Even questions like "I'm going to Tokyo, what should I do?" belong here.
+        2. 'new_travel_plan': User commits to a SPECIFIC destination and wants flights/hotels/costs.
+           ("I want to fly to Rome — show me flights", "Let's book a trip to Madrid").
+           ONLY use when the user is ready to START PLANNING a specific trip, not just exploring.
+        3. 'build_itinerary': ONLY when user EXPLICITLY asks for a day-by-day schedule.
+           ("Build a 3-day itinerary for Rome", "plan my days in Paris", "replan for $700").
+           "How should I split my time?" or "how many days per city?" → 'advisor', NOT here.
+        4. 'update_travel_plan': Changing an existing confirmed plan's parameters (budget, dates, destination).
+        5. 'general_chat': ONLY pure non-travel conversation — "Hello", "Thanks", "What can you do?".
+           NEVER use for any travel question, even casual ones.
 
         TRANSITION RULE (critical): If the system is in ACTIVE ADVISOR FLOW and the user
         says something like "plan this trip", "let's go", "book this", "sounds good let's do it",

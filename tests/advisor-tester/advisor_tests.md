@@ -54,7 +54,7 @@ Each test specifies:
 ---
 
 ### A4 — Vibe/lifestyle tag search, no origin
-**Input:** `I want a romantic destination — where should I go?`
+**Input:** `I want a romantic destination, where should I go?`
 **Expected plan:** `find_destinations_by_tag(tag="romantic")` — 1 tool
 **Expected behavior:** Lists only cities returned by the tool. Ends with an invitation to check flights once origin is known.
 **Pass criteria:**
@@ -79,7 +79,7 @@ Each test specifies:
 ---
 
 ### A6 — Activities for a named city the user is already visiting
-**Input:** `I'm going to Tokyo — what activities are there?`
+**Input:** `I'm going to Tokyo, what activities are there?`
 **Expected plan:** `fetch_activities(city="Tokyo")` — 1 tool
 **Expected behavior:** Lists activities by category. Does not suggest alternative destinations.
 **Pass criteria:**
@@ -116,7 +116,7 @@ Each test specifies:
 ---
 
 ### A9 — Short-haul reachability, no budget
-**Input:** `I'm flying from Tel Aviv. I hate long flights — where should I go?`
+**Input:** `I'm flying from Tel Aviv. I hate long flights, where should I go?`
 **Expected plan:** `get_reachable_destinations(origin="Tel Aviv", max_flight_hours=2.5)` — 1 tool
 **Expected behavior:** Lists only cities reachable within ~2–3 hours from Tel Aviv with prices and flight duration.
 **Pass criteria:**
@@ -133,7 +133,7 @@ Each test specifies:
 ---
 
 ### B1 — Full city profile (overview + activities)
-**Input:** `Tell me everything about Berlin — what kind of city is it, what can I do there, and when should I visit?`
+**Input:** `Tell me everything about Berlin. what kind of city is it, what can I do there, and when should I visit?`
 **Expected plan:** `get_city_overview(city="Berlin")` + `fetch_activities(city="Berlin")` — 2 tools
 **Expected behavior:** Covers activity types, best visit months, weather, and a named activity list from the DB.
 **Pass criteria:**
@@ -158,7 +158,7 @@ Each test specifies:
 ---
 
 ### B3 — Nightlife search (tag + vibe)
-**Input:** `I want a city with great nightlife — any recommendations?`
+**Input:** `I want a city with great nightlife, any recommendations?`
 **Expected plan:** `find_destinations_by_tag(tag="nightlife")` + `find_destinations_by_vibe(category="Nightlife")` — 2 tools
 **Expected behavior:** Combines results from both tools; cities appearing in both are highlighted.
 **Pass criteria:**
@@ -224,8 +224,8 @@ Each test specifies:
 ---
 
 ### C1 — Follow-up: detail on a previously shown city
-**Turn 1:** `I want a romantic destination — where should I go?`
-**Turn 2:** `Tell me more about Paris — when should I visit and how many days?`
+**Turn 1:** `I want a romantic destination, where should I go?`
+**Turn 2:** `Tell me more about Paris, when should I visit and how many days?`
 
 **Expected Turn 1 plan:** `find_destinations_by_tag(tag="romantic")`
 **Expected Turn 2 plan:** `get_city_overview(city="Paris")` — classified as follow-up; `advisor_shown_cities` from Turn 1 provides context
@@ -239,7 +239,7 @@ Each test specifies:
 ---
 
 ### C2 — Fresh question after a previous turn (no context bleed)
-**Turn 1:** `Tell me about Tokyo — what's the weather like in summer?`
+**Turn 1:** `Tell me about Tokyo, what's the weather like in summer?`
 **Turn 2:** `What are the best family destinations in Europe?`
 
 **Expected Turn 1 plan:** `get_average_weather(city="Tokyo", season="Summer")`
@@ -254,7 +254,7 @@ Each test specifies:
 ---
 
 ### C3 — Refining a budget within an active rec session
-**Turn 1:** `I'm from Tel Aviv. I want a romantic city — where should I go?`
+**Turn 1:** `I'm from Tel Aviv. I want a romantic city, where should I go?`
 **Turn 2:** `My budget is $900. Which of those could I afford?`
 
 **Expected Turn 1 plan:** `get_reachable_destinations(origin="Tel Aviv")` + `find_destinations_by_tag(tag="romantic")`
@@ -302,7 +302,7 @@ Each test specifies:
 ---
 
 ### D1 — Fallback: tag with no DB match
-**Input:** `I want to go somewhere known for its jungles — where should I go?`
+**Input:** `I want to go somewhere known for its jungles, where should I go?`
 **Expected plan:** `find_destinations_by_tag(tag="nature-nearby")` or similar — if result is empty, executor falls back to `find_destinations_by_vibe(category="Sightseeing")`
 **Pass criteria:**
 - Fallback fires if the original tag returns empty
@@ -314,7 +314,7 @@ Each test specifies:
 ---
 
 ### D2 — Country resolution: origin
-**Input:** `I'm from Israel. I want somewhere with great food — where should I go?`
+**Input:** `I'm from Israel. I want somewhere with great food, where should I go?`
 **Expected plan:** `get_reachable_destinations(origin="Tel Aviv")` + `find_destinations_by_tag(tag="foodie")` — "Israel" resolved to "Tel Aviv" in tool args
 **Pass criteria:**
 - Tool args use "Tel Aviv", not "Israel"
@@ -325,7 +325,7 @@ Each test specifies:
 ---
 
 ### D3 — No origin guard: no reachability tool without an origin
-**Input:** `I want a beach holiday — where should I fly?`
+**Input:** `I want a beach holiday, where should I fly?`
 **Expected plan:** `find_destinations_by_tag(tag="beach")` — 1 tool only; `get_reachable_destinations` NOT called
 **Expected behavior:** Lists beach cities; ends with an offer to check flights once the user shares their origin.
 **Pass criteria:**
@@ -349,7 +349,7 @@ Each test specifies:
 ---
 
 ### D5 — No budget tool without an origin
-**Input:** `I have a $500 budget — where can I go?`
+**Input:** `I have a $500 budget, where can I go?`
 **Expected plan:** `find_destinations_by_tag(tag="budget-friendly")` — 1 tool; budget tools NOT used (no origin given)
 **Expected behavior:** Lists budget-friendly cities by tag; notes that costs depend on origin and offers to check once origin is shared.
 **Pass criteria:**

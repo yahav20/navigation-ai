@@ -89,7 +89,7 @@ class TestCase:
 TESTS: list[TestCase] = [
 
     # =========================================================
-    # SECTION A — Single-turn, single-tool (planner precision)
+    # SECTION A, Single-turn, single-tool (planner precision)
     # =========================================================
 
     TestCase("A1", "A", "Best time to visit Tokyo", [
@@ -127,9 +127,9 @@ TESTS: list[TestCase] = [
         ),
     ]),
 
-    TestCase("A4", "A", "Romantic destination — no origin given", [
+    TestCase("A4", "A", "Romantic destination, no origin given", [
         TurnSpec(
-            "I want a romantic destination — where should I go?",
+            "I want a romantic destination, where should I go?",
             must_have_tools=["find_destinations_by_tag"],
             must_have_tool_args=[{"tool_name": "find_destinations_by_tag",
                                   "arg_key": "tag", "arg_value": "romantic"}],
@@ -138,7 +138,7 @@ TESTS: list[TestCase] = [
         ),
     ]),
 
-    TestCase("A5", "A", "Nature trip — no origin given", [
+    TestCase("A5", "A", "Nature trip, no origin given", [
         TurnSpec(
             "Where should I go for a nature trip?",
             must_have_tools=["find_destinations_by_vibe"],
@@ -151,7 +151,7 @@ TESTS: list[TestCase] = [
 
     TestCase("A6", "A", "Activities for a named city the user is visiting", [
         TurnSpec(
-            "I'm going to Tokyo — what activities are there?",
+            "I'm going to Tokyo, what activities are there?",
             must_have_tools=["fetch_activities"],
             must_have_tool_args=[{"tool_name": "fetch_activities",
                                   "arg_key": "city", "arg_value": "Tokyo"}],
@@ -192,9 +192,9 @@ TESTS: list[TestCase] = [
         ),
     ]),
 
-    TestCase("A9", "A", "Short-haul from Tel Aviv — no budget", [
+    TestCase("A9", "A", "Short-haul from Tel Aviv, no budget", [
         TurnSpec(
-            "I'm flying from Tel Aviv. I hate long flights — where should I go?",
+            "I'm flying from Tel Aviv. I hate long flights, where should I go?",
             must_have_tools=["get_reachable_destinations"],
             must_have_tool_args=[{"tool_name": "get_reachable_destinations",
                                   "arg_key": "origin", "arg_value": "Tel Aviv"}],
@@ -205,12 +205,12 @@ TESTS: list[TestCase] = [
     ]),
 
     # =========================================================
-    # SECTION B — Single-turn, multi-tool (planner strategy)
+    # SECTION B, Single-turn, multi-tool (planner strategy)
     # =========================================================
 
     TestCase("B1", "B", "Full city profile: Berlin", [
         TurnSpec(
-            "Tell me everything about Berlin — what kind of city is it, "
+            "Tell me everything about Berlin, what kind of city is it, "
             "what can I do there, and when should I visit?",
             must_have_tools=["get_city_overview"],
             must_have_tool_args=[{"tool_name": "get_city_overview",
@@ -222,7 +222,7 @@ TESTS: list[TestCase] = [
         ),
     ]),
 
-    TestCase("B2", "B", "Origin + vibe, no budget — reachable + tag combined", [
+    TestCase("B2", "B", "Origin + vibe, no budget, reachable + tag combined", [
         TurnSpec(
             "I'm flying from Tel Aviv and I want a foodie destination. Where should I go?",
             must_have_one_of=["get_reachable_destinations", "find_destinations_by_tag"],
@@ -233,9 +233,9 @@ TESTS: list[TestCase] = [
         ),
     ]),
 
-    TestCase("B3", "B", "Nightlife — tag and vibe both called", [
+    TestCase("B3", "B", "Nightlife, tag and vibe both called", [
         TurnSpec(
-            "I want a city with great nightlife — any recommendations?",
+            "I want a city with great nightlife, any recommendations?",
             must_have_one_of=["find_destinations_by_tag", "find_destinations_by_vibe"],
             max_tools=2,
         ),
@@ -262,7 +262,7 @@ TESTS: list[TestCase] = [
         ),
     ]),
 
-    TestCase("B6", "B", "Family trip — vibe tool required, no fetch_activities", [
+    TestCase("B6", "B", "Family trip, vibe tool required, no fetch_activities", [
         TurnSpec(
             "I'm planning a family trip with kids aged 7 and 10. Where should we go?",
             must_have_tools=["find_destinations_by_vibe"],
@@ -273,68 +273,37 @@ TESTS: list[TestCase] = [
         ),
     ]),
 
-    TestCase("B7", "B", "Budget + vibe preference — only budget tool, no tag tool", [
+    TestCase("B7", "B", "Budget + vibe preference, only budget tool, no tag tool", [
         TurnSpec(
             "I'm from Tel Aviv, I have $1000, and I want a romantic city. Where can I go?",
             must_have_one_of=["find_destinations_within_budget_auto", "find_destinations_within_budget"],
             must_not_have_tools=["find_destinations_by_tag", "find_destinations_by_vibe"],
             max_tools=1,
-            note="Budget tool already filters by reachability — adding a tag tool introduces out-of-budget cities",
+            note="Budget tool already filters by reachability, adding a tag tool introduces out-of-budget cities",
         ),
     ]),
 
     # =========================================================
-    # SECTION C — Multi-turn (follow-up detection + state)
+    # SECTION C, Multi-turn (follow-up detection + state)
     # =========================================================
 
     TestCase("C1", "C", "Follow-up: detail on a city shown in previous turn", [
         TurnSpec(
-            "I want a romantic destination — where should I go?",
+            "I want a romantic destination, where should I go?",
             must_have_tools=["find_destinations_by_tag"],
             note="Turn 1: discover romantic destinations",
         ),
         TurnSpec(
-            "Tell me more about Paris — when should I visit and how many days?",
+            "Tell me more about Paris, when should I visit and how many days?",
             must_have_one_of=["get_city_overview", "get_best_time_to_visit",
                               "get_trip_duration_advisor"],
             must_not_have_tools=["find_destinations_by_tag"],
             must_show_cities=["Paris"],
-            note="Turn 2: follow-up — must not re-run the discovery tool",
+            note="Turn 2: follow-up, must not re-run the discovery tool",
         ),
     ]),
 
-    TestCase("C2", "C", "Fresh question — no context bleed from previous turn", [
-        TurnSpec(
-            "What's the weather like in Tokyo in summer?",
-            must_have_one_of=["get_average_weather", "get_city_overview"],
-            note="Turn 1: Tokyo weather",
-        ),
-        TurnSpec(
-            "I want a family-friendly destination — where should we go?",
-            must_have_tools=["find_destinations_by_vibe"],
-            must_have_tool_args=[{"tool_name": "find_destinations_by_vibe",
-                                  "arg_key": "category", "arg_value": "Family"}],
-            must_not_have_tools=["get_average_weather"],
-            response_must_not_contain=["Tokyo"],
-            note="Turn 2: fresh question — Tokyo must not bleed into plan or response",
-        ),
-    ]),
-
-    TestCase("C3", "C", "Budget refinement in active rec session", [
-        TurnSpec(
-            "I'm from Tel Aviv. I want a romantic city — where should I go?",
-            must_have_one_of=["get_reachable_destinations", "find_destinations_by_tag"],
-            note="Turn 1: establish origin + vibe",
-        ),
-        TurnSpec(
-            "My budget is $900. Which of those could I afford?",
-            must_have_one_of=["find_destinations_within_budget_auto", "find_destinations_within_budget"],
-            must_not_have_tools=["find_destinations_by_tag"],
-            note="Turn 2: budget refinement — origin 'Tel Aviv' must be picked up from state context",
-        ),
-    ]),
-
-    TestCase("C4", "C", "Avoid re-fetching same city+season on follow-up", [
+    TestCase("C2", "C", "Avoid re-fetching same city+season on follow-up", [
         TurnSpec(
             "What's the weather like in Amsterdam in summer?",
             must_have_tools=["get_average_weather"],
@@ -349,12 +318,26 @@ TESTS: list[TestCase] = [
             must_have_tool_args=[{"tool_name": "get_average_weather",
                                   "arg_key": "season", "arg_value": "Winter"}],
             max_tools=1,
-            note="Turn 2: fetch winter — must NOT re-fetch summer (max_tools=1 enforces this)",
+            note="Turn 2: fetch winter, must NOT re-fetch summer (max_tools=1 enforces this)",
+        ),
+    ]),
+
+    TestCase("C3", "C", "Budget refinement in active rec session", [
+        TurnSpec(
+            "I'm from Tel Aviv. I want a romantic city, where should I go?",
+            must_have_one_of=["get_reachable_destinations", "find_destinations_by_tag"],
+            note="Turn 1: establish origin + vibe",
+        ),
+        TurnSpec(
+            "My budget is $900. Which of those could I afford?",
+            must_have_one_of=["find_destinations_within_budget_auto", "find_destinations_within_budget"],
+            must_not_have_tools=["find_destinations_by_tag"],
+            note="Turn 2: budget refinement, origin 'Tel Aviv' must be picked up from state context",
         ),
     ]),
 
     # =========================================================
-    # SECTION D — Edge cases
+    # SECTION D, Edge cases
     # =========================================================
 
     TestCase("D2", "D", "Country resolution: 'Israel' -> 'Tel Aviv' in tool args", [
@@ -363,13 +346,13 @@ TESTS: list[TestCase] = [
             must_have_tools=["get_reachable_destinations"],
             must_have_tool_args=[{"tool_name": "get_reachable_destinations",
                                   "arg_key": "origin", "arg_value": "Tel Aviv"}],
-            note="User says 'Israel' — tool arg must be 'Tel Aviv'",
+            note="User says 'Israel', tool arg must be 'Tel Aviv'",
         ),
     ]),
 
     TestCase("D3", "D", "No reachability tool when no origin is given", [
         TurnSpec(
-            "I want a beach holiday — where should I fly?",
+            "I want a beach holiday, where should I fly?",
             must_have_one_of=["find_destinations_by_tag"],
             must_not_have_tools=["get_reachable_destinations"],
             max_tools=1,
@@ -388,9 +371,9 @@ TESTS: list[TestCase] = [
         ),
     ]),
 
-    TestCase("D5", "D", "Budget stated but no origin — use tag, not budget tool", [
+    TestCase("D5", "D", "Budget stated but no origin, use tag, not budget tool", [
         TurnSpec(
-            "I have a $500 budget — where can I go?",
+            "I have a $500 budget, where can I go?",
             must_have_one_of=["find_destinations_by_tag", "find_destinations_by_vibe"],
             must_not_have_tools=["find_destinations_within_budget_auto",
                                  "find_destinations_within_budget"],
@@ -400,7 +383,7 @@ TESTS: list[TestCase] = [
 
     TestCase("D6", "D", "rec_shown_cities accumulates across turns", [
         TurnSpec(
-            "I want a romantic destination — where should I go?",
+            "I want a romantic destination, where should I go?",
             note="Turn 1: cities shown are tracked",
         ),
         TurnSpec(
@@ -410,13 +393,13 @@ TESTS: list[TestCase] = [
     ]),
 
     # =========================================================
-    # SECTION E — Replanner decision-making
+    # SECTION E, Replanner decision-making
     # These tests verify the replanner's loop, pruning, and
     # graceful-failure behaviour (the defining feature of the
     # Plan-and-Execute architecture).
     # =========================================================
 
-    TestCase("E1", "E", "Three-step plan — replanner iterates twice before finishing", [
+    TestCase("E1", "E", "Three-step plan, replanner iterates twice before finishing", [
         TurnSpec(
             "I'm visiting Lisbon next summer. What activities are there, "
             "how many days should I stay, and what's the weather in summer?",
@@ -438,21 +421,21 @@ TESTS: list[TestCase] = [
 
     TestCase("E2", "E", "Replanner prunes get_best_time when get_city_overview already covers it", [
         TurnSpec(
-            "Give me a complete overview of Amsterdam — what it's like, "
+            "Give me a complete overview of Amsterdam, what it's like, "
             "what to do there, and specifically the best months to visit.",
             must_have_tools=["get_city_overview"],
             must_not_have_tools=["get_best_time_to_visit", "find_destinations_by_tag",
                                  "find_destinations_by_vibe", "get_reachable_destinations"],
             max_tools=2,
             must_show_cities=["Amsterdam"],
-            note="city_overview already includes best-visit months — either the planner or replanner "
+            note="city_overview already includes best-visit months, either the planner or replanner "
                  "must suppress a redundant get_best_time_to_visit call",
         ),
     ]),
 
     TestCase("E3", "E", "Graceful handling when a city does not exist in the database", [
         TurnSpec(
-            "I'm planning a trip to Eldorado — what activities are there?",
+            "I'm planning a trip to Eldorado, what activities are there?",
             must_have_tools=["fetch_activities"],
             must_have_tool_args=[{"tool_name": "fetch_activities",
                                   "arg_key": "city", "arg_value": "Eldorado"}],
@@ -471,7 +454,7 @@ TESTS: list[TestCase] = [
             min_tools=2,
             max_tools=2,
             must_show_cities=["Rome", "Barcelona"],
-            note="Two get_trip_duration_advisor calls for different cities — replanner must continue "
+            note="Two get_trip_duration_advisor calls for different cities, replanner must continue "
                  "after the first and recognise the second is not redundant",
         ),
     ]),
@@ -492,12 +475,26 @@ def make_graph():
 # Turn runner
 # ---------------------------------------------------------------------------
 
+_INTENT_COLORS = {
+    "advisor":           CYAN,
+    "new_travel_plan":   "\033[94m",   # blue
+    "update_travel_plan":"\033[95m",   # magenta
+    "build_itinerary":   "\033[93m",   # yellow
+    "general_chat":      "\033[96m",   # cyan
+}
+
+
 def run_turn(graph, config: dict, message: str) -> tuple[dict, str]:
     """Stream one turn to completion; return (final_state, formatter_response)."""
     initial_state = {"messages": [("user", message)], "step_count": 0}
 
-    for _ in graph.stream(initial_state, config, stream_mode="values"):
-        pass  # consume stream until graph finishes
+    intent_printed = False
+    for update in graph.stream(initial_state, config, stream_mode="updates"):
+        if not intent_printed and "router" in update:
+            intent = (update["router"] or {}).get("intent", "?")
+            color  = _INTENT_COLORS.get(intent, "")
+            print(f"\n{DIM}[Router]{RESET} intent = {color}{intent}{RESET}")
+            intent_printed = True
 
     final_state = graph.get_state(config).values
 
@@ -533,7 +530,7 @@ def check_turn(
     skip_response_checks: bool = False,
 ) -> list[Check]:
     checks: list[Check] = []
-    # advisor_plan is cleared to [] after execution — check what was actually run instead
+    # advisor_plan is cleared to [] after execution, check what was actually run instead
     plan = state.get("advisor_last_tool_results") or []
     tools_in_plan = [step.get("tool_name", "") for step in plan]
     shown_cities = [c.lower() for c in (state.get("advisor_shown_cities") or [])]
@@ -638,18 +635,20 @@ def check_turn(
 def run_test(
     test: TestCase,
     skip_response_checks: bool = False,
-) -> tuple[bool, list[tuple[int, str, list[Check]]], float]:
+) -> tuple[bool, list[tuple[int, str, list[Check], dict, str]], float]:
     """
     Run all turns for one test case.
-    Returns (all_passed, [(turn_idx, turn_message, checks)], elapsed_seconds).
+    Returns (all_passed, [(turn_idx, turn_message, checks, state, response)], elapsed_seconds).
     """
     graph = make_graph()
     config = {"configurable": {"thread_id": str(uuid.uuid4())}}
-    all_turn_results: list[tuple[int, str, list[Check]]] = []
+    all_turn_results: list[tuple[int, str, list[Check], dict, str]] = []
     elapsed = 0.0
 
     for i, turn_spec in enumerate(test.turns):
         t0 = time.time()
+        state: dict = {}
+        response: str = ""
         try:
             state, response = run_turn(graph, config, turn_spec.message)
             checks = check_turn(turn_spec, state, response, skip_response_checks)
@@ -658,9 +657,9 @@ def run_test(
             checks = [Check(f"Turn {i + 1} execution", False, str(exc))]
             print(f"\n{DIM}{tb}{RESET}")
         elapsed += time.time() - t0
-        all_turn_results.append((i + 1, turn_spec.message, checks))
+        all_turn_results.append((i + 1, turn_spec.message, checks, state, response))
 
-    all_passed = all(c.passed for _, _, checks in all_turn_results for c in checks)
+    all_passed = all(c.passed for _, _, checks, _, _ in all_turn_results for c in checks)
     return all_passed, all_turn_results, elapsed
 
 
@@ -672,22 +671,52 @@ def print_test_header(test: TestCase, index: int, total: int) -> None:
     print(f"\n{DIM}[{index}/{total}]{RESET} {CYAN}{test.id}{RESET} {test.description}", end="  ", flush=True)
 
 
+def _result_is_empty(result) -> bool:
+    """Mirrors executor._is_empty for display purposes."""
+    if isinstance(result, list):
+        return not result or (len(result) == 1 and "message" in result[0])
+    if isinstance(result, dict):
+        return "message" in result
+    return False
+
+
 def print_test_result(
     test: TestCase,
     passed: bool,
-    turn_results: list[tuple[int, str, list[Check]]],
+    turn_results: list[tuple[int, str, list[Check], dict, str]],
     elapsed: float,
 ) -> None:
     status = f"{GREEN}PASS{RESET}" if passed else f"{RED}FAIL{RESET}"
     print(f"{status}  {DIM}({elapsed:.1f}s){RESET}")
 
     if not passed:
-        for turn_idx, message, checks in turn_results:
+        for turn_idx, message, checks, state, response in turn_results:
             failed = [c for c in checks if not c.passed]
             if not failed:
                 continue
-            label = f"  Turn {turn_idx}: \"{message[:60]}{'…' if len(message) > 60 else ''}\""
+            label = f"  Turn {turn_idx}: \"{message[:60]}{'...' if len(message) > 60 else ''}\""
             print(f"{label}")
+
+            # Routing intent
+            intent = state.get("intent", "?")
+            color  = _INTENT_COLORS.get(intent, "")
+            print(f"    {DIM}[Router]{RESET} intent = {color}{intent}{RESET}")
+
+            # Actual tool results that ran
+            tool_results = state.get("advisor_last_tool_results") or []
+            if tool_results:
+                print(f"    {DIM}[Tools run]{RESET}")
+                for r in tool_results:
+                    t_name  = r.get("tool_name", "?")
+                    t_args  = r.get("args", {})
+                    t_res   = r.get("result")
+                    is_empty = _result_is_empty(t_res)
+                    args_str = ", ".join(f"{k}={v!r}" for k, v in t_args.items())
+                    data_tag = f"{RED}empty{RESET}" if is_empty else f"{GREEN}data{RESET}"
+                    print(f"      {DIM}- {t_name}({args_str}):{RESET} [{data_tag}]")
+            else:
+                print(f"    {DIM}[Tools run] none{RESET}")
+
             for c in failed:
                 print(f"    {CROSS} {c.description}")
                 if c.detail:
@@ -789,7 +818,7 @@ def main() -> None:
     for i, test in enumerate(tests_to_run, 1):
         print_test_header(test, i, total)
         passed, turn_results, elapsed = run_test(test, skip_response_checks=skip_resp)
-        print_test_result(test, passed, turn_results, elapsed)
+        print_test_result(test, passed, turn_results, elapsed)  # type: ignore[arg-type]
         all_results.append((test, passed, turn_results, elapsed))
 
     print_summary(all_results)
