@@ -80,6 +80,10 @@ def render_agent_message(msg_type: str, content: str) -> None:
     console.print(Panel(body, title=msg_type.lower(), border_style="cyan", title_align="left"))
 
 
+def render_node_status(msg: str) -> None:
+    console.print(Text(f"  {msg.strip()}", style="dim"))
+
+
 def _state_html(state: tuple[str, str, str, str]) -> HTML:
     def fmt(v: str) -> str:
         s = str(v)

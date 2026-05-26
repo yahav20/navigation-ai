@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 from agent.state import AgentState
 from agent.nodes.advisor_planner import AdvisorPlan, PlannedToolCall, _step_to_args
 from agent.nodes.advisor_executor import _is_empty, format_tool_result
+from ui import render_node, render_node_status
 
 MAX_REPLAN_STEPS = 5
 
@@ -107,6 +108,7 @@ class AdvisorReplannerNode:
         )
 
     def __call__(self, state: AgentState) -> dict:
+        render_node("advisor_replanner")
         plan = list(state.get("advisor_plan") or [])
         past_results = list(state.get("advisor_last_tool_results") or [])
         replan_count = state.get("advisor_replan_count") or 0
@@ -129,15 +131,15 @@ class AdvisorReplannerNode:
                     and _is_empty(last_result_entry["result"])
                     and not sibling_already_ran):
                 needs_substitution_check = True
-                print(f"\n[Replanner] '{last_executed_name}' returned empty — "
-                      f"checking whether to substitute sibling tool.")
+                render_node_status(f"[Replanner] '{last_executed_name}' returned empty — "
+                                   f"checking whether to substitute sibling tool.")
 
         # --- Forced finish: plan exhausted with no substitution needed, or step-count guard ---
         if (not remaining_plan and not needs_substitution_check) or replan_count >= MAX_REPLAN_STEPS:
             if replan_count >= MAX_REPLAN_STEPS:
-                print(f"\n[Replanner] Step limit reached ({MAX_REPLAN_STEPS}). Forcing finish.")
+                render_node_status(f"[Replanner] Step limit reached ({MAX_REPLAN_STEPS}). Forcing finish.")
             else:
-                print(f"\n[Replanner] Plan complete. Proceeding to formatter.")
+                render_node_status(f"[Replanner] Plan complete. Proceeding to formatter.")
             return {
                 "advisor_plan": [],
                 "messages": [AIMessage(content=build_data_collected(past_results))],
@@ -189,7 +191,7 @@ class AdvisorReplannerNode:
                 decision.steps.append(PlannedToolCall(tool_name=s["tool_name"], **s.get("args", {})))
 
         if not decision.steps:
-            print(f"\n[Replanner] Sufficient data collected. Proceeding to formatter.")
+            render_node_status(f"[Replanner] Sufficient data collected. Proceeding to formatter.")
             return {
                 "advisor_plan": [],
                 "messages": [AIMessage(content=build_data_collected(past_results))],
@@ -201,7 +203,7 @@ class AdvisorReplannerNode:
             {"tool_name": step.tool_name, "args": _step_to_args(step)}
             for step in decision.steps
         ]
-        print(f"\n[Replanner] Continuing with: {[s['tool_name'] for s in new_plan]}")
+        render_node_status(f"[Replanner] Continuing with: {[s['tool_name'] for s in new_plan]}")
         return {
             "advisor_plan": new_plan,
             "advisor_replan_count": replan_count + 1,

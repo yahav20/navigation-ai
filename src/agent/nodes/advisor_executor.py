@@ -4,6 +4,7 @@ from typing import Any
 
 from agent.state import AgentState
 from tools.advisor_tools import advisor_tools
+from ui import render_node, render_node_status
 
 _tool_map = {t.name: t for t in advisor_tools}
 
@@ -86,6 +87,7 @@ class AdvisorExecutorNode:
     """Execute the first planned tool call and append the result to accumulated state."""
 
     def __call__(self, state: AgentState) -> dict:
+        render_node("advisor_executor")
         plan = state.get("advisor_plan") or []
         past_results = list(state.get("advisor_last_tool_results") or [])
 
@@ -102,10 +104,10 @@ class AdvisorExecutorNode:
             for r in past_results
         )
         if already_ran:
-            print(f"\n[Executor] Skipping duplicate call: {tool_name}({args})")
+            render_node_status(f"[Executor] Skipping duplicate call: {tool_name}({args})")
             return {"advisor_last_tool_results": past_results}
 
-        print(f"\n[Executor] Executing: {tool_name}({args})")
+        render_node_status(f"[Executor] Executing: {tool_name}({args})")
         result = _run_step(tool_name, args)
 
         past_results.append({"tool_name": tool_name, "args": args, "result": result})

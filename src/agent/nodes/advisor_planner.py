@@ -5,6 +5,7 @@ from langchain_core.language_models import BaseChatModel
 from pydantic import BaseModel, Field
 
 from agent.state import AgentState
+from ui import render_node, render_node_status
 
 
 # ---------------------------------------------------------------------------
@@ -368,6 +369,7 @@ class AdvisorPlannerNode:
         self.extraction_model = extraction_model
 
     def __call__(self, state: AgentState) -> dict:
+        render_node("advisor_planner")
         summary = state.get("summary", "")
         messages = list(state.get("messages", []))
 
@@ -415,7 +417,7 @@ class AdvisorPlannerNode:
             {"tool_name": step.tool_name, "args": _step_to_args(step)}
             for step in sanitized
         ]
-        print(f"\n[Planner] Created plan: {[s['tool_name'] for s in plan_steps]}")
+        render_node_status(f"[Planner] Created plan: {[s['tool_name'] for s in plan_steps]}")
         return {
             "advisor_plan": plan_steps,
             "advisor_last_tool_results": [],   # reset accumulated results for new turn
