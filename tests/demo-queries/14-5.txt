@@ -1,0 +1,27 @@
+flow 1 - connection and information
+
+I want to plan a 3-day trip from New York to Berlin. My total budget for the entire trip (flights and hotel) is $750.
+
+
+
+flow 2 - rec -> resume -> plan:
+
+I'm planning a family trip with kids aged 7 and 10. Where should we go, what activities would suit them, and when is the best time to visit?
+
+-- exit --
+
+remind me the options you have suggested
+
+the London option sounds good. plan a 4 days trip there from Israel
+
+about 2000$
+
+
+
+flow 3 - from recommend to plan
+
+When is the best time to visit Tokyo?
+
+sounds good! plan this trip for me
+
+i will start in Israel, travel for 4 days and my budget is 1500$

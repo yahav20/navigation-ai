@@ -40,7 +40,7 @@ class SummaryNode:
             5. CRITICAL: If the system found specific flights or hotels (e.g., from tool responses),
                summarize their details (airline, flight numbers, hotel names, prices) so the agent
                remembers them for the next turn.
-            6. CRITICAL: If the last turn was a destination recommendation (the agent recommended
+            6. CRITICAL: If the last turn was a destination advisor (the agent recommended
                cities to visit), record the recommended cities by name so the user can refer back
                to them next turn (e.g. "sounds good, let's go there", "book the first one",
                "plan a trip to that city"). This enables the planning agent to resolve the

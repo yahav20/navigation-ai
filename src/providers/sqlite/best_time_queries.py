@@ -1,4 +1,4 @@
-"""SQLite queries for best-time-to-visit recommendations."""
+"""SQLite queries for best-time-to-visit advisor."""
 
 
 class SQLiteBestTimeQueriesMixin:
@@ -14,7 +14,7 @@ class SQLiteBestTimeQueriesMixin:
             (city.strip().lower(),),
         )
         if not rows:
-            return {"message": f"No recommendations found for {city}."}
+            return {"message": f"No advisor found for {city}."}
         return {
             "months": [m.strip() for m in rows[0]["months"].split(",")],
             "reason": rows[0]["reason"],

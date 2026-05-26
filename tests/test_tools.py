@@ -91,7 +91,7 @@ def test_get_best_time_to_visit_no_data():
     result = get_best_time_to_visit.invoke({"city": "Atlantis"})
     assert isinstance(result, dict)
     assert "message" in result
-    assert "No recommendations found" in result["message"]
+    assert "No advisor found" in result["message"]
 
 # --- Tests for get_average_weather ---
 def test_get_average_weather_valid_data():

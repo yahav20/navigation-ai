@@ -13,12 +13,12 @@ def after_enrichment(state: AgentState) -> str:
 
     if not state.get("enrichment_complete", False):
         return END
-        
+
     intent = state.get("intent", "other")
-    
+
     if intent == "build_itinerary":
         return "itinerary_planner"
-        
+
     return "flight_search"
 
 
@@ -34,15 +34,13 @@ def after_travel_agent(state: AgentState) -> str:
     return "formatter" if state.get("travel_plan") else "summary"
 
 
-
-
 def after_security_gate(state: AgentState) -> str:
     """Route to router if safe, or skip directly to summary if blocked."""
     last_message = state["messages"][-1]
-    
+
     if getattr(last_message, "name", "") == "security_gate":
         return "summary"
-        
+
     return "router"
 
 
@@ -54,8 +52,8 @@ def after_router(state: AgentState) -> str:
         return "extract_metadata"
     elif intent == "update_travel_plan":
         return "adjustments"
-    elif intent == "recommendations":
-        return "rec_agent"
+    elif intent == "advisor":
+        return "advisor_planner"
     elif intent == "build_itinerary":
         return "extract_metadata"
     elif intent == "general_chat":
@@ -78,23 +76,3 @@ def chat_should_continue(state: AgentState) -> str:
         return "chat_tools"
 
     return "summary"
-
-
-REC_MAX_STEPS = 4
-
-def rec_should_continue(state: AgentState) -> str:
-    """Route to rec_tools if the agent issued tool calls, otherwise send to rec_formatter.
-
-    REC_MAX_STEPS is intentionally low — recommendation queries should rarely need more
-    than 3 tool turns. A high step count is a symptom of the agent over-tooling.
-    """
-    last_message = state["messages"][-1]
-    step_count = state.get("step_count", 0)
-
-    if step_count >= REC_MAX_STEPS:
-        return "rec_formatter"
-
-    if getattr(last_message, "tool_calls", None):
-        return "rec_tools"
-
-    return "rec_formatter"
