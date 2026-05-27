@@ -69,87 +69,22 @@ PREREQUISITE_STEPS = {
 
 # ── System Prompt ─────────────────────────────────────────────────────────
 SYSTEM_PROMPT = """
-You are an adaptive travel execution planner inside a multi-agent system.
+You are a travel itinerary planner. Output a minimal ordered list of execution steps.
 
-Your ONLY responsibility: generate a minimal, ordered list of execution steps
-that will produce a complete, feasible itinerary.
+STEP TYPES (use exact names):
+  fetch_flights, fetch_return_flights, fetch_hotels, fetch_weather,
+  fetch_activities, build_day_schedule (needs day=N), verify_budget
 
-You DO NOT execute tools.
-You DO NOT generate the final itinerary.
-You ONLY decide:
-- what steps should run
-- what order they should run in
-- what should be retried
-- what can be skipped during replanning
+RULES:
+- fetch_activities MUST come before all build_day_schedule steps.
+- verify_budget MUST be last.
+- NEVER re-emit steps listed in "completed_steps".
+- On replan: emit only remaining steps, skip completed ones.
+- Each build_day_schedule needs its own entry with the correct day number.
+- If replanning fails due to missing resources, use suggested_adjustments:
+    trip_days (int) to reduce days, or total_budget (float) to raise budget.
 
-SYSTEM ARCHITECTURE:
-- Planner (you):
-    Creates and updates adaptive execution plans.
-- Executor:
-    Executes ONE step at a time using tools autonomously.
-    Returns structured execution results:
-      status: success | failed | retrying | fallback_used
-      data
-      error
-      replan_hint
-      trace
-- Observer:
-    Validates execution results and controls system state transitions.
-    Decides whether to:
-      continue
-      retry
-      replan
-      fallback
-      finalize
-
-AVAILABLE STEP TYPES:
-  fetch_flights         — outbound flights (origin → destination)
-  fetch_return_flights  — return flights (destination → origin)
-  fetch_hotels          — available hotels at destination
-  fetch_weather         — seasonal weather at destination
-  fetch_activities      — activities/attractions at destination
-  build_day_schedule    — deterministic day builder (requires day=N field)
-  verify_budget         — final cost check (must be last)
-
-ARCHITECTURE NOTES:
-  - fetch_activities also runs AI activity-selection internally; it MUST come
-    before all build_day_schedule steps.
-  - build_day_schedule is deterministic — you do NOT specify times or costs.
-  - verify_budget always comes last.
-  - The Executor may fail, retry, or use fallback strategies.
-  - You must use execution history and failures when replanning.
-
-ADAPTIVE RULES:
-  1. Only include steps that are actually needed given the context.
-  2. NEVER re-emit a step listed in "completed_steps" — those results are cached.
-  3. On replan, only emit the REMAINING steps (start from the first incomplete one).
-  4. If a fetch step failed, include it again so the executor retries.
-  5. If budget is a concern, still include verify_budget — do not skip it.
-  6. If a previous build_day_schedule failed for a specific day, re-emit only
-     that day's build_day_schedule step (not all days).
-  7. Prefer minimal viable plans over maximal ones.
-  8. You MAY dynamically add, remove, reorder, or retry steps based on:
-       - execution history
-       - observer feedback
-       - failures
-       - partial results
-  9. NEVER duplicate already completed successful work.
- 10. Avoid infinite retry loops by preferring minimal recovery plans.
- 11. CONSTRAINT RELAXATION: If you see in the REPLAN CONTEXT that a previous attempt failed due to lack of resources (e.g., "no activity candidates after deduplication"), DO NOT blindly retry. 
-  12. Instead, RELAX THE CONSTRAINTS using the `suggested_adjustments` field:
-     - If you ran out of activities, drastically reduce "trip_days" (e.g., {"trip_days": 1}).
-     - If flights/hotels exceed the budget, increase "total_budget" (e.g., {"total_budget": 2000.0}).
-
-ORDERING CONSTRAINTS (non-negotiable):
-  - fetch_activities MUST appear before any build_day_schedule.
-  - verify_budget MUST be the final step.
-  - fetch_* steps should appear before build_day_schedule steps.
-  - build_day_schedule requires all prerequisite fetch steps.
-
-OUTPUT:
-Return ONLY a valid ExecutionPlan tool call (structured JSON).
-You MUST include the 'description' field for every single PlanStep in the JSON.
-Do not output any markdown text or explanations OUTSIDE the JSON function call.
+Output only the structured JSON. Include a description for every step.
 """
 # ── Per-step human prompt builder ─────────────────────────────────────────
 
@@ -337,7 +272,7 @@ def _validate_and_fix(
 
 class ItineraryPlannerNode:
     def __init__(self, llm: BaseChatModel) -> None:
-        self.llm = llm.with_structured_output(ExecutionPlan)
+        self.llm = llm.with_structured_output(ExecutionPlan, method="function_calling")
 
     def __call__(self, state: AgentState) -> dict:
         destination = state.get("destination_city", "")
@@ -414,8 +349,8 @@ class ItineraryPlannerNode:
 
         # ── Validate & fix plan ───────────────────────────────────────────
         effective_trip_days = trip_days
-        if plan.suggested_adjustments and "trip_days" in plan.suggested_adjustments:
-            effective_trip_days = plan.suggested_adjustments["trip_days"]
+        if plan.suggested_adjustments and plan.suggested_adjustments.trip_days is not None:
+            effective_trip_days = plan.suggested_adjustments.trip_days
             
         # הוספת חישוב הימים המושלמים
         comp_days = _completed_days(step_results)
@@ -436,11 +371,12 @@ class ItineraryPlannerNode:
 
         state_updates = {}
         if plan.suggested_adjustments:
-            plan_md += f"\n⚠️ **Constraints Relaxed by AI:** {plan.suggested_adjustments}\n"
-            if "trip_days" in plan.suggested_adjustments:
-                state_updates["trip_days"] = plan.suggested_adjustments["trip_days"]
-            if "total_budget" in plan.suggested_adjustments:
-                state_updates["total_budget"] = plan.suggested_adjustments["total_budget"]
+            adj = plan.suggested_adjustments
+            plan_md += f"\n⚠️ **Constraints Relaxed by AI:** {adj.model_dump(exclude_none=True)}\n"
+            if adj.trip_days is not None:
+                state_updates["trip_days"] = adj.trip_days
+            if adj.total_budget is not None:
+                state_updates["total_budget"] = adj.total_budget
       
 
         result = {

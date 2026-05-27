@@ -89,6 +89,15 @@ def _apply_hotel_preferences(hotels: list[dict], preferences: dict) -> list[dict
     min_stars = preferences.get("min_hotel_stars")
     if isinstance(min_stars, (int, float)):
         result = [hotel for hotel in result if hotel.get("stars", 0) >= min_stars]
+
+    dietary = (preferences.get("dietary_restrictions") or "").lower()
+    if "kosher" in dietary:
+        kosher_hotels = [hotel for hotel in result if hotel.get("is_kosher")]
+        # Only apply the filter if at least one kosher hotel exists; otherwise keep all
+        # and let the agent explain the limitation rather than returning an empty list.
+        if kosher_hotels:
+            result = kosher_hotels
+
     return result
 
 
