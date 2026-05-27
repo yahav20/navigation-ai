@@ -38,7 +38,7 @@ class RefusalDetection(BaseModel):
 
 class TravelAdjustments(BaseModel):
     """Detect if the user explicitly wants to adjust their existing travel parameters."""
-    
+
     is_adjustment: bool = Field(default=False, description="True ONLY if the user is explicitly changing their destination, origin, budget, or trip days.")
     new_destination: str | None = Field(default=None, description="The new destination city, if updated.")
     new_origin: str | None = Field(default=None, description="The new origin city, if updated.")
@@ -112,26 +112,37 @@ class TravelPlan(BaseModel):
 
 class IntentClassification(BaseModel):
     """Classify the user's primary intent to route them to the correct agent."""
-    
+
     intent: Literal[
         "new_travel_plan",
         "update_travel_plan",
-        "recommendations",
+        "advisor",
         "build_itinerary",
         "general_chat",
-        "itinerary",         
-        "update_itinerary"   
     ] = Field(
         description=(
-            "Classify the user's intent strictly following these rules:\n"
-            "- 'new_travel_plan': User wants a general travel package (flights, hotels, and a list of top activities) for a SPECIFIC destination.\n"
-            "- 'update_travel_plan': Changing parameters of an EXISTING travel package (budget, dates, origin/destination).\n"
-            "- 'recommendations': User wants to travel but has NO specific destination yet, looking for ideas.\n"
-            "- 'build_itinerary': User explicitly asks for a DAY-BY-DAY chronological schedule or a time-based routing of attractions.\n"
-            "- 'general_chat': Greetings, casual chat, or general travel questions.\n"
+            "Classify the user's intent. When in doubt, choose 'advisor'.\n"
+            "- 'advisor': The DEFAULT for ALL travel-related queries. Use this for: destination ideas "
+            "('where should I go?'), activities in a city, weather, city profiles, best time to visit, "
+            "trip duration advice, budget exploration, travel recommendations, ANY travel information query. "
+            "Also covers refining search parameters within an ACTIVE ADVISOR FLOW.\n"
+            "- 'new_travel_plan': ONLY when the user commits to a SPECIFIC destination and wants to CHECK "
+            "or BOOK flights, hotels, or costs. (e.g. 'I want to fly to Rome', 'show me hotels in Madrid', "
+            "'let\\'s plan a trip to Tokyo'). Do NOT use just because a city is mentioned.\n"
+            "- 'update_travel_plan': Changing parameters (budget, days, destination) of an ALREADY-PLANNED trip.\n"
+            "- 'build_itinerary': ONLY when user EXPLICITLY requests a day-by-day schedule or itinerary. "
+            "Trigger phrases: 'build an itinerary', 'plan my days', 'day-by-day schedule'. "
+            "Questions like 'how should I split my time' or 'how many days per city' are 'advisor', NOT 'build_itinerary'.\n"
+            "- 'general_chat': ONLY for pure non-travel conversation — greetings ('hello', 'hi', 'thanks'), "
+            "'what can you do?', completely off-topic chat. NEVER use for ANY travel-related question.\n"
         )
     )
     has_explicit_destination: bool = Field(
         default=False,
-        description="True ONLY if the user explicitly names a destination city or country in their message."
+        description=(
+            "True ONLY if the user explicitly names a DESTINATION city (where they want TO GO or VISIT), "
+            "not their origin/current/departure city. "
+            "Example: 'I want to fly to Rome' → True (Rome is destination). "
+            "'I\\'m flying FROM Tel Aviv' → False (Tel Aviv is origin, not destination)."
+        )
     )

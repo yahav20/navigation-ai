@@ -110,10 +110,13 @@ def _run_turn(
     initial_state = {"messages": [("user", user_input)], "step_count": 0}
     last_content = ""
 
+    _SELF_REPORTING_NODES = {"advisor_planner", "advisor_executor", "advisor_replanner"}
     with ui.thinking(current_state) as display:
         for mode, data in graph.stream(initial_state, config, stream_mode=["values", "updates"]):
             if mode == "updates":
-                ui.render_node(next(iter(data)))
+                node_name = next(iter(data))
+                if node_name not in _SELF_REPORTING_NODES:
+                    ui.render_node(node_name)
                 continue
 
             messages = data.get("messages", [])
