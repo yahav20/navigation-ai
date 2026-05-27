@@ -301,13 +301,7 @@ def _render_alternatives(
         f"within your constraints (${budget} · {trip_days} days).\n",
         "Here are culturally similar alternatives with available flights:\n",
     ]
-    emojis = ["1️⃣", "2️⃣", "3️⃣"]
-    for i, city in enumerate(alternatives):
-        # Prevent index out of bounds if more than 3 alternatives bypass the slicing somehow
-        emoji = emojis[i] if i < len(emojis) else "📍"
-        lines.append(f"## {emoji} {city}")
-        lines.append(f"Direct or connecting flights available from **{origin}**. "
-                     f"Similar culture and travel vibe to {original}.\n")
+  
     lines += [
         "---",
         "💬 Reply with a city name and I'll plan your full itinerary!",

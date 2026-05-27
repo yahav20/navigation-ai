@@ -11,7 +11,9 @@ from pydantic import BaseModel, Field
 # ---------------------------------------------------------------------------
 
 class PlanStep(BaseModel):
-    step_id: int
+    step_id: int = Field(
+        description="The sequential ID of the step."
+    )
     step_type: Literal[
         "fetch_flights",
         "fetch_return_flights",
@@ -20,9 +22,16 @@ class PlanStep(BaseModel):
         "fetch_weather",
         "build_day_schedule",
         "verify_budget",
-    ]
-    description: str         
-    day: Optional[int] = None
+    ] = Field(
+        description="The exact type of step to execute."
+    )
+    description: str = Field(
+        description="A short, human-readable description of what this step does (e.g., 'Fetch hotels in Paris' or 'Build schedule for Day 2')."
+    )         
+    day: Optional[int] = Field(
+        default=None, 
+        description="The specific day number, required ONLY if step_type is 'build_day_schedule'."
+    )
 
 
 class ExecutionPlan(BaseModel):
@@ -31,6 +40,10 @@ class ExecutionPlan(BaseModel):
     total_days: int
     steps: List[PlanStep]
     retry_count: int = 0
+    suggested_adjustments: Optional[dict] = Field(
+        default=None,
+        description="Use this to relax constraints if replanning fails. Keys can be 'trip_days' (int) or 'total_budget' (float). Example: {'trip_days': 2} if you lack activities."
+    )
 
 
 # ---------------------------------------------------------------------------

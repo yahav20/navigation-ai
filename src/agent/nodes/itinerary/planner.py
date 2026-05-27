@@ -135,6 +135,10 @@ ADAPTIVE RULES:
        - partial results
   9. NEVER duplicate already completed successful work.
  10. Avoid infinite retry loops by preferring minimal recovery plans.
+ 11. CONSTRAINT RELAXATION: If you see in the REPLAN CONTEXT that a previous attempt failed due to lack of resources (e.g., "no activity candidates after deduplication"), DO NOT blindly retry. 
+  12. Instead, RELAX THE CONSTRAINTS using the `suggested_adjustments` field:
+     - If you ran out of activities, drastically reduce "trip_days" (e.g., {"trip_days": 1}).
+     - If flights/hotels exceed the budget, increase "total_budget" (e.g., {"total_budget": 2000.0}).
 
 ORDERING CONSTRAINTS (non-negotiable):
   - fetch_activities MUST appear before any build_day_schedule.
@@ -143,9 +147,9 @@ ORDERING CONSTRAINTS (non-negotiable):
   - build_day_schedule requires all prerequisite fetch steps.
 
 OUTPUT:
-Return ONLY a valid ExecutionPlan (structured JSON).
-No markdown.
-No explanation.
+Return ONLY a valid ExecutionPlan tool call (structured JSON).
+You MUST include the 'description' field for every single PlanStep in the JSON.
+Do not output any markdown text or explanations OUTSIDE the JSON function call.
 """
 # ── Per-step human prompt builder ─────────────────────────────────────────
 
@@ -200,7 +204,23 @@ def _completed_step_types(step_results: dict) -> list[str]:
             completed.append(step_type)
     return completed
 
-
+def _completed_days(step_results: dict) -> set[int]:
+    """
+    Return a set of day numbers that have been successfully built.
+    """
+    days = set()
+    for key, val in step_results.items():
+        if not key.startswith("build_day_schedule"):
+            continue
+        if isinstance(val, dict) and val.get("error"):
+            continue
+        if isinstance(val, dict) and val.get("status") in ["failed", "retrying"]:
+            continue
+            
+        inner = val.get("data", val) if isinstance(val, dict) else val
+        if isinstance(inner, dict) and isinstance(inner.get("day"), int):
+            days.add(inner["day"])
+    return days
 def _parse_replan_context(observer_reason: str) -> Optional[dict]:
     """
     Try to parse a JSON replan context from the observer_reason string.
@@ -225,23 +245,20 @@ def _parse_replan_context(observer_reason: str) -> Optional[dict]:
 
 
 # ── Validation & sanitisation ──────────────────────────────────────────────
-
 def _validate_and_fix(
     plan: ExecutionPlan,
     completed: list[str],
     trip_days: int,
     destination: str,
     origin: str,
+    completed_days: set[int] = None,
 ) -> ExecutionPlan:
     """
-    Post-process the LLM plan to enforce hard constraints:
-      1. Remove steps whose step_type is already completed.
-      2. Ensure fetch_activities precedes build_day_schedule.
-      3. Ensure verify_budget is last.
-      4. Fill in missing day= fields for build_day_schedule.
-      5. Remove duplicate step_types (keep first occurrence, except build_day_schedule).
-      6. Re-number step_ids sequentially.
+    Post-process the LLM plan to enforce hard constraints.
     """
+    if completed_days is None:
+        completed_days = set()
+        
     steps = plan.steps
 
     # 1. Drop already-completed non-build steps
@@ -272,14 +289,22 @@ def _validate_and_fix(
             step_type="fetch_activities",
             description=f"Activities in {destination} + AI selection",
         ))
+        
+    # ================================================================
+    # התיקון הגדול: סינון ימים חורגים ודילוג על ימים שכבר הושלמו
     build_steps = [
         s for s in build_steps
-        if s.day is not None
+        if s.day is not None 
+        and s.day <= trip_days           # מוחק את יום 2 אם קיצרנו ליום 1
+        and s.day not in completed_days  # מוחק ימים שכבר נבנו בהצלחה
     ]
+    
     # 4. Fill missing days in build_day_schedule
     existing_days = {s.day for s in build_steps if s.day}
     all_days = set(range(1, trip_days + 1))
-    missing_days = sorted(all_days - existing_days)
+    required_days = all_days - completed_days # לא לדרוש ימים שכבר סיימנו!
+    missing_days = sorted(required_days - existing_days)
+    # ================================================================
 
     for d in missing_days:
         build_steps.append(PlanStep(
@@ -389,9 +414,16 @@ class ItineraryPlannerNode:
             plan = _default_plan(destination, origin, trip_days, replan_count, completed)
 
         # ── Validate & fix plan ───────────────────────────────────────────
-        plan = _validate_and_fix(plan, completed, trip_days, destination, origin)
+        effective_trip_days = trip_days
+        if plan.suggested_adjustments and "trip_days" in plan.suggested_adjustments:
+            effective_trip_days = plan.suggested_adjustments["trip_days"]
+            
+        # הוספת חישוב הימים המושלמים
+        comp_days = _completed_days(step_results)
 
-        # ── Build log ────────────────────────────────────────────────────
+        # שימוש ב-effective_trip_days וב-comp_days
+        plan = _validate_and_fix(plan, completed, effective_trip_days, destination, origin, comp_days)
+
         plan_md += "\n📝 **Execution Plan:**\n"
         for step in plan.steps:
             day_tag = f" (Day {step.day})" if step.day else ""
@@ -403,23 +435,33 @@ class ItineraryPlannerNode:
         if completed:
             plan_md += f"\n⏩ **Skipping already-completed steps:** {', '.join(f'`{s}`' for s in completed)}\n"
 
-        return {
+        state_updates = {}
+        if plan.suggested_adjustments:
+            plan_md += f"\n⚠️ **Constraints Relaxed by AI:** {plan.suggested_adjustments}\n"
+            if "trip_days" in plan.suggested_adjustments:
+                state_updates["trip_days"] = plan.suggested_adjustments["trip_days"]
+            if "total_budget" in plan.suggested_adjustments:
+                state_updates["total_budget"] = plan.suggested_adjustments["total_budget"]
+      
+
+        result = {
             "current_step_index": 0,
             "itinerary_plan": {
                 "execution_plan": plan.model_dump(),
-                "step_results": step_results,  # preserve cached results
+                "step_results": step_results, 
                 "retry_count": retry_count,
                 "replan_count": replan_count + 1,
                 "observer_reason": "",
-                # Carry the fallback's monotonic recovery counter through the
-                # rebuilt plan dict — it is the loop's termination invariant and
-                # must never reset just because the Planner regenerated a plan.
                 "recovery_attempts": prev_plan.get("recovery_attempts", 0),
             },
             "itinerary_feasible": True,
             "itinerary_fallback_reason": None,
             "messages": [AIMessage(content=plan_md.strip(), name="planner_log")],
         }
+        
+        result.update(state_updates)
+        
+        return result
 
 
 # ── Default / fallback plan ────────────────────────────────────────────────

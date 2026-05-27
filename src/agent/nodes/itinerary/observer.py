@@ -184,7 +184,6 @@ def _unwrap(val: dict) -> dict:
 # ---------------------------------------------------------------------------
 # Layer 1 — Pure Python Validators
 # ---------------------------------------------------------------------------
-
 def validate_schedule(results: dict, budget: float, trip_days: int) -> list[ValidationError]:
     """
     Run all structural checks. Returns list of ValidationError objects.
@@ -195,8 +194,22 @@ def validate_schedule(results: dict, budget: float, trip_days: int) -> list[Vali
     for key, val in results.items():
         if not key.startswith("build_day_schedule") or not isinstance(val, dict):
             continue
+            
+        # =======================================================
+        # תיקון 1: דילוג על צעדים שנכשלו (שאריות מ-replans קודמים)
+        if val.get("status") == "failed" or val.get("error"):
+            continue
+        # =======================================================
+
         day_data = _unwrap(val)
         day = day_data.get("day", "?")
+        
+        # =======================================================
+        # תיקון 2: דילוג על ימים שבוטלו בעקבות Constraints Relaxation
+        if isinstance(day, int) and day > trip_days:
+            continue
+        # =======================================================
+
         slots = day_data.get("slots", [])
 
         if not slots:
@@ -586,8 +599,8 @@ class ItineraryObserverNode:
                          if e.code not in HARD_ERROR_CODES and e.code not in MEAL_CODES]
 
         # Meal errors: only replan if ALL three are missing (implies data issue)
-        if len(meal_errors) == 3 and not hard_errors:
-            hard_errors = meal_errors  # treat as hard
+        # if len(meal_errors) == 3 and not hard_errors:
+        #     hard_errors = meal_errors  # treat as hard
 
         if hard_errors:
             # Pick the most critical error to lead the replan context
