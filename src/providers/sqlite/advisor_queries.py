@@ -204,13 +204,14 @@ class AdvisorQueriesMixin:
         city_lower = city.strip().lower()
 
         activities = self._query(
-            """SELECT a.category,
+            """cat.value AS category,
                       GROUP_CONCAT(a.name, ', ') AS activities,
                       COUNT(a.id) AS count
                FROM activities a
                JOIN cities c ON a.city_id = c.id
+               JOIN json_each(a.categories) AS cat
               WHERE LOWER(c.name) = ?
-              GROUP BY a.category
+              GROUP BY cat.value
               ORDER BY count DESC""",
             (city_lower,),
         )
