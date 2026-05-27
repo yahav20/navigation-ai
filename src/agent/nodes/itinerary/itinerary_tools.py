@@ -151,7 +151,6 @@ def search_activities(
     """
     try:
         activities = _fetch_activities(city)
-        # לוג 1: כמות הפעילויות הכללית שחזרה מה-DB
         print(f"[DEBUG] Total activities fetched from DB for {city}: {len(activities)}")
 
         if category:
@@ -164,9 +163,8 @@ def search_activities(
         # Dietary filtering
         if kosher_only:
             activities = [a for a in activities if "kosher" in [feat.lower() for feat in a.get("features", [])]]
-            # לוג 2: כמות הפעילויות הכשרות שנשארו
+    
             print(f"[DEBUG] Kosher activities remaining after filter: {len(activities)}")
-            # לוג 3 (בונוס): הדפסת השמות של הפעילויות הכשרות כדי לוודא שאלו באמת הפעילויות שציפית להן
             kosher_names = [a.get('name') for a in activities]
             print(f"[DEBUG] Kosher activity names: {kosher_names}")
 
@@ -236,10 +234,6 @@ def calculate_trip_cost(
         raise ToolException(f"calculate_trip_cost failed: {e}")
 
 
-# ---------------------------------------------------------------------------
-# ── Backward Compatibility Aliases ─────────────────────────────────────────
-# נועד למנוע שגיאות ייבוא (ImportError) מקבצים ישנים כמו fallback.py ו-planner
-# ---------------------------------------------------------------------------
 fetch_flights = search_outbound_flights
 fetch_return_flights = search_return_flights
 fetch_hotels = search_hotels

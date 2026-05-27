@@ -195,8 +195,6 @@ def validate_schedule(results: dict, budget: float, trip_days: int) -> list[Vali
         if not key.startswith("build_day_schedule") or not isinstance(val, dict):
             continue
             
-        # =======================================================
-        # תיקון 1: דילוג על צעדים שנכשלו (שאריות מ-replans קודמים)
         if val.get("status") == "failed" or val.get("error"):
             continue
         # =======================================================
@@ -205,7 +203,6 @@ def validate_schedule(results: dict, budget: float, trip_days: int) -> list[Vali
         day = day_data.get("day", "?")
         
         # =======================================================
-        # תיקון 2: דילוג על ימים שבוטלו בעקבות Constraints Relaxation
         if isinstance(day, int) and day > trip_days:
             continue
         # =======================================================

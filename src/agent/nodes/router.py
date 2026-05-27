@@ -89,7 +89,7 @@ class RouterNode:
         if final_intent == "update_travel_plan":
             content_lower = last_msg.content.lower()
             # If the user used planning/replanning trigger words, force route to Planner
-            trigger_words = ["replan", "full plan", "schedule", "לוז", "תכנון מלא", "תבנה לי"]
+            trigger_words = ["replan", "full plan", "schedule", "schedule", "plan", "  itinerary", "day-by-day", "day by day", "build my trip", "build this trip", "plan this trip", "sounds good let's do it", "let's go", "I want to go there"]
             if any(word in content_lower for word in trigger_words):
                 final_intent = "build_itinerary"
 

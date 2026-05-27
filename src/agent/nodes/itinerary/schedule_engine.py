@@ -334,8 +334,25 @@ class DayScheduleBuilder:
         if not self._had_dinner and cursor < departure_anchor and cursor.hour >= 18:
             cursor, location = self._inject_dinner(cursor, departure_anchor, location, cfg, meal_candidates)
 
-        return [s.to_dict() for s in self._slots]
+        if cfg.is_last_day and cfg.departure_time:
+            taxi_min = max(AIRPORT_HOTEL_MIN_MINUTES, 45)
+            taxi_cost = TAXI_BASE_COST + 30 * TAXI_COST_PER_KM
+            
+            transfer_start = max(cursor, departure_anchor)
+            transfer_end = transfer_start + timedelta(minutes=taxi_min)
+            
+            self._push(TimeSlot(
+                start=transfer_start,
+                end=transfer_end,
+                slot_type="transport",
+                name="City → Airport transfer",
+                description=f"Taxi to the airport for your {cfg.departure_time} flight",
+                estimated_cost=taxi_cost,
+                transport_mode="taxi"
+            ))
+        # =================================================================
 
+        return [s.to_dict() for s in self._slots]
     # ── Arrival sequence (Day 1 only) ─────────────────────────────────────
 
     def _insert_arrival_sequence(

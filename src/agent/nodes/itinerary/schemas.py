@@ -46,16 +46,12 @@ class ExecutionPlan(BaseModel):
     )
 
 
-# ---------------------------------------------------------------------------
-# Executor output (התווסף לכאן כדי לרכז את כל החוזים במקום אחד)
-# ---------------------------------------------------------------------------
 
 class StepExecutionResult(BaseModel):
     """The strict output schema demanded by the Observer."""
     status: Literal["success", "failed", "retrying", "fallback_used"] = Field(
         description="The outcome of the execution step."
     )
-    # שימוש ב-Any מאפשר לקבל גם מחרוזת JSON שהמודל בטעות יצר
     data: dict | list = Field(
         default_factory=dict, 
         description="The structured data returned by the tool(s) used. Can be dict, list, or JSON string."

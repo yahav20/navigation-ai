@@ -100,7 +100,6 @@ def select_activities_per_day(
         for a in sorted_activities[:25]
     ]
 
-    # 3. יצירת ההודעה הרזה והחסכונית בטוקנים
     user_msg = (
         f"Destination: {destination}\n"
         f"Trip duration: {trip_days} days\n"
@@ -110,7 +109,6 @@ def select_activities_per_day(
     )
 
     try:
-        # אפשר להשאיר את הגבלת הטוקנים של התשובה כדי להיות סופר-בטוחים
         small_llm = llm.bind(max_tokens=600)
         
         raw = small_llm.invoke([

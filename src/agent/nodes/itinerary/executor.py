@@ -89,7 +89,7 @@ def _args_fetch_flights(destination: str, origin: str, **_) -> dict:
     return {"origin": origin, "destination": destination}
 
 def _args_fetch_return_flights(destination: str, origin: str, **_) -> dict:
-    return {"origin": destination, "destination": origin}
+    return {"origin": origin, "destination": destination}
 
 def _args_fetch_hotels(destination: str, prefs: dict, **_) -> dict:
     dietary = str(prefs.get("dietary_restrictions", "")).lower()

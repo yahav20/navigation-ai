@@ -291,18 +291,17 @@ def _validate_and_fix(
         ))
         
     # ================================================================
-    # התיקון הגדול: סינון ימים חורגים ודילוג על ימים שכבר הושלמו
     build_steps = [
         s for s in build_steps
         if s.day is not None 
-        and s.day <= trip_days           # מוחק את יום 2 אם קיצרנו ליום 1
-        and s.day not in completed_days  # מוחק ימים שכבר נבנו בהצלחה
+        and s.day <= trip_days         
+        and s.day not in completed_days 
     ]
     
     # 4. Fill missing days in build_day_schedule
     existing_days = {s.day for s in build_steps if s.day}
     all_days = set(range(1, trip_days + 1))
-    required_days = all_days - completed_days # לא לדרוש ימים שכבר סיימנו!
+    required_days = all_days - completed_days 
     missing_days = sorted(required_days - existing_days)
     # ================================================================
 

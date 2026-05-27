@@ -35,19 +35,15 @@ class ItineraryFormatterNode:
 
     def __call__(self, state: AgentState) -> dict:
         plan_state = state.get("itinerary_plan", {})
-        action = state.get("itinerary_fallback_action", "")
         feasible = state.get("itinerary_feasible", True)
         
-        # Case 1: The itinerary failed and the system proposed alternative destinations (Fallback Alternatives)
-        if action == "suggested_alternatives" or not feasible:
+        if not feasible:
             return self._format_fallback_response(state)
 
-        # Case 2: The itinerary was completed successfully and we have a ready markdown from the Observer
         final_markdown = plan_state.get("final_markdown")
         if final_markdown:
             return {"messages": [AIMessage(content=final_markdown)]}
 
-        # Case 3: Edge case/fallback - an existing plan that wasn't finalized
         return self._format_intermediate_response(state)
 
     def _format_fallback_response(self, state: AgentState) -> dict:
