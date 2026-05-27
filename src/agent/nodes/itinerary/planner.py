@@ -354,10 +354,14 @@ class ItineraryPlannerNode:
 
         # ── Log header ────────────────────────────────────────────────────
         if is_replan:
+            reason_msg = (replan_context.get('error_message', observer_reason_raw)
+                          if replan_context else observer_reason_raw or "continued planning")
+            failed_step = (replan_context.get('failed_step', 'unknown')
+                           if replan_context else 'unknown')
             plan_md = (
                 f"🔄 **REPLANNING** (plan attempt {replan_count + 1}/{MAX_REPLANS})\n"
-                f"*Reason:* {replan_context.get('error_message', observer_reason_raw)}\n"
-                f"*Failed step:* `{replan_context.get('failed_step', 'unknown')}`\n"
+                f"*Reason:* {reason_msg}\n"
+                f"*Failed step:* `{failed_step}`\n"
                 f"*Completed so far:* {completed}\n"
             )
         else:
