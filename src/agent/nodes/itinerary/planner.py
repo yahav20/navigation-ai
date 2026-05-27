@@ -287,6 +287,17 @@ class ItineraryPlannerNode:
         observer_reason_raw = prev_plan.get("observer_reason", "")
         step_results = prev_plan.get("step_results", {})
 
+        # ── Detect fresh user request vs system replan ─────────────────────
+        # observer_reason is the ONLY reliable signal of a system-triggered replan.
+        # replan_count can be > 0 from a previous session — that's stale state.
+        # If observer_reason is empty but step_results exist, this is a fresh
+        # user request (e.g. "rebuild with kosher") — reset all carry-over state.
+        is_replan = bool(observer_reason_raw)
+        if not is_replan and step_results:
+            step_results = {}
+            retry_count = 0
+            replan_count = 0
+
         # ── Hard stop ──────────────────────────────────────────────────────
         if replan_count >= MAX_REPLANS or retry_count >= MAX_RETRIES:
             reason = observer_reason_raw or "max_retries_exceeded"
@@ -301,7 +312,6 @@ class ItineraryPlannerNode:
             }
 
         # ── Context assembly ───────────────────────────────────────────────
-        is_replan = replan_count > 0 or bool(observer_reason_raw)
         replan_context = _parse_replan_context(observer_reason_raw) if is_replan else None
         completed = _completed_step_types(step_results)
 
