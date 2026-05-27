@@ -313,6 +313,26 @@ def seed_travel(conn: sqlite3.Connection) -> None:
         ("paris", "Angelina Paris (Rivoli)", json.dumps(["Food", "Cafe", "Dessert"]), 30, 0, 48.8651, 2.3283, 60, "08:00", "19:00", "1,2,3,4,5,6,7", "MORNING", True, False, 4.5),
         ("paris", "Catacombs of Paris", json.dumps(["History", "Unique", "Indoor"]), 29, 10, 48.8338, 2.3324, 90, "09:45", "20:30", "2,3,4,5,6,7", "AFTERNOON", False, True, 4.6),
         ("paris", "Macaron Baking Class", json.dumps(["Activity", "Food", "Class"]), 55, 12, 48.8732, 2.3291, 90, "10:00", "18:00", "1,2,3,4,5,6", "AFTERNOON", True, True, 4.7),
+        
+        # --- Genuine Kosher & Jewish Heritage Activities in Paris ---
+        ("paris", "Le Marais Jewish Quarter Tour", json.dumps(["Culture", "Walking", "Outdoor"]), 25, 0, 48.8575, 2.3588, 120, "10:00", "16:00", "1,2,3,4,5,6,7", "MORNING", False, True, 4.8),
+        ("paris", "Musée d'Art et d'Histoire du Judaïsme", json.dumps(["Culture", "Museum", "Indoor"]), 10, 0, 48.8611, 2.3553, 120, "11:00", "18:00", "2,3,4,5,7", "AFTERNOON", False, False, 4.6),
+        ("paris", "Memorial de la Shoah", json.dumps(["History", "Museum", "Indoor"]), 0, 10, 48.8553, 2.3561, 150, "10:00", "18:00", "1,2,3,4,5,7", "MORNING", False, False, 4.8),
+        ("paris", "Grande Synagogue de Paris", json.dumps(["History", "Culture", "Indoor"]), 0, 0, 48.8756, 2.3403, 60, "09:00", "17:00", "1,2,3,4,5", "MORNING", False, False, 4.7),
+        
+        # Kosher Food (Breakfast / Morning)
+        ("paris", "Korcarz Kosher Bakery", json.dumps(["Food", "Cafe", "Breakfast"]), 15, 0, 48.8572, 2.3592, 45, "07:30", "19:30", "1,2,3,4,5,7", "MORNING", True, False, 4.8),
+        
+        # Kosher Food (Lunch / Casual)
+        ("paris", "Pitzman Kosher Dairy", json.dumps(["Food", "Casual", "Indoor"]), 20, 0, 48.8576, 2.3595, 60, "11:00", "22:00", "1,2,3,4,5,7", "AFTERNOON", True, False, 4.5),
+        
+        # Kosher Food (Dinner / Evening)
+        ("paris", "Kavod French Kosher Restaurant", json.dumps(["Food", "Fine Dining", "Indoor"]), 80, 0, 48.8711, 2.3022, 120, "18:30", "23:00", "1,2,3,4,5,7", "EVENING", True, True, 4.7),
+        ("paris", "Miel et Paprika Kosher", json.dumps(["Food", "Restaurant", "Casual"]), 35, 0, 48.8680, 2.3600, 90, "12:00", "22:30", "1,2,3,4,5,7", "EVENING", True, True, 4.6),
+        
+        # Social / Evening
+        ("paris", "Chabad Champs-Élysées", json.dumps(["Culture", "Social", "Indoor"]), 0, 0, 48.8705, 2.3045, 90, "09:00", "21:00", "1,2,3,4,5,6,7", "EVENING", True, False, 4.9),
+        
 
         ("london", "London Eye", json.dumps(["Sightseeing", "Viewpoint"]), 30, 0, 51.5033, -0.1195, 60, "10:00", "20:30", "1,2,3,4,5,6,7", "SUNSET", False, True, 4.5),
         ("london", "British Museum", json.dumps(["Culture", "Museum", "Indoor"]), 0, 0, 51.5194, -0.1270, 150, "10:00", "17:00", "1,2,3,4,5,6,7", "MORNING", True, False, 4.8),
@@ -384,6 +404,16 @@ def seed_travel(conn: sqlite3.Connection) -> None:
         ("London Eye", ["Wheelchair Accessible", "Air Conditioned"]),
         ("Mount Fuji Day Trip", ["Guided Tour"]),
         ("Rijksmuseum", ["Wheelchair Accessible", "Air Conditioned", "Vegetarian Options"]),        
+        
+        ("Le Marais Jewish Quarter Tour", ["Guided Tour", "Family Friendly", "Kosher"]),
+        ("Musée d'Art et d'Histoire du Judaïsme", ["Wheelchair Accessible", "Air Conditioned", "Kosher"]),
+        ("Memorial de la Shoah", ["Wheelchair Accessible", "Air Conditioned", "Kosher"]),
+        ("Grande Synagogue de Paris", ["Wheelchair Accessible", "Kosher"]),
+        ("Korcarz Kosher Bakery", ["Kosher", "Vegetarian Options", "Family Friendly"]),
+        ("Kavod French Kosher Restaurant", ["Kosher", "Air Conditioned", "Wheelchair Accessible"]),
+        ("Pitzman Kosher Dairy", ["Kosher", "Vegetarian Options", "Family Friendly"]),
+        ("Miel et Paprika Kosher", ["Kosher", "Family Friendly"]),
+        ("Chabad Champs-Élysées", ["Kosher", "Family Friendly", "Wheelchair Accessible"]),
     ]
     mapping_insert_data = []
     for activity_name, feats in activity_features_map:

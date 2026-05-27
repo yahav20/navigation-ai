@@ -41,7 +41,7 @@ def _fetch_hotels(city: str) -> list[dict]:
 def _fetch_activities(city: str) -> list[dict]:
     """Fetch all activities for a given city."""
     city = validate_city(city)
-    return data_provider.fetch_activities(city)
+    return data_provider.fetch_activities_with_features(city)
 
 
 def _fetch_weather(city: str) -> dict:
@@ -116,20 +116,18 @@ def search_hotels(
     min_stars: Optional[int] = None,
 ) -> list[dict]:
     """
-    Search hotels in a city, optionally filtered by price, stars, and amenities.
+    Search hotels in a city, optionally filtered by price, stars, and kosher status.
     Returns hotels sorted by stars (desc) then price (asc).
     """
     try:
         hotels = _fetch_hotels(city)
         
         if kosher_only:
-            # Checking amenities list based on travel_db.json schema
-            hotels = [
-                h for h in hotels 
-                if "kosher" in [a.lower() for a in h.get("amenities", [])]
-            ]
+            hotels = [h for h in hotels if h.get("is_kosher")]
+            
         if min_stars:
             hotels = [h for h in hotels if h.get("stars", 0) >= min_stars]
+            
         if max_price_per_night:
             hotels = [h for h in hotels if h.get("price_per_night", 9999) <= max_price_per_night]
             
@@ -153,6 +151,8 @@ def search_activities(
     """
     try:
         activities = _fetch_activities(city)
+        # לוג 1: כמות הפעילויות הכללית שחזרה מה-DB
+        print(f"[DEBUG] Total activities fetched from DB for {city}: {len(activities)}")
 
         if category:
             cat_lower = category.lower()
@@ -161,13 +161,19 @@ def search_activities(
                 if cat_lower in str(a.get("category", "")).lower()
             ]
         
-        # Dietary filtering based on Executor parameters
+        # Dietary filtering
         if kosher_only:
-            activities = [a for a in activities if "kosher" in [am.lower() for am in a.get("amenities", [])] or "kosher" in str(a).lower()]
+            activities = [a for a in activities if "kosher" in [feat.lower() for feat in a.get("features", [])]]
+            # לוג 2: כמות הפעילויות הכשרות שנשארו
+            print(f"[DEBUG] Kosher activities remaining after filter: {len(activities)}")
+            # לוג 3 (בונוס): הדפסת השמות של הפעילויות הכשרות כדי לוודא שאלו באמת הפעילויות שציפית להן
+            kosher_names = [a.get('name') for a in activities]
+            print(f"[DEBUG] Kosher activity names: {kosher_names}")
+
         if vegetarian_friendly:
-            activities = [a for a in activities if "vegetarian" in str(a).lower()]
+            activities = [a for a in activities if "vegetarian options" in [feat.lower() for feat in a.get("features", [])]]
         if vegan_friendly:
-            activities = [a for a in activities if "vegan" in str(a).lower()]
+            activities = [a for a in activities if "vegan options" in [feat.lower() for feat in a.get("features", [])]]
 
         if max_price is not None:
             activities = [a for a in activities if a.get("price", 9999) <= max_price]
@@ -237,7 +243,6 @@ def calculate_trip_cost(
 fetch_flights = search_outbound_flights
 fetch_return_flights = search_return_flights
 fetch_hotels = search_hotels
-# הוספתי גם את הפעילויות ליתר ביטחון
 fetch_activities_alias = search_activities
 
 
