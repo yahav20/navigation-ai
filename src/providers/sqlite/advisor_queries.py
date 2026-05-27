@@ -204,7 +204,7 @@ class AdvisorQueriesMixin:
         city_lower = city.strip().lower()
 
         activities = self._query(
-            """cat.value AS category,
+            """SELECT cat.value AS category,
                       GROUP_CONCAT(a.name, ', ') AS activities,
                       COUNT(a.id) AS count
                FROM activities a
