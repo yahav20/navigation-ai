@@ -9,15 +9,11 @@ from agent.state import AgentState
 # Routing Function 1: From Enrichment
 # ---------------------------------------------------------
 def after_enrichment(state: AgentState) -> str:
-    """Route to flight search or itinerary planner when enrichment is complete."""
-
+    """Route to flight search when travel enrichment is complete.
+    build_itinerary no longer passes through here — it goes directly to itinerary_enrichment.
+    """
     if not state.get("enrichment_complete", False):
         return END
-
-    intent = state.get("intent", "other")
-
-    if intent == "build_itinerary":
-        return "itinerary_planner"
 
     return "flight_search"
 
@@ -55,7 +51,8 @@ def after_router(state: AgentState) -> str:
     elif intent == "advisor":
         return "advisor_planner"
     elif intent == "build_itinerary":
-        return "extract_metadata"
+        # Bypass travel enrichment — ItineraryEnrichmentNode handles all field collection
+        return "itinerary_enrichment"
     elif intent == "general_chat":
         return "general_chat"
     else:

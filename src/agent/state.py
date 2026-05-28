@@ -30,12 +30,15 @@ class AgentState(TypedDict):
     intent: str                    # intent classification
 
     # --- Itinerary Step-by-Step Execution ---
-    current_step_index: NotRequired[int]              # Tracks which step the Executor should run next
-    itinerary_feasible: NotRequired[bool]             # True if the plan is progressing successfully, False if failure occurred
-    itinerary_fallback_reason: NotRequired[str]       # The error message/reason that triggered the Replanner or Fallback
-    observer_action: NotRequired[str]                 # Edge routing signal from Observer: "continue", "complete", etc.
-    itinerary_fallback_action: NotRequired[str]       # The action taken by the Fallback node (e.g., "adjusted_days", "suggested_alternatives")
-    itinerary_fallback_alternatives: NotRequired[list[str]] # List of alternative cities suggested by Fallback
+    current_step_index: NotRequired[int]        # Tracks which step the Executor should run next
+    itinerary_feasible: NotRequired[bool]       # True if plan is progressing, False on hard failure
+    itinerary_fallback_reason: NotRequired[str] # Set by Replanner on max retries; read by Formatter
+    itinerary_mode: NotRequired[str]            # "with_travel_data" | "standalone"
+    replanner_action: NotRequired[str]          # Edge routing signal: "continue" | "replan" | "done"
+    itinerary_enrichment_complete: NotRequired[bool]          # True once ItineraryEnrichmentNode passes through
+    itinerary_selected_hotel: NotRequired[dict]               # Raw hotel dict (lat/lng/price) from DB
+    itinerary_selected_outbound_flight: NotRequired[dict]     # Raw outbound flight dict (times/price)
+    itinerary_selected_return_flight: NotRequired[dict]       # Raw return flight dict (times/price)
 
     # --- Advisor ---
     advisor_plan: list                 # list of {tool_name, args} dicts produced by advisor_planner

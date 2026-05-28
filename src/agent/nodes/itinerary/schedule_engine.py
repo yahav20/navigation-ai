@@ -225,7 +225,7 @@ class DayScheduleBuilder:
     def build(self, candidates: list[ActivityCandidate]) -> list[dict]:
         cfg = self.cfg
 
-        day_end = _parse_time(self._date, DAY_END)
+        day_end = _parse_time(self._date, cfg.day_end_time)
         departure_anchor = (
             _parse_time(self._date, cfg.departure_time) - timedelta(minutes=150)
             if cfg.is_last_day and cfg.departure_time
@@ -233,7 +233,7 @@ class DayScheduleBuilder:
         )
 
         # ── Cursor: current time & location ──
-        cursor = _parse_time(self._date, DAY_START_DEFAULT)
+        cursor = _parse_time(self._date, cfg.day_start_time)
         location = GeoPoint(cfg.hotel_lat, cfg.hotel_lng, "Hotel")
 
         # ── Day 1 arrival sequence ──
@@ -538,13 +538,21 @@ class DayScheduleBuilder:
 class DayConfig:
     day_number: int
     total_days: int
-    hotel_name: str
-    hotel_lat: float
-    hotel_lng: float
+
+    # Hotel fields are optional for standalone mode (no booking confirmed).
+    # In standalone mode, executor passes city-centre coordinates derived
+    # from the average lat/lng of the day's activity candidates.
+    hotel_name: str = "accommodation"
+    hotel_lat: float = 0.0
+    hotel_lng: float = 0.0
     hotel_has_breakfast: bool = False
 
     is_first_day: bool = False
-    arrival_time: Optional[str] = None      # "HH:MM" — only Day 1
+    arrival_time: Optional[str] = None      # "HH:MM" — Day 1 with_travel_data only
 
     is_last_day: bool = False
-    departure_time: Optional[str] = None    # "HH:MM" — only last day
+    departure_time: Optional[str] = None    # "HH:MM" — last day with_travel_data only
+
+    # Configurable schedule window — set from user_preferences
+    day_start_time: str = DAY_START_DEFAULT  # "HH:MM"
+    day_end_time:   str = DAY_END            # "HH:MM"
