@@ -2,26 +2,23 @@
 from langchain_core.tools import tool
 
 from providers import SQLiteDataProvider
+from providers.flights import search_flights_with_fallback
 from security import validate_city, validate_positive_number, validate_season
 
 data_provider = SQLiteDataProvider()
 
-# @tool
-# def fetch_flights(origin: str, destination: str) -> list[dict]:
-#     """Fetch available flights between two cities with prices and availability status."""
-#     return data_provider.fetch_flights(origin, destination)
+
 @tool
-def fetch_flights(origin: str, destination: str) -> list[dict]:
-    """Fetch available flights between two cities. Automatically finds direct flights, and if none exist, finds connecting flights."""
+def fetch_flights(origin: str, destination: str, departure_at: str | None = None) -> list[dict]:
+    """Fetch available flights between two cities for an approximate departure date.
+
+    `departure_at` is YYYY-MM-DD for a specific day or YYYY-MM for a whole month.
+    When omitted, defaults to roughly one month from today (month-wide query).
+    API-first with SQLite fallback.
+    """
     origin = validate_city(origin)
     destination = validate_city(destination)
-    direct_flights = data_provider.fetch_flights(origin, destination)
-    has_direct = any("flight_number" in f for f in direct_flights)
-    if not has_direct:
-        connecting_flights = data_provider.find_connecting_flights(origin, destination)
-        if connecting_flights and any("route" in f for f in connecting_flights):
-            return connecting_flights
-    return direct_flights
+    return search_flights_with_fallback(origin, destination, departure_at)
 
 @tool
 def fetch_hotels(city: str, max_price: int | None = None) -> list[dict]:
@@ -73,12 +70,18 @@ def get_average_weather(city: str, season: str) -> dict:
     return data_provider.get_average_weather(city, season)
 
 @tool
-def find_connecting_flights(origin: str, destination: str) -> list[dict]:
+def find_connecting_flights(origin: str, destination: str, departure_at: str | None = None) -> list[dict]:
     """
-    Fetch connecting flights (1 or 2 stops) between an origin and destination.
+    Fetch connecting flights (1+ stops) between an origin and destination.
     Use this tool ONLY when direct flights (fetch_flights) are unavailable or exceed the user's budget.
-    Returns flight routes including total price, intermediate connecting cities, and operating airlines.
+    Returns connecting offers with total price and per-leg route detail. API-first with SQLite fallback.
     """
-    return data_provider.find_connecting_flights(origin, destination)
+    origin = validate_city(origin)
+    destination = validate_city(destination)
+    offers = search_flights_with_fallback(origin, destination, departure_at)
+    return [
+        o for o in offers
+        if isinstance(o, dict) and ((o.get("transfers") or 0) >= 1 or o.get("route"))
+    ]
 
 tools = [fetch_flights, fetch_hotels, calculate_trip_cost, fetch_activities, get_best_time_to_visit, get_average_weather]

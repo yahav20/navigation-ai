@@ -7,24 +7,23 @@ from tools.tools import (
     get_average_weather
 )
 
-# --- Tests for fetch_flights ---
+# --- Tests for fetch_flights (Travelpayouts-backed) ---
 def test_fetch_flights_valid_route():
-    # Assuming travel_db.json has a flight from New York to Los Angeles
+    # Major real-world route — the Travelpayouts feed should always have offers.
     result = fetch_flights.invoke({"origin": "New York", "destination": "London"})
     assert isinstance(result, list)
     assert len(result) > 0
-    assert "flight_number" in result[0]
-    assert "price" in result[0]
-    assert "availability" in result[0]
-    assert "airline" in result[0]
-    
-def test_fetch_flights_no_flights():
-    # Assuming travel_db.json has no flights from New York to Tokyo
-    result = fetch_flights.invoke({"origin": "New York", "destination": "Tokyo"})
+    sample = result[0]
+    # Either a direct flight (flight_number + price) or a connecting route (total_price + route).
+    assert ("flight_number" in sample and "price" in sample and "airline" in sample) \
+        or ("route" in sample and "total_price" in sample)
+
+
+def test_fetch_flights_unknown_city():
+    # An unresolvable city name has no IATA code, so the tool returns an empty list.
+    result = fetch_flights.invoke({"origin": "Atlantis", "destination": "Wakanda"})
     assert isinstance(result, list)
-    assert len(result) == 1
-    assert "message" in result[0]
-    assert "No available flights" in result[0]["message"]
+    assert result == []
     
 # --- Tests for fetch_hotels ---
 def test_fetch_hotels_valid_city():

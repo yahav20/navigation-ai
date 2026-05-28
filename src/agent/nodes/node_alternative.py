@@ -5,6 +5,7 @@ from langchain_core.messages import AIMessage
 from pydantic import BaseModel, Field
 
 from agent.state import AgentState
+from providers.flights import search_flights_with_fallback
 from tools.dependencies import data_provider
 
 
@@ -87,6 +88,7 @@ Candidates:
         budget_optional = state.get("budget_optional", False)
         apply_budget = bool(budget) and not budget_optional
         trip_days = state.get("trip_days") or 2
+        trip_start = state.get("trip_start")
 
         enriched = []
         seen_cities = set()
@@ -99,7 +101,7 @@ Candidates:
                 continue
             seen_cities.add(key)
 
-            raw_flights = data_provider.fetch_flights(origin, city) or []
+            raw_flights = search_flights_with_fallback(origin, city, trip_start) or []
             flights = [
                 f for f in raw_flights
                 if isinstance(f, dict) and "flight_number" in f
