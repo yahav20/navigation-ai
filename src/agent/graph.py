@@ -26,6 +26,7 @@ from agent.nodes.node_alternative import (
 )
 from agent.nodes.general_chat import GeneralChatNode
 from agent.nodes.router import RouterNode
+from agent.nodes.save_plan import SavePlanPromptNode
 from agent.nodes.advisor_planner import AdvisorPlannerNode
 from agent.nodes.advisor_executor import AdvisorExecutorNode
 from agent.nodes.advisor_formatter import AdvisorFormatterNode
@@ -72,6 +73,7 @@ def build_graph(
     alternative_destination_node = AlternativeDestinationNode(extraction_model)
     formatter_alternative = FormatterAlternativeNode(extraction_model)
     router_node = RouterNode(extraction_model)
+    save_plan_prompt_node = SavePlanPromptNode()
 
     #   -Itinerary
     itinerary_planner_node = ItineraryPlannerNode(response_model)
@@ -103,6 +105,7 @@ def build_graph(
     builder.add_node("flight_search", flight_search_node)
     builder.add_node("travel_agent", travel_agent_node)
     builder.add_node("formatter", formatter)
+    builder.add_node("save_plan_prompt", save_plan_prompt_node)
     builder.add_node("alternative_destination", alternative_destination_node)
     builder.add_node("formatter_alternative", formatter_alternative)
     builder.add_node("summary", summary_node)
@@ -180,7 +183,8 @@ def build_graph(
     )
     builder.add_edge("alternative_destination", "formatter_alternative")
     builder.add_edge("formatter_alternative", "summary")
-    builder.add_edge("formatter", "summary")
+    builder.add_edge("formatter", "save_plan_prompt")
+    builder.add_edge("save_plan_prompt", "summary")
 
     # -----   -Itinerary (Plan & Execute) -----
     builder.add_conditional_edges(

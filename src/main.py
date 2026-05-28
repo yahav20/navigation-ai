@@ -11,6 +11,7 @@ warnings.filterwarnings("ignore", category=LangChainPendingDeprecationWarning)
 
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer  # noqa: E402
 from langgraph.checkpoint.sqlite import SqliteSaver  # noqa: E402
+from langgraph.types import Command  # noqa: E402
 
 import ui  # noqa: E402
 from agent.graph import build_graph  # noqa: E402
@@ -96,7 +97,7 @@ def _interactive_loop(conn: sqlite3.Connection, session_id: str) -> None:
         turn_count += 1
 
         try:
-            current_state = _run_turn(graph, config, user_input, current_state, session_id)
+            current_state = _run_turn(graph, config, user_input, current_state, session_id, prompt_session)
         except Exception as e:  # noqa: BLE001  # top-level handler: report connection/runtime errors to user
             ui.render_error(e)
             break
@@ -108,16 +109,44 @@ def _run_turn(
     user_input: str,
     current_state: tuple[str, str, str, str, str],
     session_id: str = "unknown",
+    prompt_session=None,
 ) -> tuple[str, str, str, str, str]:
-    initial_state = {"messages": [("user", user_input)], "step_count": 0}
-    last_content = ""
+    stream_input: dict | Command = {"messages": [("user", user_input)], "step_count": 0}
+    last_content: list[str] = [""]
 
+    while True:
+        current_state, last_content[0] = _stream_until_pause(
+            graph, config, stream_input, current_state, last_content[0], session_id
+        )
+
+        snapshot = graph.get_state(config)
+        pending = getattr(snapshot, "interrupts", ()) or ()
+        if not pending:
+            return current_state
+
+        payload = pending[0].value if hasattr(pending[0], "value") else pending[0]
+        question = (
+            payload.get("question") if isinstance(payload, dict) else str(payload)
+        ) or "Continue? (yes/no)"
+        ui.render_agent_message("AIMessage", question)
+        answer = ui.ask_user(prompt_session, state=current_state) if prompt_session else input("> ")
+        stream_input = Command(resume=(answer or "").strip())
+
+
+def _stream_until_pause(
+    graph,
+    config: dict,
+    stream_input,
+    current_state: tuple[str, str, str, str, str],
+    last_content: str,
+    session_id: str,
+) -> tuple[tuple[str, str, str, str, str], str]:
     _SELF_REPORTING_NODES = {"advisor_planner", "advisor_executor", "advisor_replanner"}
     # LangGraph emits an `updates` message *after* a node finishes, so the
     # wall-clock between consecutive updates is the latest node's runtime.
     last_node_start = time.perf_counter()
     with ui.thinking(current_state) as display:
-        for mode, data in graph.stream(initial_state, config, stream_mode=["values", "updates"]):
+        for mode, data in graph.stream(stream_input, config, stream_mode=["values", "updates"]):
             if mode == "updates":
                 node_name = next(iter(data))
                 elapsed_ms = (time.perf_counter() - last_node_start) * 1000
@@ -147,7 +176,7 @@ def _run_turn(
             ui.render_agent_message(last_msg.__class__.__name__, content)
             last_content = content
 
-    return current_state
+    return current_state, last_content
 
 
 if __name__ == "__main__":
