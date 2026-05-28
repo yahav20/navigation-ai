@@ -134,7 +134,7 @@ class ItineraryExecutorNode:
             )
 
         elif step.step_type == "verify_budget":
-            result = self._run_verify_budget(results, budget, trip_days, destination, origin, mode)
+            result = self._run_verify_budget(results, budget, trip_days, destination, origin, mode, state)
 
         else:
             result = _wrap_result(
@@ -469,7 +469,7 @@ class ItineraryExecutorNode:
 
     # ── verify_budget handler ──────────────────────────────────────────────
 
-    def _run_verify_budget(self, results, budget, trip_days, destination, origin, mode) -> dict:
+    def _run_verify_budget(self, results, budget, trip_days, destination, origin, mode, state=None) -> dict:
         missing = _missing_prerequisites(results)
         if missing:
             return _wrap_result(
@@ -505,10 +505,15 @@ class ItineraryExecutorNode:
         avg_prices: Optional[dict] = None  # populated in standalone mode for formatter
 
         if mode == "with_travel_data":
-            flight_price    = 0.0
-            ret_price       = 0.0
+            # Read actual flight prices from the resolved raw flights
+            _state = state or {}
+            outbound_fl = _state.get("itinerary_selected_outbound_flight") or {}
+            return_fl   = _state.get("itinerary_selected_return_flight") or {}
+            flight_price = float(outbound_fl.get("price", 0) or 0)
+            ret_price    = float(return_fl.get("price", 0) or return_fl.get("total_price", 0) or 0)
+
+            # Read hotel price from any built day result
             hotel_per_night = 0.0
-            # Read hotel price stored in any built day result
             for key, wrapped in results.items():
                 if key.startswith("build_day_schedule"):
                     dd = _inner_data(wrapped)

@@ -41,6 +41,27 @@ from tools.dependencies import data_provider
 
 DEFAULT_TRIP_DAYS = 3
 
+# Deterministic country → primary city map (mirrors travel enrichment node)
+_COUNTRY_TO_CITY: dict[str, str] = {
+    "israel": "Tel Aviv", "france": "Paris", "uk": "London",
+    "england": "London", "britain": "London", "great britain": "London",
+    "usa": "New York City", "united states": "New York City",
+    "united states of america": "New York City", "america": "New York City",
+    "japan": "Tokyo", "germany": "Berlin", "netherlands": "Amsterdam",
+    "holland": "Amsterdam", "spain": "Madrid", "italy": "Rome",
+    "portugal": "Lisbon", "australia": "Sydney", "canada": "Toronto",
+    "china": "Beijing", "india": "Mumbai", "brazil": "São Paulo",
+    "mexico": "Mexico City", "russia": "Moscow", "turkey": "Istanbul",
+    "greece": "Athens", "thailand": "Bangkok", "uae": "Dubai",
+    "united arab emirates": "Dubai", "south korea": "Seoul", "korea": "Seoul",
+    "egypt": "Cairo", "jordan": "Amman", "morocco": "Casablanca",
+}
+
+
+def _resolve_city(name: str) -> str:
+    """If name is a country, return its primary city. Otherwise return as-is."""
+    return _COUNTRY_TO_CITY.get(name.strip().lower(), name) if name else name
+
 
 # ---------------------------------------------------------------------------
 # Extraction schemas
@@ -101,11 +122,17 @@ class ItineraryEnrichmentNode:
         meta_updates = self._extract_metadata(state)
         updates.update(meta_updates)
 
-        # Merge extracted values with existing state for the remainder of the checks
-        destination = updates.get("destination_city") or state.get("destination_city", "")
-        origin      = updates.get("current_city")     or state.get("current_city", "")
-        trip_days   = updates.get("trip_days")         or state.get("trip_days", 0)
-        budget      = updates.get("total_budget")      or state.get("total_budget", 0)
+        # Merge extracted values with existing state; resolve country names to cities
+        destination = _resolve_city(updates.get("destination_city") or state.get("destination_city") or "")
+        origin      = _resolve_city(updates.get("current_city")     or state.get("current_city") or "")
+        trip_days   = updates.get("trip_days")   or state.get("trip_days", 0)
+        budget      = updates.get("total_budget") or state.get("total_budget", 0)
+
+        # Write resolved city names back into updates if they changed
+        if destination and destination != (updates.get("destination_city") or state.get("destination_city")):
+            updates["destination_city"] = destination
+        if origin and origin != (updates.get("current_city") or state.get("current_city")):
+            updates["current_city"] = origin
 
         # ── Step 2: Ask for missing required fields ────────────────────────
         if not destination:
@@ -197,14 +224,14 @@ class ItineraryEnrichmentNode:
         except Exception:
             return {}
         result = {}
-        if meta.current_city     and not state.get("current_city"):
-            result["current_city"]     = meta.current_city
+        if meta.current_city and not state.get("current_city"):
+            result["current_city"] = _resolve_city(meta.current_city)
         if meta.destination_city and not state.get("destination_city"):
-            result["destination_city"] = meta.destination_city
-        if meta.trip_days        and not state.get("trip_days"):
-            result["trip_days"]        = meta.trip_days
-        if meta.total_budget     and not state.get("total_budget"):
-            result["total_budget"]     = meta.total_budget
+            result["destination_city"] = _resolve_city(meta.destination_city)
+        if meta.trip_days and not state.get("trip_days"):
+            result["trip_days"] = meta.trip_days
+        if meta.total_budget and not state.get("total_budget"):
+            result["total_budget"] = meta.total_budget
         return result
 
     def _extract_prefs(self, state: AgentState, destination: str) -> dict:
@@ -264,12 +291,14 @@ class ItineraryEnrichmentNode:
                 pass
 
         # ── Outbound flight ────────────────────────────────────────────────
-        # Use the cheapest available flight from flight_options, or match by flight number
+        # Prefer a flight arriving before 16:00 so Day 1 has sightseeing time.
+        # If no early option, fall back to cheapest.
         valid_flights = [f for f in flight_options if isinstance(f, dict) and not f.get("message")]
 
         if valid_flights:
             outbound_label = flights_curated[0].get("label", "") if flights_curated else ""
-            outbound = _match_flight(valid_flights, outbound_label) or valid_flights[0]
+            matched = _match_flight(valid_flights, outbound_label)
+            outbound = matched or _pick_best_outbound(valid_flights)
             result["itinerary_selected_outbound_flight"] = outbound
 
         # ── Return flight ──────────────────────────────────────────────────
@@ -301,3 +330,26 @@ def _match_flight(flights: list[dict], label: str) -> Optional[dict]:
         if fn and fn in label:
             return f
     return None
+
+
+def _arrival_hour(flight: dict) -> int:
+    """Parse the hour from a flight's arrival_time string (HH:MM or datetime)."""
+    arr = str(flight.get("arrival_time", "23:59"))
+    if "T" in arr:
+        arr = arr.split("T")[1]
+    try:
+        return int(arr[:5].split(":")[0])
+    except (ValueError, IndexError):
+        return 23
+
+
+def _pick_best_outbound(flights: list[dict]) -> dict:
+    """
+    Pick the outbound flight that gives the most Day 1 sightseeing time.
+    Prefer flights arriving before 16:00; fall back to cheapest available.
+    """
+    if not flights:
+        return {}
+    early = [f for f in flights if _arrival_hour(f) < 16]
+    pool  = early if early else flights
+    return min(pool, key=lambda f: float(f.get("price", 9999)))

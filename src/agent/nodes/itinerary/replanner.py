@@ -41,61 +41,46 @@ MAX_REPLANS = 3   # must match planner.py
 REVIEW_SYSTEM = """
 You are the final travel itinerary quality reviewer AND copywriter.
 
-You receive a structured trip plan summary that includes a Mode field:
-  - "with_travel_data": real flights and hotel were booked by the travel agent.
-  - "standalone": no booking; average market prices were used for estimation.
+STRICT RULES — violating any of these causes immediate failure:
+1. NEVER use "..." to abbreviate. Every table row must be fully written out.
+2. NEVER invent events, activities, or slots not present in the input data.
+3. NEVER leave placeholder text like "$XX", "Tips here", or "[Theme]" in the output.
+4. Output ONLY the markdown — no JSON, no preamble, no explanation.
 
-Your tasks:
+QUALITY CHECK — before writing, verify:
+- Every day has at least 2 activities (meal slots do NOT count as activities).
+- At least one food/restaurant slot exists somewhere in the trip.
+- No logically impossible times (e.g. dinner at 07:00, activity ending before it starts).
+If a SEVERE problem is found, reply ONLY with this JSON (nothing else):
+{"reject": true, "reason": "<one-sentence explanation>"}
 
-1. Check for SEVERE structural problems only:
-   - A day has fewer than 2 activities
-   - No food venue is present across the entire trip
-   - The schedule is logically impossible (e.g. dinner at 07:00)
-
-2. If you find a SEVERE problem, reply ONLY with a JSON object:
-   {"reject": true, "reason": "<one-sentence explanation>"}
-
-3. If the plan is acceptable, output ONLY the final markdown itinerary
-   using the format below. Do NOT wrap it in JSON.
-
-MARKDOWN FORMAT:
+MARKDOWN FORMAT (output this if the plan is acceptable):
 
 # ✈️ Your [N]-Day [Destination] Itinerary
 
-## 🛫 Flights & Accommodation
-*(with_travel_data mode — show real details from OUTBOUND FLIGHT / RETURN FLIGHT / HOTEL lines)*
-**Outbound:** [Airline] [Flight#] | $[price]
-**Return:**   [Airline] [Flight#] | $[price]
-**Hotel:** [Name] — [stars]★ | $[price]/night
+## 📅 Day 1 — [fill in the actual theme from the data]
+| Time | Activity | Duration | Cost |
+|------|----------|----------|------|
+| HH:MM | [icon] [Actual name from data] | X min | $Y |
 
-*(standalone mode — show estimated averages with ~ marker)*
-> 💡 **Estimated prices** (averages — no booking confirmed)
-> ✈️ Outbound flight (~$[price]) · Return flight (~$[price])
-> 🏨 Hotel in [destination] (~$[price]/night)
+*(Render EVERY slot from the data for this day. Never skip rows.)*
+**Day total: $[actual day_cost from data]**
 
-## 📅 Day 1 — [Theme]
-| Time | Activity | Duration | Est. Cost |
-|------|----------|----------|-----------|
-| HH:MM | [icon] [Name] | X min | $Y |
-...
-**Day total: $XX**
-
-[Repeat for each day]
+[Repeat ## 📅 Day N section for every day in the trip]
 
 ---
 ## 💰 Trip Budget Summary
 | Category | Cost |
 |----------|------|
-| Flights (outbound + return) | $X  *(or ~$X avg)* |
-| Hotel ([N] nights) | $X  *(or ~$X avg)* |
-| Activities | $X |
-| Meals | $X |
-| **Grand Total** | **$X** *(or ~$X estimated)* |
+| Hotel ([N] nights) | $[hotel_total from verify_budget] |
+| Activities | $[activities_total from verify_budget] |
+| Meals | $[meals_total from verify_budget] |
+| **Grand Total** | **$[grand_total from verify_budget]** |
 
-✅ Within budget  /  ⚠️ Over budget
+[✅ Within budget / ⚠️ Over budget — based on grand_total vs budget]
 
 ---
-*💡 Tips and local recommendations here.*
+💡 **Paris tips:** [Write 1-2 genuine, specific tips for this destination — never leave this as a placeholder]
 """
 
 
@@ -156,45 +141,63 @@ def _build_summary(
     origin: str = "",
     destination: str = "",
 ) -> str:
+    """
+    Build a compact, LLM-readable summary of the execution results.
+    Avoids sending large raw JSON blobs that cause the LLM to truncate output.
+    """
     lines = [
-        f"Trip: {trip_days} days | Budget: ${budget or 'flexible'} | Mode: {mode}",
+        f"TRIP: {trip_days} days | Destination: {destination} | Origin: {origin} | "
+        f"Budget: ${budget or 'flexible'} | Mode: {mode}",
+        "",
     ]
 
-    # Include flight/hotel context so LLM can render the correct section
-    if mode == "with_travel_data" and travel_plan:
-        flights = travel_plan.get("flights", [])
-        hotels  = travel_plan.get("hotels", [])
-        if flights:
-            f0 = flights[0]
-            lines.append(f"OUTBOUND FLIGHT: {f0.get('label','')} | {f0.get('airline','')} | ${f0.get('price',0):.0f}")
-            if len(flights) > 1:
-                f1 = flights[1]
-                lines.append(f"RETURN FLIGHT: {f1.get('label','')} | {f1.get('airline','')} | ${f1.get('price',0):.0f}")
-        if hotels:
-            h0 = hotels[0]
-            lines.append(f"HOTEL: {h0.get('name','')} | {h0.get('stars','')}★ | ${h0.get('price_per_night',0):.0f}/night")
-    else:
-        # Standalone — pull average prices from verify_budget result if available
-        budget_key = next((k for k in results if k.startswith("verify_budget")), None)
-        if budget_key:
-            b = _unwrap(results.get(budget_key, {}))
-            avg = b.get("avg_prices") if isinstance(b, dict) else None
-            if avg:
-                lines.append(
-                    f"ESTIMATED PRICES (averages, no booking): "
-                    f"flight {origin}→{destination} ~${avg.get('avg_flight_price',400):.0f}, "
-                    f"return ~${avg.get('avg_return_flight_price',400):.0f}, "
-                    f"hotel ~${avg.get('avg_hotel_per_night',120):.0f}/night"
-                )
+    # ── Day schedules (most important — render every slot compactly) ────────
+    for d in range(1, trip_days + 1):
+        key = next(
+            (k for k in results
+             if k.startswith("build_day_schedule")
+             and isinstance(_unwrap(results[k]), dict)
+             and _unwrap(results[k]).get("day") == d),
+            None,
+        )
+        if not key:
+            continue
+        inner = _unwrap(results[key])
+        if not isinstance(inner, dict):
+            continue
+        theme    = inner.get("theme", f"Day {d}")
+        day_cost = inner.get("day_cost", 0)
+        lines.append(f"DAY {d} — {theme} | day_cost: ${day_cost:.0f}")
+        for slot in inner.get("slots", []):
+            t    = slot.get("time", "")
+            et   = slot.get("end_time", "")
+            dur  = slot.get("duration_minutes", 0)
+            stype = slot.get("slot_type", "")
+            name = slot.get("name", "")
+            cost = slot.get("estimated_cost", 0)
+            lines.append(f"  {t}-{et} ({dur}min) [{stype}] {name} ${cost:.0f}")
+        lines.append("")
 
-    for key, val in results.items():
-        if not isinstance(val, dict):
-            continue
-        if val.get("status") == "failed":
-            continue
-        inner = _unwrap(val)
-        lines.append(f"--- {key.upper()} ---")
-        lines.append(json.dumps(inner, ensure_ascii=False)[:800])
+    # ── Budget totals ────────────────────────────────────────────────────────
+    budget_key = next((k for k in results if k.startswith("verify_budget")), None)
+    if budget_key:
+        b = _unwrap(results.get(budget_key, {}))
+        if isinstance(b, dict):
+            totals = {k: v for k, v in b.items()
+                      if k not in ("avg_prices",) and isinstance(v, (int, float))}
+            lines.append(f"BUDGET TOTALS: {json.dumps(totals)}")
+            lines.append("")
+
+    # ── Weather (brief) ──────────────────────────────────────────────────────
+    weather_key = next((k for k in results if k.startswith("fetch_weather")), None)
+    if weather_key:
+        w = _unwrap(results.get(weather_key, {}))
+        if isinstance(w, dict):
+            temp = w.get("temperature") or w.get("avg_temp") or ""
+            season = w.get("season", "")
+            if temp:
+                lines.append(f"WEATHER: {season} {temp}")
+
     return "\n".join(lines)
 
 

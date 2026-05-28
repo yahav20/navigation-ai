@@ -69,53 +69,49 @@ class ItineraryFormatterNode:
     def _header_with_travel_data(
         self, state: AgentState, origin: str, destination: str
     ) -> str:
-        travel_plan = state.get("travel_plan") or {}
-        flights = travel_plan.get("flights", [])
-        hotels  = travel_plan.get("hotels", [])
+        # Use raw resolved flights (have actual flight numbers, times, prices)
+        # travel_plan["flights"] are curated OUTBOUND options — not split outbound/return
+        outbound_raw = state.get("itinerary_selected_outbound_flight") or {}
+        return_raw   = state.get("itinerary_selected_return_flight") or {}
+        travel_plan  = state.get("travel_plan") or {}
+        hotels       = travel_plan.get("hotels", [])
 
         lines = ["## 🛫 Flights & Accommodation"]
 
-        if flights:
-            f0 = flights[0]
-            label    = f0.get("label", "")
-            airline  = f0.get("airline", "")
-            price    = f0.get("price", 0)
-            legs     = f0.get("legs", [])
-            if legs:
-                lines.append(f"**Outbound (connecting):**")
-                for leg in legs:
-                    lines.append(
-                        f"  - {leg.get('airline',airline)} {leg.get('flight_number','')} "
-                        f"| {leg.get('from_city','')} → {leg.get('to_city','')}"
-                    )
-                lines.append(f"  *Total: ${price:.0f}*")
-            else:
-                lines.append(f"**Outbound:** {airline} {label} | ${price:.0f}")
+        # ── Outbound ──────────────────────────────────────────────────────
+        if outbound_raw:
+            out_num     = outbound_raw.get("flight_number", "")
+            out_airline = outbound_raw.get("airline", "")
+            out_dep     = outbound_raw.get("departure_time", "")
+            out_arr     = outbound_raw.get("arrival_time", "")
+            out_price   = float(outbound_raw.get("price", 0) or 0)
+            dep_str     = f" | Dep: {out_dep} → Arr: {out_arr}" if out_dep else ""
+            lines.append(
+                f"**Outbound:** {out_airline} {out_num}{dep_str} | **${out_price:.0f}**"
+            )
+        elif origin and destination:
+            lines.append(f"**Outbound:** {origin} → {destination}")
 
-        if len(flights) > 1:
-            f1 = flights[1]
-            label   = f1.get("label", "")
-            airline = f1.get("airline", "")
-            price   = f1.get("price", 0)
-            legs    = f1.get("legs", [])
-            if legs:
-                lines.append(f"**Return (connecting):**")
-                for leg in legs:
-                    lines.append(
-                        f"  - {leg.get('airline',airline)} {leg.get('flight_number','')} "
-                        f"| {leg.get('from_city','')} → {leg.get('to_city','')}"
-                    )
-                lines.append(f"  *Total: ${price:.0f}*")
-            else:
-                lines.append(f"**Return:** {airline} {label} | ${price:.0f}")
-        elif flights and origin and destination:
-            lines.append(f"**Return:** {destination} → {origin} *(details not specified)*")
+        # ── Return ────────────────────────────────────────────────────────
+        if return_raw:
+            ret_num     = return_raw.get("flight_number", "")
+            ret_airline = return_raw.get("airline", "")
+            ret_dep     = return_raw.get("departure_time", "")
+            ret_arr     = return_raw.get("arrival_time", "")
+            ret_price   = float(return_raw.get("price", 0) or 0)
+            dep_str     = f" | Dep: {ret_dep} → Arr: {ret_arr}" if ret_dep else ""
+            lines.append(
+                f"**Return:** {ret_airline} {ret_num}{dep_str} | **${ret_price:.0f}**"
+            )
+        elif destination and origin:
+            lines.append(f"**Return:** {destination} → {origin} *(details not confirmed)*")
 
+        # ── Hotel ─────────────────────────────────────────────────────────
         if hotels:
             h0 = hotels[0]
-            name  = h0.get("name", "Hotel")
-            stars = h0.get("stars")
-            price = h0.get("price_per_night", 0)
+            name     = h0.get("name", "Hotel")
+            stars    = h0.get("stars")
+            price    = h0.get("price_per_night", 0)
             star_str = f" — {stars}★" if stars else ""
             lines.append(f"\n**🏨 Hotel:** {name}{star_str} | ${price:.0f}/night")
 
