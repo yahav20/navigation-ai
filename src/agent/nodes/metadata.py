@@ -1,5 +1,7 @@
 """Extract travel metadata from the conversation history."""
 # src/agent/nodes/metadata.py
+from datetime import date
+
 from langchain_core.language_models import BaseChatModel
 
 from agent.models import TravelMetadata
@@ -31,6 +33,7 @@ class MetadataNode:
 
         current_trip_days = state.get("trip_days")
         existing_summary = state.get("summary", "")
+        today_iso = date.today().isoformat()
 
         metadata: TravelMetadata = extractor.invoke([
             {
@@ -39,7 +42,9 @@ class MetadataNode:
                 Extract travel metadata from the conversation.
                 Only fill a field if it is explicitly mentioned or very clear.
                 Do not guess. If a field is missing, return null.
-                Extract: current_city, destination_city, budget, trip_days.
+                Extract: current_city, destination_city, budget, trip_days, trip_start.
+
+                Today's date is {today_iso}.
 
                 IMPORTANT — current_city and destination_city must be CITIES, not countries.
                 If the user names a country, resolve it to the primary departure/arrival city:
@@ -66,6 +71,14 @@ class MetadataNode:
                 Example: current is 5, user says "add 2 days" → return 7.
                 Example: current is 5, user says "reduce by 1 day" → return 4.
                 If the user gives an absolute number like "6 days", return that directly.
+
+                IMPORTANT — trip_start resolution:
+                Convert phrases about when the trip happens into a calendar string.
+                - Specific day ("June 10", "leaving August 3rd", "on 2026-07-15") -> YYYY-MM-DD.
+                - Month or season only ("in June", "next month", "around August", "late autumn")
+                  -> YYYY-MM. Resolve relative phrases against today's date above.
+                - If the user says nothing about timing, return null.
+                Never invent a date when none was implied.
                 """,
             },
             *recent_messages,
@@ -75,42 +88,42 @@ class MetadataNode:
         old_dest = state.get("destination_city", "").lower() if state.get("destination_city") else ""
         old_budget = state.get("total_budget")
         old_days = state.get("trip_days")
+        old_start = state.get("trip_start")
+
+        def _invalidate_flights(reset_alternatives: bool = False) -> None:
+            updates["travel_plan"] = {}
+            updates["itinerary_plan"] = {}
+            updates["flight_options"] = []
+            updates["return_flight_options"] = []
+            updates["has_flights"] = False
+            if reset_alternatives:
+                updates["alternative_destinations"] = []
 
         if metadata.current_city is not None:
             new_origin = metadata.current_city.split(",")[0].strip()
             updates["current_city"] = new_origin
-            # If origin changed, invalidate old plans
             if old_origin and new_origin.lower() != old_origin:
-                updates["travel_plan"] = {}
-                updates["itinerary_plan"] = {}
-                updates["flight_options"] = []
-                updates["has_flights"] = False
+                _invalidate_flights()
 
         if metadata.destination_city is not None:
             new_dest = metadata.destination_city.split(",")[0].strip()
             updates["destination_city"] = new_dest
-            # If destination changed, invalidate old plans
             if old_dest and new_dest.lower() != old_dest:
-                updates["travel_plan"] = {}
-                updates["itinerary_plan"] = {}
-                updates["alternative_destinations"] = []
-                updates["flight_options"] = []
-                updates["has_flights"] = False
+                _invalidate_flights(reset_alternatives=True)
 
         if metadata.budget is not None:
             updates["total_budget"] = metadata.budget
             if old_budget is not None and metadata.budget != old_budget:
-                updates["travel_plan"] = {}
-                updates["itinerary_plan"] = {}
-                updates["flight_options"] = []
-                updates["has_flights"] = False
+                _invalidate_flights()
 
         if metadata.trip_days is not None:
             updates["trip_days"] = metadata.trip_days
             if old_days is not None and metadata.trip_days != old_days:
-                updates["travel_plan"] = {}
-                updates["itinerary_plan"] = {}
-                updates["flight_options"] = []
-                updates["has_flights"] = False
+                _invalidate_flights()
+
+        if metadata.trip_start is not None:
+            updates["trip_start"] = metadata.trip_start
+            if old_start is not None and metadata.trip_start != old_start:
+                _invalidate_flights()
 
         return updates

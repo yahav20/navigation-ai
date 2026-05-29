@@ -1,4 +1,6 @@
 """Enrichment gate node and its phase helpers for the travel agent."""
+from datetime import date, timedelta
+
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import ToolMessage
 from langchain_core.runnables import Runnable
@@ -12,6 +14,11 @@ data_provider = SQLiteDataProvider()
 
 OPTION_THRESHOLD = 2
 DEFAULT_TRIP_DAYS = 3
+
+
+def _default_trip_start() -> str:
+    """Fall back to next month (YYYY-MM) if the user skips picking a date."""
+    return (date.today() + timedelta(days=30)).strftime("%Y-%m")
 
 
 # ---------------------------------------------------------------------------
@@ -132,6 +139,13 @@ def _classify_optional_fields(
         else:
             missing_labels.append("number of days for the trip")
             missing_keys.add("trip_days")
+
+    if not state.get("trip_start"):
+        if "trip_start" in asked:
+            extra["trip_start"] = _default_trip_start()  # user was asked but didn't answer — fall back to next month
+        else:
+            missing_labels.append("approximate trip start (a month is fine, e.g. 'June')")
+            missing_keys.add("trip_start")
 
     return extra
 

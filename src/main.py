@@ -1,6 +1,7 @@
 """CLI entry point for the navigation AI agent."""
 import argparse
 import sqlite3
+import time
 import warnings
 from pathlib import Path
 
@@ -61,11 +62,12 @@ def _interactive_loop(conn: sqlite3.Connection, session_id: str) -> None:
     ui.render_banner(CHOSEN_PROVIDER, session_id, CHECKPOINT_DB, resuming)
 
     prompt_session = ui.make_prompt_session()
-    current_state: tuple[str, str, str, str] = (
+    current_state: tuple[str, str, str, str, str] = (
         saved.get("current_city", "None") if saved else "None",
         saved.get("destination_city", "None") if saved else "None",
         saved.get("total_budget", "None") if saved else "None",
         saved.get("trip_days", "None") if saved else "None",
+        saved.get("trip_start", "None") if saved else "None",
     )
     turn_count = 0
 
@@ -104,19 +106,24 @@ def _run_turn(
     graph,
     config: dict,
     user_input: str,
-    current_state: tuple[str, str, str, str],
+    current_state: tuple[str, str, str, str, str],
     session_id: str = "unknown",
-) -> tuple[str, str, str, str]:
+) -> tuple[str, str, str, str, str]:
     initial_state = {"messages": [("user", user_input)], "step_count": 0}
     last_content = ""
 
     _SELF_REPORTING_NODES = {"advisor_planner", "advisor_executor", "advisor_replanner"}
+    # LangGraph emits an `updates` message *after* a node finishes, so the
+    # wall-clock between consecutive updates is the latest node's runtime.
+    last_node_start = time.perf_counter()
     with ui.thinking(current_state) as display:
         for mode, data in graph.stream(initial_state, config, stream_mode=["values", "updates"]):
             if mode == "updates":
                 node_name = next(iter(data))
+                elapsed_ms = (time.perf_counter() - last_node_start) * 1000
+                last_node_start = time.perf_counter()
                 if node_name not in _SELF_REPORTING_NODES:
-                    ui.render_node(node_name)
+                    ui.render_node(node_name, elapsed_ms=elapsed_ms)
                 continue
 
             messages = data.get("messages", [])
@@ -131,6 +138,7 @@ def _run_turn(
                 data.get("destination_city", "None"),
                 data.get("total_budget", "None"),
                 data.get("trip_days", "None"),
+                data.get("trip_start", "None"),
             )
             display.update(current_state)
 

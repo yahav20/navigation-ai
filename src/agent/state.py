@@ -23,8 +23,10 @@ class AgentState(TypedDict):
     trip_days: int                 # number of trip days; defaults to 3 if user skips after being asked
     summary: str                   # rolling conversation summary maintained by summary_node
     alternative_destinations: list # populated when fetch_flights returns no results for the route
-    flight_options: NotRequired[list[dict]]  # deterministic flight results used only for branching/response context
-    has_flights: NotRequired[bool]           # True when flight_options contains usable route data
+    trip_start: NotRequired[str]             # approximate trip start as YYYY-MM-DD or YYYY-MM
+    flight_options: NotRequired[list[dict]]  # deterministic outbound flight results
+    return_flight_options: NotRequired[list[dict]]  # deterministic return flight results (destination -> origin)
+    has_flights: NotRequired[bool]           # True when both outbound and return options are usable
     travel_plan: NotRequired[dict]           # curated TravelPlan dump produced by TravelAgentNode for the formatter
     itinerary_plan: NotRequired[dict]        # curated day-by-day itinerary produced by itinerary agent
     intent: str                    # intent classification

@@ -71,8 +71,16 @@ def render_banner(provider: str, session_id: str, checkpoint_db: Path, resuming:
     console.print(Panel(Markdown(msg), title="agent", border_style="cyan", title_align="left"))
 
 
-def render_node(node: str) -> None:
-    console.print(Rule(Text(node, style="bold magenta"), style="magenta"))
+def render_node(node: str, elapsed_ms: float | None = None) -> None:
+    if elapsed_ms is not None:
+        label = Text.assemble(
+            (node, "bold magenta"),
+            ("  ", ""),
+            (f"{elapsed_ms:,.0f} ms", "dim white"),
+        )
+    else:
+        label = Text(node, style="bold magenta")
+    console.print(Rule(label, style="magenta"))
 
 
 def render_agent_message(msg_type: str, content: str) -> None:
@@ -84,17 +92,18 @@ def render_node_status(msg: str) -> None:
     console.print(Text(f"  {msg.strip()}", style="dim"))
 
 
-def _state_html(state: tuple[str, str, str, str]) -> HTML:
+def _state_html(state: tuple[str, str, str, str, str]) -> HTML:
     def fmt(v: str) -> str:
         s = str(v)
         return "—" if s in {"", "None"} else s
 
-    origin, destination, budget, trip_days = state
+    origin, destination, budget, trip_days, trip_start = state
     fields = [
         ("origin", fmt(origin)),
         ("destination", fmt(destination)),
         ("budget", fmt(budget)),
         ("trip days", fmt(trip_days)),
+        ("est. start", fmt(trip_start)),
     ]
     parts = ["<state.corner>  ╰─ </state.corner>"]
     for i, (label, value) in enumerate(fields):
@@ -128,20 +137,21 @@ class ThinkingDisplay:
     """Live spinner + state line that types out updated values."""
 
     _SECONDS_PER_CHAR = 0.04
+    _FIELD_COUNT = 5
 
-    def __init__(self, state: tuple[str, str, str, str]) -> None:
+    def __init__(self, state: tuple[str, str, str, str, str]) -> None:
         self._state = tuple(state)
-        self._changed_at: list[float] = [float("-inf")] * 4
+        self._changed_at: list[float] = [float("-inf")] * self._FIELD_COUNT
         self._spinner = Spinner(
             "dots",
             text=Text("thinking...", style="bright_magenta"),
             style="bright_magenta",
         )
 
-    def update(self, new_state: tuple[str, str, str, str]) -> None:
+    def update(self, new_state: tuple[str, str, str, str, str]) -> None:
         new_state = tuple(new_state)
         now = time.monotonic()
-        for i in range(4):
+        for i in range(self._FIELD_COUNT):
             if self._state[i] != new_state[i]:
                 self._changed_at[i] = now
         self._state = new_state
@@ -160,6 +170,7 @@ class ThinkingDisplay:
             ("destination", fmt(self._state[1])),
             ("budget", fmt(self._state[2])),
             ("trip days", fmt(self._state[3])),
+            ("est. start", fmt(self._state[4])),
         ]
         line = Text("  ╰─ ", style="bright_magenta")
         for i, (label, value) in enumerate(fields):
@@ -179,7 +190,7 @@ class ThinkingDisplay:
 
 
 @contextmanager
-def thinking(state: tuple[str, str, str, str]):
+def thinking(state: tuple[str, str, str, str, str]):
     """Show a spinner and the live state line while the agent works."""
     display = ThinkingDisplay(state)
     with Live(display, console=console, refresh_per_second=20, transient=True):
@@ -192,7 +203,7 @@ def make_prompt_session() -> PromptSession:
 
 def ask_user(
     session: PromptSession,
-    state: tuple[str, str, str, str] | None = None,
+    state: tuple[str, str, str, str, str] | None = None,
 ) -> str | None:
     """Prompt the user. Renders [input row, state row] directly inline.
 
