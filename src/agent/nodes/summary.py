@@ -4,10 +4,9 @@ from langchain_core.language_models import BaseChatModel
 from agent.llm import silent
 from agent.state import AgentState
 
-MIN_MESSAGES_TO_SUMMARIZE = 3
-# Cap how many recent messages feed the summary LLM so cost stays bounded even
-# though we no longer prune the stored history.
-SUMMARY_CONTEXT_WINDOW = 12
+# A full exchange (the user's message + the agent's reply) is the smallest unit
+# worth folding into memory. Fewer new messages than this and we wait.
+MIN_MESSAGES_TO_SUMMARIZE = 2
 
 
 class SummaryNode:
@@ -18,12 +17,25 @@ class SummaryNode:
         self.extraction_model = extraction_model
 
     def __call__(self, state: AgentState) -> dict:
-        """Update the rolling conversation summary (without pruning history)."""
+        """Fold only the messages added since the last summary into memory.
+
+        We track a watermark (`last_summarized_index`) rather than pruning the
+        transcript: the full history stays in state (so the chat UI never
+        collapses), but each turn the LLM only sees the *new* cycle — the
+        rolling `summary` string carries everything older. This restores the
+        old per-cycle scope without the destructive RemoveMessage pruning.
+        """
         messages = state.get("messages", [])
         existing_summary = state.get("summary", "")
 
-        # We only want to summarize if there has been actual progress
-        if len(messages) < MIN_MESSAGES_TO_SUMMARIZE:
+        # How many messages are already captured in `summary`. Clamp in case the
+        # history shrank since (e.g. a RemoveMessage emitted by another node).
+        start = min(state.get("last_summarized_index", 0), len(messages))
+        new_messages = messages[start:]
+
+        # Only summarize once a fresh exchange has accumulated. When we skip we
+        # leave the watermark untouched so these messages are folded in later.
+        if len(new_messages) < MIN_MESSAGES_TO_SUMMARIZE:
             return {}
 
         summary_prompt = f"""
@@ -54,19 +66,15 @@ class SummaryNode:
 
         response = silent(self.extraction_model).invoke([
             {"role": "system", "content": summary_prompt},
-            *messages[-SUMMARY_CONTEXT_WINDOW:],
+            *new_messages,
         ])
 
-        new_summary = response.content
-
-        # IMPORTANT: do NOT prune the message history here. The rolling `summary`
-        # string above is what carries memory across turns (nodes inject it into
-        # their prompts; e.g. metadata/general_chat). Deleting messages from
-        # state would also erase them from any client that renders the live graph
-        # state — like agent-chat-ui — making the visible conversation collapse
-        # at the end of every turn. Per-turn LLM context is already bounded where
-        # it's consumed (e.g. metadata uses messages[-10:]) and by the window above.
+        # Advance the watermark to the full history length: everything up to here
+        # is now reflected in `summary`. We deliberately do NOT prune the stored
+        # messages — that would erase them from any client rendering live graph
+        # state (e.g. agent-chat-ui) and collapse the visible conversation.
         return {
-            "summary": new_summary,
+            "summary": response.content,
+            "last_summarized_index": len(messages),
             "is_adjustment": False,
         }
