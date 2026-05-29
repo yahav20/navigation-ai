@@ -6,10 +6,9 @@
 # protobuf<6) used by the main CLI env. Keeping the server isolated lets the
 # main env (tavenv) stay on protobuf 5.x so the Gemini provider is unaffected.
 #
-# Setup (use uv — its resolver keeps protobuf at 5.x; plain pip greedily grabs
-# protobuf 6 and warns):
-#   uv venv .lgenv --python 3.12
-#   uv pip install --python .lgenv/bin/python -r requirements-server.txt
+# Setup (plain venv + pip; pip may print a harmless protobuf conflict warning):
+#   python3 -m venv .lgenv
+#   .lgenv/bin/pip install -r requirements-server.txt
 #   .lgenv/bin/langgraph dev --allow-blocking    # serves http://127.0.0.1:2024
 #
 # --allow-blocking is required: graph nodes do synchronous file reads

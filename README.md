@@ -85,29 +85,43 @@ except Exception as e:
     print(f"--- Connection Failed ---\nError details: {e}")
 ```
 
-## Web UI — connect [agent-chat-ui](https://github.com/langchain-ai/agent-chat-ui)
+## Web UI — `atlas-web`
 
 The graph is exposed as a LangGraph server via `langgraph.json` (graph id `agent`,
-factory `src/agent/graph.py:make_graph`), so the official `agent-chat-ui` can drive it.
+factory `src/agent/graph.py:make_graph`). The web frontend lives in **`atlas-web/`** — a
+vendored copy of [agent-chat-ui](https://github.com/langchain-ai/agent-chat-ui) checked
+into this repo and pre-configured (via `atlas-web/.env`) to talk to the local server.
+
+### 1. Start the LangGraph dev server
 
 The dev server needs `langgraph-cli`, whose backend (`langgraph-api`) is best kept in
 **its own virtualenv** — installing it alongside the main app would otherwise force
-`protobuf>=6` and clash with the Gemini SDK (`protobuf<6`). Setup (uses [uv](https://docs.astral.sh/uv/)):
+`protobuf>=6` and clash with the Gemini SDK (`protobuf<6`).
 
 ```bash
-uv venv .lgenv --python 3.12
-uv pip install --python .lgenv/bin/python -r requirements-server.txt
+python3 -m venv .lgenv
+.lgenv/bin/pip install -r requirements-server.txt
 .lgenv/bin/langgraph dev --allow-blocking          # http://127.0.0.1:2024
 ```
 
+> pip may print a `protobuf` dependency-conflict warning while resolving — it's harmless
+> here, since this server env is separate from the Gemini CLI env (`tavenv`).
+
 `--allow-blocking` is required because graph nodes read local files (e.g. `data/travel_db.json`)
-synchronously. Then point the UI at it:
+synchronously.
+
+### 2. Start the `atlas-web` UI
+
+In a second terminal:
 
 ```bash
-npx create-agent-chat-app          # or clone agent-chat-ui and `npm run dev`
-# Deployment URL: http://127.0.0.1:2024
-# Assistant / Graph ID: agent
+cd atlas-web
+npm install
+npm run dev                                        # http://localhost:3000
 ```
+
+`atlas-web/.env` already points the UI at the server (`NEXT_PUBLIC_API_URL=http://localhost:2024`,
+`NEXT_PUBLIC_ASSISTANT_ID=agent`), so it connects on load — open http://localhost:3000.
 
 The CLI (`python src/main.py`) is unchanged and keeps using its own `SqliteSaver`.
 
