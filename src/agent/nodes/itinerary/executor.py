@@ -76,6 +76,7 @@ from agent.nodes.itinerary.itinerary_tools import (
 )
 from agent.nodes.itinerary.schedule_engine import DayConfig, DayScheduleBuilder
 from agent.nodes.itinerary.activity_selector import select_activities_per_day, resolve_candidates
+from agent.llm import silent
 from agent.state import AgentState
 
 # ── Safety limits ──────────────────────────────────────────────────────────
@@ -147,7 +148,7 @@ Respond ONLY as JSON (no markdown fences):
 
 class ItineraryExecutorNode:
     def __init__(self, llm: BaseChatModel) -> None:
-        self.llm = llm
+        self.llm = silent(llm)
 
     # ── Main entry point ───────────────────────────────────────────────────
 

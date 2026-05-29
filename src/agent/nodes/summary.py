@@ -1,10 +1,13 @@
 """Conversation summary node for the travel agent."""
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import RemoveMessage
 
+from agent.llm import silent
 from agent.state import AgentState
 
 MIN_MESSAGES_TO_SUMMARIZE = 3
+# Cap how many recent messages feed the summary LLM so cost stays bounded even
+# though we no longer prune the stored history.
+SUMMARY_CONTEXT_WINDOW = 12
 
 
 class SummaryNode:
@@ -15,7 +18,7 @@ class SummaryNode:
         self.extraction_model = extraction_model
 
     def __call__(self, state: AgentState) -> dict:
-        """Summarize the current state and prune the message history."""
+        """Update the rolling conversation summary (without pruning history)."""
         messages = state.get("messages", [])
         existing_summary = state.get("summary", "")
 
@@ -49,31 +52,21 @@ class SummaryNode:
             Return ONLY the updated summary text.
             """
 
-        response = self.extraction_model.invoke([
+        response = silent(self.extraction_model).invoke([
             {"role": "system", "content": summary_prompt},
-            *messages,
+            *messages[-SUMMARY_CONTEXT_WINDOW:],
         ])
 
         new_summary = response.content
 
-        messages_to_keep_ids = set()
-
-        for m in reversed(messages):
-            if m.type == "human":
-                messages_to_keep_ids.add(m.id)
-                break
-
-        if messages:
-            messages_to_keep_ids.add(messages[-1].id)
-
-        delete_commands = [
-            RemoveMessage(id=m.id)
-            for m in messages
-            if m.id is not None and m.id not in messages_to_keep_ids
-        ]
-
+        # IMPORTANT: do NOT prune the message history here. The rolling `summary`
+        # string above is what carries memory across turns (nodes inject it into
+        # their prompts; e.g. metadata/general_chat). Deleting messages from
+        # state would also erase them from any client that renders the live graph
+        # state — like agent-chat-ui — making the visible conversation collapse
+        # at the end of every turn. Per-turn LLM context is already bounded where
+        # it's consumed (e.g. metadata uses messages[-10:]) and by the window above.
         return {
             "summary": new_summary,
-            "messages": delete_commands,
             "is_adjustment": False,
         }

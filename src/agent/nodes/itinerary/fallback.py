@@ -27,6 +27,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 # Import the updated tools
 from .itinerary_tools import fetch_flights
+from agent.llm import silent
 from agent.state import AgentState
 
 # ── Termination invariant ──────────────────────────────────────────────────
@@ -87,7 +88,7 @@ No explanation, no markdown, no extra keys.
 
 class ItineraryFallbackNode:
     def __init__(self, llm: BaseChatModel) -> None:
-        self.llm = llm
+        self.llm = silent(llm)
 
     def __call__(self, state: AgentState) -> dict:
         reason = state.get("itinerary_fallback_reason", "") or ""

@@ -67,6 +67,7 @@ from langchain_core.language_models import BaseChatModel
 
 from agent.nodes.itinerary.schemas import ExecutionPlan
 from agent.nodes.itinerary.schedule_engine import haversine_km, GeoPoint, WALK_MAX_KM
+from agent.llm import silent
 from agent.state import AgentState
 
 MAX_RETRIES = 3   # replan cycles before hard-stop to Fallback
@@ -478,7 +479,7 @@ def _build_summary(results: dict, budget: float, trip_days: int) -> str:
 
 class ItineraryObserverNode:
     def __init__(self, llm: BaseChatModel) -> None:
-        self.llm = llm
+        self.llm = silent(llm)
 
     def __call__(self, state: AgentState) -> dict:
         plan_state  = state.get("itinerary_plan", {})

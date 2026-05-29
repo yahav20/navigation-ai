@@ -14,6 +14,18 @@ _TOOL_SETS = {
     "advisor": advisor_tools,
 }
 
+# Tag recognized by the LangGraph SDK's `messages` stream mode: any LLM run
+# carrying it is skipped, so its tokens never reach the chat UI. Use it for
+# internal reasoning/extraction calls (structured JSON, rolling summaries,
+# ReAct scratchpads). Only the user-facing formatter and chat nodes should
+# stream — everything else would otherwise leak raw JSON into the GUI.
+NO_STREAM_TAG = "langsmith:nostream"
+
+
+def silent(runnable: Runnable) -> Runnable:
+    """Wrap an LLM/runnable so its tokens are NOT streamed to the client UI."""
+    return runnable.with_config(tags=[NO_STREAM_TAG])
+
 def get_models(provider: str = "google", mode: str = "travel") -> tuple[Runnable, BaseChatModel]:
     """Return (response_or_agent_model, extraction_model) for provider/mode.
 

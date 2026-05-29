@@ -42,6 +42,7 @@ from typing import Optional
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 
+from agent.llm import silent
 from agent.nodes.itinerary.schemas import ExecutionPlan, PlanStep
 from agent.state import AgentState
 
@@ -313,7 +314,7 @@ def _validate_and_fix(
 
 class ItineraryPlannerNode:
     def __init__(self, llm: BaseChatModel) -> None:
-        self.llm = llm.with_structured_output(ExecutionPlan)
+        self.llm = silent(llm.with_structured_output(ExecutionPlan))
 
     def __call__(self, state: AgentState) -> dict:
         destination = state.get("destination_city", "")

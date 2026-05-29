@@ -1,0 +1,21 @@
+# LangGraph dev-server dependencies (backend for langchain-ai/agent-chat-ui).
+#
+# Install into a SEPARATE virtualenv from the main app. `langgraph-cli[inmem]`
+# pulls langgraph-api, which requires protobuf>=6.32 — and that conflicts with
+# the Gemini SDK (langchain-google-genai -> google-ai-generativelanguage,
+# protobuf<6) used by the main CLI env. Keeping the server isolated lets the
+# main env (tavenv) stay on protobuf 5.x so the Gemini provider is unaffected.
+#
+# Setup (use uv — its resolver keeps protobuf at 5.x; plain pip greedily grabs
+# protobuf 6 and warns):
+#   uv venv .lgenv --python 3.12
+#   uv pip install --python .lgenv/bin/python -r requirements-server.txt
+#   .lgenv/bin/langgraph dev --allow-blocking    # serves http://127.0.0.1:2024
+#
+# --allow-blocking is required: graph nodes do synchronous file reads
+# (e.g. data/travel_db.json), which the dev server otherwise rejects.
+#
+# (requirements.txt pins langgraph==1.1.10 so the resolver can't downgrade it.)
+
+-r requirements.txt
+langgraph-cli[inmem]

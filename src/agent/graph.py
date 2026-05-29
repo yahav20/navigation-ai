@@ -50,16 +50,8 @@ from agent.nodes.itinerary.itinerary_edges import (
 )
 
 
-def build_graph(
-    provider: str = "google",
-    checkpointer: BaseCheckpointSaver | None = None,
-) -> CompiledStateGraph:
-    """Build the graph using the specified model provider ('google' or 'groq').
-
-    If no `checkpointer` is supplied, falls back to an in-memory saver so the
-    graph still works for tests and one-shot invocations. Persistent runs
-    should pass a durable checkpointer (e.g. `SqliteSaver`).
-    """
+def _assemble_builder(provider: str = "google") -> StateGraph:
+    """Assemble the travel-agent StateGraph (nodes + edges), uncompiled."""
     # 1. Create nodes for the travel planning path
     response_model, extraction_model = get_models(provider)
 
@@ -240,6 +232,33 @@ def build_graph(
     )
     builder.add_edge("chat_tools", "general_chat")
 
+    return builder
+
+
+def build_graph(
+    provider: str = "google",
+    checkpointer: BaseCheckpointSaver | None = None,
+) -> CompiledStateGraph:
+    """Compile the travel-agent graph for the CLI and tests.
+
+    If no `checkpointer` is supplied, falls back to an in-memory saver so the
+    graph still works for tests and one-shot invocations. Persistent runs
+    should pass a durable checkpointer (e.g. `SqliteSaver`).
+    """
+    builder = _assemble_builder(provider)
     if checkpointer is None:
         checkpointer = MemorySaver(serde=JsonPlusSerializer())
     return builder.compile(checkpointer=checkpointer)
+
+
+def make_graph() -> CompiledStateGraph:
+    """Graph factory for the LangGraph API server (``langgraph dev`` / Platform).
+
+    Referenced by ``langgraph.json``. Compiled WITHOUT a checkpointer — the
+    server supplies its own persistence layer (threads/checkpoints), so a
+    custom saver here would be ignored or conflict. Use ``build_graph`` for the
+    CLI and tests instead.
+    """
+    from config.setting import CHOSEN_PROVIDER
+
+    return _assemble_builder(CHOSEN_PROVIDER).compile()

@@ -2,6 +2,7 @@
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import RemoveMessage
 
+from agent.llm import silent
 from agent.models import TravelAdjustments
 from agent.state import AgentState
 
@@ -11,7 +12,7 @@ class AdjustmentsNode:
 
     def __init__(self, extraction_model: BaseChatModel) -> None:
         """Bind the Adjustments extraction model."""
-        self.extraction_model = extraction_model.with_structured_output(TravelAdjustments)
+        self.extraction_model = silent(extraction_model.with_structured_output(TravelAdjustments))
 
     def __call__(self, state: AgentState) -> dict:
         """Return state updates for explicit trip-parameter changes."""

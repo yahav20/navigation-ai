@@ -85,6 +85,38 @@ except Exception as e:
     print(f"--- Connection Failed ---\nError details: {e}")
 ```
 
+## Web UI — connect [agent-chat-ui](https://github.com/langchain-ai/agent-chat-ui)
+
+The graph is exposed as a LangGraph server via `langgraph.json` (graph id `agent`,
+factory `src/agent/graph.py:make_graph`), so the official `agent-chat-ui` can drive it.
+
+The dev server needs `langgraph-cli`, whose backend (`langgraph-api`) is best kept in
+**its own virtualenv** — installing it alongside the main app would otherwise force
+`protobuf>=6` and clash with the Gemini SDK (`protobuf<6`). Setup (uses [uv](https://docs.astral.sh/uv/)):
+
+```bash
+uv venv .lgenv --python 3.12
+uv pip install --python .lgenv/bin/python -r requirements-server.txt
+.lgenv/bin/langgraph dev --allow-blocking          # http://127.0.0.1:2024
+```
+
+`--allow-blocking` is required because graph nodes read local files (e.g. `data/travel_db.json`)
+synchronously. Then point the UI at it:
+
+```bash
+npx create-agent-chat-app          # or clone agent-chat-ui and `npm run dev`
+# Deployment URL: http://127.0.0.1:2024
+# Assistant / Graph ID: agent
+```
+
+The CLI (`python src/main.py`) is unchanged and keeps using its own `SqliteSaver`.
+
+> **Security note:** input validation (`validate_input`) runs *inside* the graph via
+> `security_gate`, so it protects the UI path too. But `scan_output` (output secret-scanning)
+> and the per-session turn cap (`MAX_TURNS_PER_SESSION`) live only in the CLI loop
+> (`src/main.py`) and are **not** enforced over the web UI. Move them into the graph (e.g. a
+> post-`summary` scan node) if the UI is exposed beyond local dev.
+
 ## Project Structure
 
 ```

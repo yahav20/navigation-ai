@@ -3,6 +3,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import RemoveMessage
 from pydantic import BaseModel, Field
 
+from agent.llm import silent
 from agent.state import AgentState
 
 
@@ -199,7 +200,7 @@ class AdvisorFormatterNode:
 
     def __init__(self, model: BaseChatModel) -> None:
         self.model = model
-        self._city_extractor = model.with_structured_output(_CityExtraction)
+        self._city_extractor = silent(model.with_structured_output(_CityExtraction))
 
     def __call__(self, state: AgentState) -> dict:
         messages = list(state.get("messages", []))

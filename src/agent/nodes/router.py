@@ -1,5 +1,6 @@
 """Router node to classify user intent and direct the graph flow."""
 from langchain_core.language_models import BaseChatModel
+from agent.llm import silent
 from agent.state import AgentState
 from agent.models import IntentClassification
 
@@ -7,7 +8,7 @@ class RouterNode:
     """Classify user intent to route to the appropriate sub-graph."""
 
     def __init__(self, classification_model: BaseChatModel) -> None:
-        self.classification_model = classification_model.with_structured_output(IntentClassification)
+        self.classification_model = silent(classification_model.with_structured_output(IntentClassification))
 
     def __call__(self, state: AgentState) -> dict:
         messages = state.get("messages", [])

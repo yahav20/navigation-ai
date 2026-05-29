@@ -3,6 +3,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage
 from pydantic import BaseModel, Field
 
+from agent.llm import silent
 from agent.state import AgentState
 from agent.nodes.advisor_planner import AdvisorPlan, PlannedToolCall, _step_to_args
 from agent.nodes.advisor_executor import _is_empty, format_tool_result
@@ -103,9 +104,9 @@ class AdvisorReplannerNode:
     """Review execution progress and update the plan or signal completion."""
 
     def __init__(self, extraction_model: BaseChatModel) -> None:
-        self.pruner = extraction_model.with_structured_output(
+        self.pruner = silent(extraction_model.with_structured_output(
             _RemainingPlan, method="function_calling"
-        )
+        ))
 
     def __call__(self, state: AgentState) -> dict:
         render_node("advisor_replanner")

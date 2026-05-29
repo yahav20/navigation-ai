@@ -125,9 +125,14 @@ def _run_turn(
             return current_state
 
         payload = pending[0].value if hasattr(pending[0], "value") else pending[0]
-        question = (
-            payload.get("question") if isinstance(payload, dict) else str(payload)
-        ) or "Continue? (yes/no)"
+        if isinstance(payload, dict) and payload.get("action_requests"):
+            # Agent Inbox HITLRequest schema (shared with agent-chat-ui).
+            action = payload["action_requests"][0]
+            question = action.get("description") or "Continue? (yes/no)"
+        elif isinstance(payload, dict):
+            question = payload.get("question") or "Continue? (yes/no)"
+        else:
+            question = str(payload) or "Continue? (yes/no)"
         ui.render_agent_message("AIMessage", question)
         answer = ui.ask_user(prompt_session, state=current_state) if prompt_session else input("> ")
         stream_input = Command(resume=(answer or "").strip())
