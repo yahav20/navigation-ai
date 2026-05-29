@@ -62,7 +62,7 @@ import math
 from datetime import datetime
 from typing import Optional
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.language_models import BaseChatModel
 
 from agent.nodes.itinerary.schemas import ExecutionPlan
@@ -562,10 +562,9 @@ class ItineraryObserverNode:
                         "itinerary_feasible": False,
                         "itinerary_fallback_reason": f"no_{flight_type}_flights",
                         "observer_action": "no_flights",
-                        "messages": [AIMessage(
-                            content=f"✈️ **No {flight_type} flights found** — routing to alternative destinations.",
-                            name="observer_log",
-                        )],
+                        "progress_log": [
+                            f"✈️ **No {flight_type} flights found** — routing to alternative destinations."
+                        ],
                     }
 
         # ── 2. Not done yet: continue ──
@@ -685,8 +684,8 @@ class ItineraryObserverNode:
             "itinerary_plan": {**plan_state, "final_markdown": markdown},
             "itinerary_feasible": True,
             "observer_action": "complete",
-            "messages": [
-                AIMessage(content=success_msg, name="observer_log"),
+            "progress_log": [
+                success_msg,
             ],
         }
 
@@ -742,14 +741,13 @@ class ItineraryObserverNode:
                     "replan_count": replan_count,
                     "observer_reason": hard_reason,
                 },
-                "messages": [AIMessage(
-                    content=(
+                "progress_log": [
+                    (
                         f"❌ **OBSERVER → FALLBACK** "
                         f"(max retries={MAX_RETRIES} reached)\n"
                         f"*Error:* `{error_code}` — {error_message}"
-                    ),
-                    name="observer_log",
-                )],
+                    )
+                ],
             }
 
         # Soft replan
@@ -763,16 +761,15 @@ class ItineraryObserverNode:
                 "replan_count": replan_count,
                 "observer_reason": observer_reason_json,
             },
-            "messages": [AIMessage(
-                content=(
+            "progress_log": [
+                (
                     f"🔄 **OBSERVER → REPLAN** "
                     f"(attempt {new_retry}/{MAX_RETRIES})\n"
                     f"*Error code:* `{error_code}`\n"
                     f"*Message:* {error_message}\n"
                     f"*Hint:* {replan_hint}"
-                ),
-                name="observer_log",
-            )],
+                )
+            ],
         }
 
 

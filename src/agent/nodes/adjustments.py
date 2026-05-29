@@ -1,6 +1,5 @@
 """Detect and process user adjustments to travel parameters."""
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import RemoveMessage
 
 from agent.llm import silent
 from agent.models import TravelAdjustments
@@ -68,22 +67,21 @@ class AdjustmentsNode:
         if not updates:
             return {}
 
-        # 1. Clear old messages except the latest user message
-        messages_to_delete = [
-            RemoveMessage(id=m.id)
-            for m in messages[:-1]
-            if m.id is not None
-        ]
-        updates["messages"] = messages_to_delete
-
-        # 2. Overwrite summary to force the agent to search again
+        # 1. Overwrite summary to force the agent to search again
+        #
+        # NOTE: We deliberately do NOT prune the message history here. Deleting
+        # messages from state also erases them from any client that renders the
+        # live graph state (e.g. agent-chat-ui), making the visible conversation
+        # collapse mid-turn. The rolling `summary` below — plus the flight/plan
+        # state resets — are what force the re-search; the transcript stays
+        # intact. (Same policy the summary node documents.)
         update_reasons = ", ".join(summary_parts)
         updates["summary"] = f"USER ADJUSTMENTS MADE: {update_reasons}. SYSTEM MUST SEARCH FOR NEW FLIGHTS AND HOTELS."
 
-        # 3. Force re-enrichment
+        # 2. Force re-enrichment
         updates["enrichment_complete"] = False
 
-        # 4. Mark that this was an adjustment, not a brand new request
+        # 3. Mark that this was an adjustment, not a brand new request
         updates["is_adjustment"] = True
 
         # Clear alternative destinations since parameters changed

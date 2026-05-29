@@ -40,7 +40,7 @@ import json
 from typing import Optional
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 
 from agent.llm import silent
 from agent.nodes.itinerary.schemas import ExecutionPlan, PlanStep
@@ -335,11 +335,10 @@ class ItineraryPlannerNode:
             return {
                 "itinerary_feasible": False,
                 "itinerary_fallback_reason": reason,
-                "messages": [AIMessage(
-                    content=f"❌ **MAX RETRIES/REPLANS REACHED** (`replan={replan_count}`, "
-                            f"`retry={retry_count}`). Passing to Fallback.",
-                    name="planner_log",
-                )],
+                "progress_log": [
+                    f"❌ **MAX RETRIES/REPLANS REACHED** (`replan={replan_count}`, "
+                    f"`retry={retry_count}`). Passing to Fallback."
+                ],
             }
 
         # ── Context assembly ───────────────────────────────────────────────
@@ -419,7 +418,7 @@ class ItineraryPlannerNode:
             },
             "itinerary_feasible": True,
             "itinerary_fallback_reason": None,
-            "messages": [AIMessage(content=plan_md.strip(), name="planner_log")],
+            "progress_log": [plan_md.strip()],
         }
 
 

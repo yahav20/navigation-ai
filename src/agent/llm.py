@@ -14,12 +14,16 @@ _TOOL_SETS = {
     "advisor": advisor_tools,
 }
 
-# Tag recognized by the LangGraph SDK's `messages` stream mode: any LLM run
-# carrying it is skipped, so its tokens never reach the chat UI. Use it for
+# Tag recognized by LangGraph's `messages`/`messages-tuple` stream mode: any LLM
+# run carrying it is skipped, so its tokens never reach the chat UI. Use it for
 # internal reasoning/extraction calls (structured JSON, rolling summaries,
 # ReAct scratchpads). Only the user-facing formatter and chat nodes should
 # stream — everything else would otherwise leak raw JSON into the GUI.
-NO_STREAM_TAG = "langsmith:nostream"
+#
+# The exact string MUST be "nostream" — that is langgraph.constants.TAG_NOSTREAM,
+# checked in langgraph/pregel/_messages.py. (The "langsmith:" prefix belongs to
+# TAG_HIDDEN = "langsmith:hidden", a different tag — do not confuse the two.)
+NO_STREAM_TAG = "nostream"
 
 
 def silent(runnable: Runnable) -> Runnable:

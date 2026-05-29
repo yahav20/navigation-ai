@@ -1,10 +1,11 @@
 """Formatter node — turns raw tool data into a warm, conversational advisor response."""
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import RemoveMessage
+from langchain_core.messages import AIMessage, RemoveMessage
 from pydantic import BaseModel, Field
 
 from agent.llm import silent
 from agent.state import AgentState
+from agent.nodes.advisor_replanner import build_data_collected
 
 
 class _CityExtraction(BaseModel):
@@ -226,9 +227,11 @@ class AdvisorFormatterNode:
         )
         current_turn_messages = messages[last_human_idx:]
 
+        data_block = state.get("advisor_data_collected") or build_data_collected([])
         response = self.model.invoke([
             {"role": "system", "content": _SYSTEM_PROMPT},
             *current_turn_messages,
+            AIMessage(content=data_block),
         ])
 
         # Extract city names from the formatted response and accumulate in state.

@@ -1,6 +1,5 @@
 """Replanner node — reviews execution results and decides to continue or finish."""
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage
 from pydantic import BaseModel, Field
 
 from agent.llm import silent
@@ -143,7 +142,7 @@ class AdvisorReplannerNode:
                 render_node_status(f"[Replanner] Plan complete. Proceeding to formatter.")
             return {
                 "advisor_plan": [],
-                "messages": [AIMessage(content=build_data_collected(past_results))],
+                "advisor_data_collected": build_data_collected(past_results),
                 "advisor_replan_count": replan_count + 1,
             }
 
@@ -195,7 +194,7 @@ class AdvisorReplannerNode:
             render_node_status(f"[Replanner] Sufficient data collected. Proceeding to formatter.")
             return {
                 "advisor_plan": [],
-                "messages": [AIMessage(content=build_data_collected(past_results))],
+                "advisor_data_collected": build_data_collected(past_results),
                 "advisor_replan_count": replan_count + 1,
             }
 

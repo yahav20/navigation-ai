@@ -66,7 +66,7 @@ import json
 from typing import Optional
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 
 from agent.nodes.itinerary.schemas import ExecutionPlan
 from agent.nodes.itinerary.itinerary_tools import (
@@ -901,5 +901,5 @@ def _state_update(
             "step_results":      results,
             "execution_history": history,
         },
-        "messages": [AIMessage(content="\n".join(log_lines), name="executor_log")],
+        "progress_log": ["\n".join(log_lines)],
     }
