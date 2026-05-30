@@ -5,6 +5,13 @@ from providers import SQLiteDataProvider
 from providers.flights import search_flights_with_fallback
 from security import validate_city, validate_positive_number, validate_season
 
+# Import new API-backed tools
+from tools.google_maps_hotels import fetch_hotels_gm, get_hotel_filter_options_gm
+from tools.google_maps_attractions import fetch_attractions, fetch_restaurants, fetch_landmarks
+from tools.xotelo_hotels import fetch_hotels_xotelo, fetch_hotels_with_ratings_xotelo
+from tools.geocoding import geocode_location
+from tools.attraction_enrichment import fetch_attraction_details, lookup_wikidata
+
 data_provider = SQLiteDataProvider()
 
 
@@ -84,4 +91,27 @@ def find_connecting_flights(origin: str, destination: str, departure_at: str | N
         if isinstance(o, dict) and ((o.get("transfers") or 0) >= 1 or o.get("route"))
     ]
 
-tools = [fetch_flights, fetch_hotels, calculate_trip_cost, fetch_activities, get_best_time_to_visit, get_average_weather]
+tools = [
+    # Original SQLite-backed tools (kept for backward compatibility & fallback)
+    fetch_flights,
+    fetch_hotels,
+    calculate_trip_cost,
+    fetch_activities,
+    get_best_time_to_visit,
+    get_average_weather,
+    find_connecting_flights,
+    # New Google Maps API-backed tools
+    fetch_hotels_gm,
+    get_hotel_filter_options_gm,
+    fetch_attractions,
+    fetch_restaurants,
+    fetch_landmarks,
+    # New Xotelo API-backed tools
+    fetch_hotels_xotelo,
+    fetch_hotels_with_ratings_xotelo,
+    # New geocoding tool
+    geocode_location,
+    # New Wikipedia/Wikivoyage enrichment tools
+    fetch_attraction_details,
+    lookup_wikidata,
+]
