@@ -76,6 +76,25 @@ def normalize_rating(api_rating: float | None) -> float | None:
     return max(1.0, (api_rating * 4 / 5) + 1)
 
 
+# Fixed USD estimates per star tier (used when Xotelo has no price range)
+_STARS_TO_PRICE = {
+    (4.6, 5.1): 300.0,
+    (4.0, 4.6): 180.0,
+    (3.5, 4.0): 120.0,
+    (0.0, 3.5):  80.0,
+}
+
+
+def _stars_to_price_estimate(stars: float | None) -> float:
+    """Return a fixed USD/night estimate based on normalized star rating."""
+    if stars is None:
+        return 120.0
+    for (lo, hi), price in _STARS_TO_PRICE.items():
+        if lo <= stars < hi:
+            return price
+    return 120.0
+
+
 def _normalize_hotels(hotels: list) -> list[dict]:
     """Normalize Xotelo hotel listing to agent schema."""
     results = []
@@ -88,19 +107,23 @@ def _normalize_hotels(hotels: list) -> list[dict]:
             continue
 
         review = hotel.get("review_summary") or {}
+        # Xotelo uses "minimum"/"maximum" field names (not "min"/"max")
         price_range = hotel.get("price_ranges") or {}
         geo = hotel.get("geo") or {}
 
-        # Normalize price: (min + max) / 2
-        p_min = price_range.get("min")
-        p_max = price_range.get("max")
-        avg_price = None
+        p_min = price_range.get("minimum") or price_range.get("min")
+        p_max = price_range.get("maximum") or price_range.get("max")
+
         if p_min is not None and p_max is not None:
-            avg_price = (p_min + p_max) / 2
+            avg_price = round((float(p_min) + float(p_max)) / 2, 2)
         elif p_min is not None:
-            avg_price = p_min
+            avg_price = round(float(p_min), 2)
         elif p_max is not None:
-            avg_price = p_max
+            avg_price = round(float(p_max), 2)
+        else:
+            # No price range from API — derive fixed estimate from star rating
+            stars = normalize_rating(review.get("rating"))
+            avg_price = _stars_to_price_estimate(stars)
 
         normalized = {
             "name": name,

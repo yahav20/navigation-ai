@@ -174,6 +174,7 @@ def _normalize_place(place: dict) -> dict | None:
         "name": name,
         "place_id": place.get("place_id"),
         "rating": normalize_rating(rating),
+        "review_count": place.get("user_ratings_total"),
         "price_level": price_level,
         "price_level_text": _price_level_text(price_level),
         "lat": geo.get("lat"),
