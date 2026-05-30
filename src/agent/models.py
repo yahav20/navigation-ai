@@ -166,7 +166,7 @@ class TravelPlanCuration(BaseModel):
             "where the airlines, timings, or layover styles complement each other."
         ),
     )
-    hotels: list[HotelPick] = Field(default_factory=list, description="1-3 hotel options chosen from the payload, best first")
+    hotels: list[HotelPick] = Field(default_factory=list, description="Exactly 3 hotel options chosen from the payload (fewer only if payload has fewer than 3). Pick at varied price points: one budget-friendly, one mid-range, one premium — so the user sees real choices.")
     activities: list[ActivityPick] = Field(default_factory=list, description="Up to 5 activities chosen from the payload, respecting user preferences")
     restaurants: list[RestaurantPick] = Field(default_factory=list, description="Up to 3 restaurant picks from the payload's restaurants list")
     sign_off: str = Field(description="One brief closing sentence")

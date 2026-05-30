@@ -39,8 +39,8 @@ Rules:
    - `day_gap`: actual days between departure and return (may be null if dates were unparseable).
    The list is sorted by score = total_price + penalty for `day_gap` deviating from `trip_days`. Aim for VARIETY across the 3 picks (cheapest, fastest, different airlines/times) — do NOT just take the first three. Copy `outbound`, `return_flight`, and `total_price` straight through and write a fresh `description` line.
    When `day_gap` is set, prefer pairings whose gap is close to `trip_days`. If the closest available gap is far off, mention that briefly in the description ("note: return is 6 days out instead of 4 due to schedule").
-3. Pick 1-3 hotels from the payload. For each candidate, check whether it is a good match for the budget (when costs.budget_applied=true). "Good match" is NOT just "cheaper than budget" — when the budget is generous relative to the option's cost, premium/higher-priced options are also a good fit. Example: a $600/night hotel for 4 nights ($2400) is a good fit for a $5000 budget, even if cheaper hotels exist. Don't drop an option just because a cheaper one exists — drop it only if it genuinely doesn't fit the budget.
-4. Pick up to 5 activities that respect user_preferences (e.g. dietary_restrictions, preferred_location).
+3. Pick **exactly 3 hotels** from the payload (fewer only if the payload has fewer than 3 entries). Hotels marked `source: "api"` are live verified options from TripAdvisor/Xotelo — always prefer these. Aim for **price variety**: one budget-friendly option, one mid-range, one premium/luxury — so the user has real choices. When costs.budget_applied=true, all 3 must fit within the budget. "Fits the budget" means flight_outbound + cheapest_return + price_per_night × trip_days ≤ total_budget.
+4. Pick up to 5 activities. Activities with `source: "api"` or `source: "hybrid"` carry live ratings from Google Maps — **prefer these** over `source: "local"` fixtures. Local fixtures are fallback only when no API activity exists in the payload. Respect user_preferences (e.g. dietary_restrictions, preferred_location).
 5. Pick up to 3 restaurants from the payload's `restaurants` list. If the list is empty, output an empty `restaurants` array. For each pick fill: `name` (from payload), `price_tier` (from `price_level_text` or null), `rating` (from payload or null), and a short `description`.
 6. For each pick, write a short one-line description of why it fits.
 7. For every FlightPick inside a pairing (both `outbound` and `return_flight`):
@@ -327,11 +327,24 @@ def build_travel_prompt_payload(state: AgentState) -> dict:
     restaurants: list[dict] = []
 
     if destination:
-        hotels = _valid_items(
-            data_provider.fetch_hotels(destination, max_price=_hotel_max_price(preferences)),
+        # Hotels: use "api" approach (reads from api_hotels cache / Xotelo live).
+        # Fall back to local fixtures only when the API returns nothing.
+        _api_hotels = _valid_items(data_provider.fetch_hotels(destination, approach="api"))
+        if _api_hotels:
+            hotels = _apply_hotel_preferences(_api_hotels, preferences)
+        else:
+            hotels = _apply_hotel_preferences(
+                _valid_items(data_provider.fetch_hotels(destination, approach="local")),
+                preferences,
+            )
+
+        # Activities: use "api" approach (reads from api_attractions cache / Google Maps live).
+        # Fall back to local fixtures only when the API returns nothing.
+        _api_activities = _valid_items(data_provider.fetch_activities(destination, approach="api"))
+        activities = _api_activities if _api_activities else _valid_items(
+            data_provider.fetch_activities(destination, approach="local")
         )
-        hotels = _apply_hotel_preferences(hotels, preferences)
-        activities = _valid_items(data_provider.fetch_activities(destination))
+
         restaurants = _valid_items(data_provider.fetch_restaurants(destination))
         weather = _fetch_weather(destination)
 
@@ -341,6 +354,8 @@ def build_travel_prompt_payload(state: AgentState) -> dict:
 
     budget = state.get("total_budget")
     budget_value = budget if isinstance(budget, (int, float)) else None
+
+    # Build costs using all candidate hotels (before budget filter)
     costs = _build_costs(
         flights,
         return_flights,
