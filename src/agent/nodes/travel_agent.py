@@ -39,7 +39,7 @@ Rules:
    - `day_gap`: actual days between departure and return (may be null if dates were unparseable).
    The list is sorted by score = total_price + penalty for `day_gap` deviating from `trip_days`. Aim for VARIETY across the 3 picks (cheapest, fastest, different airlines/times) — do NOT just take the first three. Copy `outbound`, `return_flight`, and `total_price` straight through and write a fresh `description` line.
    When `day_gap` is set, prefer pairings whose gap is close to `trip_days`. If the closest available gap is far off, mention that briefly in the description ("note: return is 6 days out instead of 4 due to schedule").
-3. Pick **exactly 3 hotels** from the payload (fewer only if the payload has fewer than 3 entries). Hotels marked `source: "api"` are live verified options from TripAdvisor/Xotelo — always prefer these. Aim for **price variety**: one budget-friendly option, one mid-range, one premium/luxury — so the user has real choices. When costs.budget_applied=true, all 3 must fit within the budget. "Fits the budget" means flight_outbound + cheapest_return + price_per_night × trip_days ≤ total_budget.
+3. Pick **exactly 3 hotels** from the payload's **`hotels` array** (fewer only if that array has fewer than 3 entries). Do NOT pick from `activities` — those are sightseeing items, not accommodation. Aim for **price variety**: one budget-friendly, one mid-range, one premium — so the user has real choices. When costs.budget_applied=true, all 3 must fit within the budget (flight_outbound + cheapest_return + price_per_night × trip_days ≤ total_budget). Use the `price_per_night` value from the payload as-is — never write $0 for a hotel.
 4. Pick up to 5 activities. Activities with `source: "api"` or `source: "hybrid"` carry live ratings from Google Maps — **prefer these** over `source: "local"` fixtures. Local fixtures are fallback only when no API activity exists in the payload. Respect user_preferences (e.g. dietary_restrictions, preferred_location).
 5. Pick up to 3 restaurants from the payload's `restaurants` list. If the list is empty, output an empty `restaurants` array. For each pick fill: `name` (from payload), `price_tier` (from `price_level_text` or null), `rating` (from payload or null), and a short `description`.
 6. For each pick, write a short one-line description of why it fits.
@@ -75,8 +75,29 @@ _NO_HOTELS_ADJUSTMENT = (
 )
 
 
+_LODGING_TYPES = {"lodging", "hotel"}
+
+
 def _is_message(item: object) -> bool:
     return isinstance(item, dict) and bool(item.get("message"))
+
+
+def _is_lodging(activity: dict) -> bool:
+    """Return True when a Google Maps activity is a hotel/lodging that should be excluded.
+
+    Checks both the place type tags returned by Google AND the name prefix, because
+    Google sometimes returns real hotels under tourist_attraction without a 'lodging' tag.
+    """
+    cats = activity.get("categories") or []
+    if isinstance(cats, str):
+        try:
+            cats = json.loads(cats)
+        except Exception:
+            cats = []
+    if _LODGING_TYPES & {str(c).lower() for c in cats}:
+        return True
+    name = (activity.get("name") or "").lower().strip()
+    return name.startswith("hotel ") or name.startswith("hôtel ")
 
 
 def _valid_items(items: object) -> list[dict]:
@@ -340,7 +361,12 @@ def build_travel_prompt_payload(state: AgentState) -> dict:
 
         # Activities: use "api" approach (reads from api_attractions cache / Google Maps live).
         # Fall back to local fixtures only when the API returns nothing.
-        _api_activities = _valid_items(data_provider.fetch_activities(destination, approach="api"))
+        # Exclude lodging entries — Google Maps sometimes returns hotels as tourist attractions,
+        # which confuses the LLM into treating them as activities with price=0.
+        _api_activities = [
+            a for a in _valid_items(data_provider.fetch_activities(destination, approach="api"))
+            if not _is_lodging(a)
+        ]
         activities = _api_activities if _api_activities else _valid_items(
             data_provider.fetch_activities(destination, approach="local")
         )
