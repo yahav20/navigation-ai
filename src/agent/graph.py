@@ -1,4 +1,5 @@
 """Build the LangGraph state graph for the travel agent."""
+from langchain_core.messages import AIMessage
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
@@ -47,6 +48,14 @@ from agent.nodes.itinerary.itinerary_edges import (
     after_itinerary_observer,
     after_itinerary_fallback,
 )
+
+
+def _out_of_scope_node(state: AgentState) -> dict:
+    return {"messages": [AIMessage(
+        content="I'm a travel assistant — I can only help with trips, destinations, and travel questions. "
+                "Is there somewhere you'd like to explore? ✈️",
+        name="out_of_scope",
+    )]}
 
 
 def build_graph(
@@ -124,6 +133,9 @@ def build_graph(
     builder.add_node("general_chat", general_chat_node)
     builder.add_node("chat_tools", ToolNode(advisor_tools))
 
+    # Out-of-scope rejection node (no LLM call — static message, goes straight to END)
+    builder.add_node("out_of_scope", _out_of_scope_node)
+
     # 5. Define edges — travel planning path
     builder.add_edge(START, "security_gate")
 
@@ -144,9 +156,11 @@ def build_graph(
             "adjustments": "adjustments",
             "advisor_planner": "advisor_planner",
             "general_chat": "general_chat",
+            "out_of_scope": "out_of_scope",
             END: END,
         },
     )
+    builder.add_edge("out_of_scope", END)
 
     builder.add_edge("extract_metadata", "enrichment")
     builder.add_edge("adjustments", "enrichment")
