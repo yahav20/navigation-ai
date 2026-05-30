@@ -150,6 +150,16 @@ def get_place_details(place_id: str) -> dict | None:
     }
 
 
+def normalize_rating(api_rating: float | None) -> float | None:
+    """Convert Google rating (0-5) to 1-5 scale to match SQLite.
+    
+    Formula: max(1.0, (api_rating * 4 / 5) + 1)
+    """
+    if api_rating is None:
+        return None
+    return max(1.0, (api_rating * 4 / 5) + 1)
+
+
 def _normalize_place(place: dict) -> dict | None:
     """Normalize a Google Places result to agent schema."""
     name = place.get("name")
@@ -163,7 +173,7 @@ def _normalize_place(place: dict) -> dict | None:
     return {
         "name": name,
         "place_id": place.get("place_id"),
-        "rating": rating,
+        "rating": normalize_rating(rating),
         "price_level": price_level,
         "price_level_text": _price_level_text(price_level),
         "lat": geo.get("lat"),

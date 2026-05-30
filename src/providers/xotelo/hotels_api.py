@@ -66,6 +66,16 @@ def xotelo_get_rates(hotel_key: str, check_in: str, check_out: str, currency: st
     return _normalize_rates((data.get("result") or {}).get("rates") or [])
 
 
+def normalize_rating(api_rating: float | None) -> float | None:
+    """Convert Xotelo/TripAdvisor rating (0-5) to 1-5 scale.
+    
+    Formula: max(1.0, (api_rating * 4 / 5) + 1)
+    """
+    if api_rating is None:
+        return None
+    return max(1.0, (api_rating * 4 / 5) + 1)
+
+
 def _normalize_hotels(hotels: list) -> list[dict]:
     """Normalize Xotelo hotel listing to agent schema."""
     results = []
@@ -81,16 +91,26 @@ def _normalize_hotels(hotels: list) -> list[dict]:
         price_range = hotel.get("price_ranges") or {}
         geo = hotel.get("geo") or {}
 
+        # Normalize price: (min + max) / 2
+        p_min = price_range.get("min")
+        p_max = price_range.get("max")
+        avg_price = None
+        if p_min is not None and p_max is not None:
+            avg_price = (p_min + p_max) / 2
+        elif p_min is not None:
+            avg_price = p_min
+        elif p_max is not None:
+            avg_price = p_max
+
         normalized = {
             "name": name,
             "hotel_key": hotel.get("key"),
-            "rating": review.get("rating"),
+            "stars": normalize_rating(review.get("rating")),
             "review_count": review.get("review_count"),
             "address": hotel.get("address"),
             "lat": geo.get("lat"),
             "lng": geo.get("lng"),
-            "price_min": price_range.get("min"),
-            "price_max": price_range.get("max"),
+            "price_per_night": avg_price,
             "currency": price_range.get("currency", "USD"),
             "tripadvisor_url": hotel.get("url"),
         }
