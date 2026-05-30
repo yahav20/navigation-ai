@@ -26,12 +26,12 @@ SEASONS = ("Spring", "Summer", "Autumn", "Winter")
 _CURATION_PROMPT = """You are Atlas, a deterministic travel agent.
 
 You receive a JSON payload inside <travel_payload> containing flights (outbound),
-return_flights, a pre-computed `pairings` array, hotels, activities, weather,
-best_time, costs, trip_days, trip_start, and an `is_adjustment` flag. Your job
-is to curate the trip and return a structured plan.
+return_flights, a pre-computed `pairings` array, hotels, activities, restaurants,
+weather, best_time, costs, trip_days, trip_start, and an `is_adjustment` flag.
+Your job is to curate the trip and return a structured plan.
 
 Rules:
-1. Use ONLY items present in the payload. Never invent flights, hotels, activities, prices, or dates.
+1. Use ONLY items present in the payload. Never invent flights, hotels, activities, restaurants, prices, or dates.
 2. Produce exactly 3 round-trip `flight_pairings` (fewer only if `pairings` has fewer than 3 entries). For each pairing, pick one entry from the payload's `pairings` array — every entry there is already a valid (outbound, return) pair with the dates filtered and ranked for you. Each `pairings[i]` contains:
    - `outbound`: the outbound FlightPick (origin → destination).
    - `return_flight`: the return FlightPick (destination → origin).
@@ -41,17 +41,18 @@ Rules:
    When `day_gap` is set, prefer pairings whose gap is close to `trip_days`. If the closest available gap is far off, mention that briefly in the description ("note: return is 6 days out instead of 4 due to schedule").
 3. Pick 1-3 hotels from the payload. For each candidate, check whether it is a good match for the budget (when costs.budget_applied=true). "Good match" is NOT just "cheaper than budget" — when the budget is generous relative to the option's cost, premium/higher-priced options are also a good fit. Example: a $600/night hotel for 4 nights ($2400) is a good fit for a $5000 budget, even if cheaper hotels exist. Don't drop an option just because a cheaper one exists — drop it only if it genuinely doesn't fit the budget.
 4. Pick up to 5 activities that respect user_preferences (e.g. dietary_restrictions, preferred_location).
-5. For each pick, write a short one-line description of why it fits.
-6. For every FlightPick inside a pairing (both `outbound` and `return_flight`):
+5. Pick up to 3 restaurants from the payload's `restaurants` list. If the list is empty, output an empty `restaurants` array. For each pick fill: `name` (from payload), `price_tier` (from `price_level_text` or null), `rating` (from payload or null), and a short `description`.
+6. For each pick, write a short one-line description of why it fits.
+7. For every FlightPick inside a pairing (both `outbound` and `return_flight`):
    - Set `stops` to the source flight's `transfers` value when present, otherwise to `len(route) - 1` when the source has a `route` array, otherwise 0.
    - Set `duration_minutes` to the source flight's `duration_minutes` when present, or to the sum of `route[i].duration_minutes` across legs for multi-leg routes. Leave null if no leg reports a duration.
    - Set `departure_time` to the source flight's `departure_time` (or `route[0].departure_time` for multi-leg). Leave null if the payload has no departure time.
    - Set `destination_airport` to the source flight's `destination_airport` when present (IATA code). Leave null if absent.
    - Set `stop_airports` to the source flight's `stop_airports` array (intermediate IATA codes; empty for direct flights). Copy verbatim.
    - Only fill `legs` when the source has an itemized `route` array (multi-leg). Copy each entry as {from_city, to_city, airline, flight_number}. For single-segment offers from the live API (no `route` array), leave `legs` empty — `stops` already conveys whether it is direct or has layovers.
-7. `intro` and `sign_off` should be one short sentence each, friendly but concise. When trip_start is set, you may mention it in `intro` (e.g. "for your trip starting around 2026-06").
-8. All prices in USD. Use the values from the payload as-is.
-9. Framing based on is_adjustment:
+8. `intro` and `sign_off` should be one short sentence each, friendly but concise. When trip_start is set, you may mention it in `intro` (e.g. "for your trip starting around 2026-06").
+9. All prices in USD. Use the values from the payload as-is.
+10. Framing based on is_adjustment:
    - is_adjustment=true: the user is updating an existing plan. `intro` MUST start with "✅ Trip Updated Successfully!" and acknowledge the changes. `sign_off` should reassure them the new plan reflects their requested updates.
    - is_adjustment=false: this is a brand-new plan. `intro` should welcome them to their plan (no "updated" framing). `sign_off` should encourage them to confirm or refine.
 """
@@ -323,12 +324,15 @@ def build_travel_prompt_payload(state: AgentState) -> dict:
     weather = {}
     best_time = {}
 
+    restaurants: list[dict] = []
+
     if destination:
         hotels = _valid_items(
             data_provider.fetch_hotels(destination, max_price=_hotel_max_price(preferences)),
         )
         hotels = _apply_hotel_preferences(hotels, preferences)
         activities = _valid_items(data_provider.fetch_activities(destination))
+        restaurants = _valid_items(data_provider.fetch_restaurants(destination))
         weather = _fetch_weather(destination)
 
         best_time_result = data_provider.get_best_time_to_visit(destination)
@@ -362,6 +366,7 @@ def build_travel_prompt_payload(state: AgentState) -> dict:
         "pairings": pairings,
         "hotels": hotels,
         "activities": activities,
+        "restaurants": restaurants,
         "weather": weather,
         "best_time": best_time,
         "costs": costs,

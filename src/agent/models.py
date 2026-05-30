@@ -143,6 +143,15 @@ class ActivityPick(BaseModel):
     description: str = Field(description="One short line on why this activity fits the trip and the user preferences")
 
 
+class RestaurantPick(BaseModel):
+    """A curated restaurant suggested to the traveller."""
+
+    name: str = Field(description="Restaurant name from the payload")
+    price_tier: str | None = Field(default=None, description="Price tier label from the payload (e.g. '$', '$$', '$$$')")
+    rating: float | None = Field(default=None, description="Rating from the payload, if available")
+    description: str = Field(description="One short line on why this restaurant is recommended")
+
+
 class TravelPlanCuration(BaseModel):
     """LLM-produced curation of a deterministic travel payload."""
 
@@ -159,6 +168,7 @@ class TravelPlanCuration(BaseModel):
     )
     hotels: list[HotelPick] = Field(default_factory=list, description="1-3 hotel options chosen from the payload, best first")
     activities: list[ActivityPick] = Field(default_factory=list, description="Up to 5 activities chosen from the payload, respecting user preferences")
+    restaurants: list[RestaurantPick] = Field(default_factory=list, description="Up to 3 restaurant picks from the payload's restaurants list")
     sign_off: str = Field(description="One brief closing sentence")
 
 
@@ -170,6 +180,7 @@ class TravelPlan(BaseModel):
     flight_pairings: list[FlightPairing] = Field(default_factory=list)
     hotels: list[HotelPick]
     activities: list[ActivityPick]
+    restaurants: list[RestaurantPick] = Field(default_factory=list)
     origin: str | None
     destination: str | None
     trip_days: int
