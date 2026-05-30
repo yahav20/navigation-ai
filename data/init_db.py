@@ -744,6 +744,74 @@ def _sync_google_restaurants(conn: sqlite3.Connection, city_key: str, city_id: i
         return 0
 
 
+_TA_KEY_TO_CITY = {
+    "g293984": ("tel aviv",      "IL"),
+    "g187147": ("paris",         "FR"),
+    "g186338": ("london",        "GB"),
+    "g298184": ("tokyo",         "JP"),
+    "g60763":  ("new york city", "US"),
+    "g187323": ("berlin",        "DE"),
+    "g188590": ("amsterdam",     "NL"),
+}
+
+
+def fix_api_city_ids(conn: sqlite3.Connection) -> None:
+    """Repair city_id in api_hotels by rederiving it from the tripadvisor_key prefix.
+
+    Safe to call multiple times — only updates rows whose city_id is wrong or stale.
+    Also fills NULL price_per_night using a star-rating-based estimate so no hotel
+    is left without a price.
+    """
+    conn.execute(
+        """
+        UPDATE api_hotels
+        SET city_id = (
+            SELECT c.id
+            FROM cities c
+            JOIN countries ON c.country_id = countries.id
+            WHERE (
+                SUBSTR(api_hotels.tripadvisor_key, 1, INSTR(api_hotels.tripadvisor_key || '-', '-') - 1) = 'g293984'
+                AND LOWER(c.name) = 'tel aviv' AND countries.alpha2 = 'IL'
+            ) OR (
+                SUBSTR(api_hotels.tripadvisor_key, 1, INSTR(api_hotels.tripadvisor_key || '-', '-') - 1) = 'g187147'
+                AND LOWER(c.name) = 'paris' AND countries.alpha2 = 'FR'
+            ) OR (
+                SUBSTR(api_hotels.tripadvisor_key, 1, INSTR(api_hotels.tripadvisor_key || '-', '-') - 1) = 'g186338'
+                AND LOWER(c.name) = 'london' AND countries.alpha2 = 'GB'
+            ) OR (
+                SUBSTR(api_hotels.tripadvisor_key, 1, INSTR(api_hotels.tripadvisor_key || '-', '-') - 1) = 'g298184'
+                AND LOWER(c.name) = 'tokyo' AND countries.alpha2 = 'JP'
+            ) OR (
+                SUBSTR(api_hotels.tripadvisor_key, 1, INSTR(api_hotels.tripadvisor_key || '-', '-') - 1) = 'g60763'
+                AND c.name = 'New York City' AND countries.alpha2 = 'US'
+            ) OR (
+                SUBSTR(api_hotels.tripadvisor_key, 1, INSTR(api_hotels.tripadvisor_key || '-', '-') - 1) = 'g187323'
+                AND LOWER(c.name) = 'berlin' AND countries.alpha2 = 'DE'
+            ) OR (
+                SUBSTR(api_hotels.tripadvisor_key, 1, INSTR(api_hotels.tripadvisor_key || '-', '-') - 1) = 'g188590'
+                AND LOWER(c.name) = 'amsterdam' AND countries.alpha2 = 'NL'
+            )
+            ORDER BY (SELECT COUNT(*) FROM hotels h WHERE h.city_id = c.id) DESC
+            LIMIT 1
+        )
+        WHERE tripadvisor_key IS NOT NULL
+        """
+    )
+    # Fill any missing prices with a star-rating-based estimate
+    conn.execute(
+        """
+        UPDATE api_hotels SET price_per_night =
+            CASE
+                WHEN stars >= 4.6 THEN 300.0
+                WHEN stars >= 4.0 THEN 180.0
+                WHEN stars >= 3.5 THEN 120.0
+                ELSE 80.0
+            END
+        WHERE price_per_night IS NULL
+        """
+    )
+
+
 def seed_api(conn: sqlite3.Connection) -> None:
     """Fetch live API data for all seeded cities and cache to api_* tables."""
     import sys as _sys
@@ -758,8 +826,8 @@ def seed_api(conn: sqlite3.Connection) -> None:
 
     gm_key = os.getenv("GOOGLE_MAPS_API_KEY")
     if not gm_key:
-        print("  WARNING: GOOGLE_MAPS_API_KEY not set — skipping Google attractions/restaurants.")
-        print("           Set the key in .env to sync Google data.")
+        print("  WARNING: GOOGLE_MAPS_API_KEY not set — Google attractions/restaurants will be skipped.")
+        print("           Add GOOGLE_MAPS_API_KEY to .env to enable Google sync.")
 
     from providers.city_metadata import CITY_METADATA
 
@@ -775,10 +843,31 @@ def seed_api(conn: sqlite3.Connection) -> None:
             print(f"  [{city_key}]: no coordinates, skipping")
             continue
         lat, lng = row[0], row[1]
+
+        hotels_exist      = conn.execute("SELECT COUNT(*) FROM api_hotels      WHERE city_id=?", (city_id,)).fetchone()[0] > 0
+        attractions_exist = conn.execute("SELECT COUNT(*) FROM api_attractions WHERE city_id=?", (city_id,)).fetchone()[0] > 0
+        restaurants_exist = conn.execute("SELECT COUNT(*) FROM api_restaurants WHERE city_id=?", (city_id,)).fetchone()[0] > 0
+
+        if hotels_exist and attractions_exist and restaurants_exist:
+            print(f"  [{city_key}]: already synced, skipping")
+            continue
+
         print(f"  [{city_key}]:")
-        _sync_xotelo_hotels(conn, city_key, city_id, meta["ta_key"])
-        _sync_google_attractions(conn, city_key, city_id, lat, lng)
-        _sync_google_restaurants(conn, city_key, city_id, lat, lng)
+        if not hotels_exist:
+            _sync_xotelo_hotels(conn, city_key, city_id, meta["ta_key"])
+        else:
+            print(f"    xotelo hotels:       already synced")
+        if not attractions_exist:
+            _sync_google_attractions(conn, city_key, city_id, lat, lng)
+        else:
+            print(f"    google attractions:  already synced")
+        if not restaurants_exist:
+            _sync_google_restaurants(conn, city_key, city_id, lat, lng)
+        else:
+            print(f"    google restaurants:  already synced")
+
+    # Always repair city_ids and fill missing prices after sync
+    fix_api_city_ids(conn)
     conn.commit()
     print("API sync complete.")
 
