@@ -255,8 +255,7 @@ class DayScheduleBuilder:
                 break
 
             # ─ Hunger check: inject meal before activity if needed ─
-            if self._is_hungry(cursor) and not act.food_available:
-                    
+            if self._is_hungry(cursor):
                 cursor, location = self._inject_meal(cursor, departure_anchor, location, meal_candidates)
                 if cursor >= departure_anchor:
                     break
@@ -318,21 +317,24 @@ class DayScheduleBuilder:
                 estimated_cost=act.price,
             ))
 
-            if act.food_available:
-                self._last_food_time = act_end  # activity fed the user
-                if act_start.hour >= 11 and act_start.hour <= 15:
-                    self._had_lunch = True
-                elif act_start.hour >= 18:
-                    self._had_dinner = True
-
             cursor = act_end
             location = act_point
             used_names.add(act.name)
 
         # ── Final dinner ──
-        #     18:00    
-        if not self._had_dinner and cursor < departure_anchor and cursor.hour >= 18:
-            cursor, location = self._inject_dinner(cursor, departure_anchor, location, cfg, meal_candidates)
+        if not self._had_dinner and cursor < departure_anchor:
+            dinner_earliest = _parse_time(self._date, "18:00")
+            if cursor < dinner_earliest and dinner_earliest < departure_anchor:
+                self._push(TimeSlot(
+                    start=cursor, end=dinner_earliest,
+                    slot_type="rest",
+                    name="Free time — explore at your own pace",
+                    description="Browse local shops, relax at a café, or revisit a favourite spot",
+                    estimated_cost=0.0,
+                ))
+                cursor = dinner_earliest
+            if cursor < departure_anchor and cursor.hour >= 17:
+                cursor, location = self._inject_dinner(cursor, departure_anchor, location, cfg, meal_candidates)
 
         if cfg.is_last_day and cfg.departure_time:
             taxi_min = max(AIRPORT_HOTEL_MIN_MINUTES, 45)

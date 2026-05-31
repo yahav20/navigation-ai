@@ -73,12 +73,19 @@ MARKDOWN FORMAT (output this if the plan is acceptable):
 ## 💰 Trip Budget Summary
 | Category | Cost |
 |----------|------|
-| Hotel ([N] nights) | $[hotel_total from verify_budget] |
+| [hotel label] ([N] nights) | $[hotel_total from verify_budget] |
 | Activities | $[activities_total from verify_budget] |
 | Meals | $[meals_total from verify_budget] |
 | **Grand Total** | **$[grand_total from verify_budget]** |
 
+Label rules (read Mode from the TRIP header line):
+  - mode=with_travel_data → hotel label = "Hotel", no flights row (already booked)
+  - mode=standalone       → hotel label = "~ Hotel (estimated)"
+                            AND add a "~ Flights (estimated)" row using approx_flights_estimated from BUDGET TOTALS
+                            Place the flights row ABOVE the hotel row.
+
 [✅ Within budget / ⚠️ Over budget — based on grand_total vs budget]
+If mode=standalone, add this footnote after the budget status: "*Grand total covers activities, meals & estimated hotel. Flights are shown separately as an estimate.*"
 
 ---
 💡 **[Destination] tips:** [Write 1-2 genuine, specific tips for this destination — never leave this as a placeholder]
@@ -186,6 +193,13 @@ def _build_summary(
         if isinstance(b, dict):
             totals = {k: v for k, v in b.items()
                       if k not in ("avg_prices",) and isinstance(v, (int, float))}
+            # Standalone: surface estimated flight costs so the LLM can render them
+            avg_p = b.get("avg_prices") or {}
+            if mode == "standalone" and avg_p:
+                out = float(avg_p.get("avg_flight_price", 0) or 0)
+                ret = float(avg_p.get("avg_return_flight_price", 0) or 0)
+                if out or ret:
+                    totals["approx_flights_estimated"] = round(out + ret, 2)
             lines.append(f"BUDGET TOTALS: {json.dumps(totals)}")
             lines.append("")
 
@@ -202,7 +216,7 @@ def _build_summary(
     return "\n".join(lines)
 
 
-def _generate_fallback_markdown(results: dict, trip_days: int, budget: float) -> str:
+def _generate_fallback_markdown(results: dict, trip_days: int, budget: float, mode: str = "standalone") -> str:
     """Plain-text itinerary renderer — used when the LLM quality review fails."""
     lines = ["# ✈️ Your Trip Itinerary\n"]
 
@@ -248,12 +262,24 @@ def _generate_fallback_markdown(results: dict, trip_days: int, budget: float) ->
             lines.append("\n---\n## 💰 Budget Summary\n")
             lines.append("| Category | Cost |")
             lines.append("|----------|------|")
+            hotel_label_prefix = "~ " if mode == "standalone" else ""
+            hotel_suffix = " (estimated)" if mode == "standalone" else ""
+            # Standalone: prepend estimated flights row
+            if mode == "standalone":
+                avg_p = b.get("avg_prices") or {}
+                out = float(avg_p.get("avg_flight_price", 0) or 0)
+                ret = float(avg_p.get("avg_return_flight_price", 0) or 0)
+                if out or ret:
+                    lines.append(f"| ~ Flights (estimated) | ${out + ret:.0f} |")
             for cat, val in b.items():
                 if cat in ("grand_total", "avg_prices"):
                     continue
                 if not isinstance(val, (int, float)):
                     continue
-                lines.append(f"| {cat.replace('_', ' ').title()} | ${float(val):.0f} |")
+                label = cat.replace("_", " ").title()
+                if "hotel" in cat.lower():
+                    label = f"{hotel_label_prefix}{label}{hotel_suffix}"
+                lines.append(f"| {label} | ${float(val):.0f} |")
             grand = float(b.get("grand_total", 0))
             lines.append(f"\n**Grand Total: ${grand:.0f}**")
             if budget:
@@ -427,7 +453,7 @@ class ItineraryReplannerNode:
         if content.startswith("```"):
             content = content.split("```")[1].lstrip("markdown").strip().rstrip("```").strip()
 
-        markdown = content if content else _generate_fallback_markdown(results, trip_days, budget)
+        markdown = content if content else _generate_fallback_markdown(results, trip_days, budget, mode)
 
         return {
             "itinerary_plan": {**plan_state, "final_markdown": markdown},
