@@ -448,7 +448,7 @@ class ItineraryExecutorNode:
         return DayConfig(
             day_number=day_num,
             total_days=trip_days,
-            hotel_name="accommodation",
+            hotel_name="",
             hotel_lat=center_lat,
             hotel_lng=center_lng,
             hotel_has_breakfast=False,
@@ -521,27 +521,27 @@ class ItineraryExecutorNode:
                         hotel_per_night = float(dd["hotel_price_per_night"])
                         break
         else:
-            # Standalone: call get_average_location_cost for estimates
+            # Standalone: fetch average prices for the formatter display, but do NOT
+            # count flights in the budget — the user opted not to book flights.
             try:
                 avg = get_average_location_cost.invoke({
                     "destination": destination,
                     "origin":      origin,
                     "trip_days":   trip_days,
                 })
-                flight_price    = float(avg.get("avg_flight_price", 400))
-                ret_price       = float(avg.get("avg_return_flight_price", 400))
                 hotel_per_night = float(avg.get("avg_hotel_per_night", 120))
                 avg_prices = avg
             except Exception:
-                flight_price    = 400.0
-                ret_price       = 400.0
                 hotel_per_night = 120.0
                 avg_prices = {
-                    "avg_flight_price":        flight_price,
-                    "avg_return_flight_price": ret_price,
+                    "avg_flight_price":        400.0,
+                    "avg_return_flight_price": 400.0,
                     "avg_hotel_per_night":     hotel_per_night,
                     "note": "estimated fallback",
                 }
+            # Flights are not booked in standalone — exclude from the budget gate.
+            flight_price = 0.0
+            ret_price    = 0.0
 
         try:
             data = calculate_trip_cost.invoke({
@@ -575,7 +575,12 @@ class ItineraryExecutorNode:
                 "Options: cheaper activities, reduce trip_days by 1-2."
             )
 
-        # Store average prices in the payload so formatter can render "estimated prices" section
+        # Standalone: drop the 0-valued flight rows — they're misleading in the budget table.
+        if mode == "standalone":
+            data.pop("outbound_flight", None)
+            data.pop("return_flight", None)
+
+        # Store average prices in the payload so formatter can render estimated prices section.
         if avg_prices is not None:
             data["avg_prices"] = avg_prices
 

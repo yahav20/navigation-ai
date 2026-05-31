@@ -69,53 +69,36 @@ class ItineraryFormatterNode:
     def _header_with_travel_data(
         self, state: AgentState, origin: str, destination: str
     ) -> str:
-        # Use raw resolved flights (have actual flight numbers, times, prices)
-        # travel_plan["flights"] are curated OUTBOUND options — not split outbound/return
         outbound_raw = state.get("itinerary_selected_outbound_flight") or {}
         return_raw   = state.get("itinerary_selected_return_flight") or {}
         travel_plan  = state.get("travel_plan") or {}
         hotels       = travel_plan.get("hotels", [])
 
-        lines = ["## 🛫 Flights & Accommodation"]
+        lines = ["## 🛫 Flights & Accommodation", ""]
 
         # ── Outbound ──────────────────────────────────────────────────────
         if outbound_raw:
-            out_num     = outbound_raw.get("flight_number", "")
-            out_airline = outbound_raw.get("airline", "")
-            out_dep     = outbound_raw.get("departure_time", "")
-            out_arr     = outbound_raw.get("arrival_time", "")
-            out_price   = float(outbound_raw.get("price", 0) or 0)
-            dep_str     = f" | Dep: {out_dep} → Arr: {out_arr}" if out_dep else ""
-            lines.append(
-                f"**Outbound:** {out_airline} {out_num}{dep_str} | **${out_price:.0f}**"
-            )
+            lines.append(_fmt_flight_line("✈️ **Outbound**", outbound_raw, origin, destination))
         elif origin and destination:
-            lines.append(f"**Outbound:** {origin} → {destination}")
+            lines.append(f"✈️ **Outbound:** {origin} → {destination}")
 
         # ── Return ────────────────────────────────────────────────────────
         if return_raw:
-            ret_num     = return_raw.get("flight_number", "")
-            ret_airline = return_raw.get("airline", "")
-            ret_dep     = return_raw.get("departure_time", "")
-            ret_arr     = return_raw.get("arrival_time", "")
-            ret_price   = float(return_raw.get("price", 0) or 0)
-            dep_str     = f" | Dep: {ret_dep} → Arr: {ret_arr}" if ret_dep else ""
-            lines.append(
-                f"**Return:** {ret_airline} {ret_num}{dep_str} | **${ret_price:.0f}**"
-            )
+            lines.append(_fmt_flight_line("🔙 **Return**", return_raw, destination, origin))
         elif destination and origin:
-            lines.append(f"**Return:** {destination} → {origin} *(details not confirmed)*")
+            lines.append(f"🔙 **Return:** {destination} → {origin} *(details not confirmed)*")
 
         # ── Hotel ─────────────────────────────────────────────────────────
         if hotels:
-            h0 = hotels[0]
+            h0       = hotels[0]
             name     = h0.get("name", "Hotel")
             stars    = h0.get("stars")
             price    = h0.get("price_per_night", 0)
-            star_str = f" — {stars}★" if stars else ""
-            lines.append(f"\n**🏨 Hotel:** {name}{star_str} | ${price:.0f}/night")
+            star_str = f" — {stars:.0f}★" if stars else ""
+            lines.append("")
+            lines.append(f"🏨 **Hotel:** {name}{star_str} | **${float(price):.0f}/night**")
 
-        return "\n".join(lines)
+        return "\n\n".join(lines)
 
     def _header_standalone(
         self, state: AgentState, origin: str, destination: str, trip_days: int
@@ -133,24 +116,26 @@ class ItineraryFormatterNode:
                 avg_prices = inner.get("avg_prices") or {}
 
         if not avg_prices:
-            return ""  # no estimates available — skip header
+            return ""
 
-        avg_out    = avg_prices.get("avg_flight_price", 0)
-        avg_ret    = avg_prices.get("avg_return_flight_price", 0)
-        avg_hotel  = avg_prices.get("avg_hotel_per_night", 0)
-        note       = avg_prices.get("note", "")
+        avg_out   = float(avg_prices.get("avg_flight_price", 0) or 0)
+        avg_ret   = float(avg_prices.get("avg_return_flight_price", 0) or 0)
+        avg_hotel = float(avg_prices.get("avg_hotel_per_night", 0) or 0)
+        total_flights = avg_out + avg_ret
+        hotel_total   = avg_hotel * trip_days if trip_days else avg_hotel
 
-        hotel_total = avg_hotel * trip_days if trip_days else avg_hotel
+        route = f"{origin} ↔ {destination}" if origin and destination else destination
 
         lines = [
-            "## 💡 Estimated Prices *(averages — no booking confirmed)*",
+            "## 💡 Approximate Travel Cost *(no booking confirmed)*",
             "",
-            f"✈️ Average outbound flight {origin} → {destination}: **~${avg_out:.0f}**",
-            f"✈️ Average return flight {destination} → {origin}: **~${avg_ret:.0f}**",
-            f"🏨 Average hotel in {destination}: **~${avg_hotel:.0f}/night**"
-            + (f" (~${hotel_total:.0f} total for {trip_days} nights)" if trip_days else ""),
+            f"✈️ **Flights** ({route}): **~${total_flights:.0f}**"
+            + (f" *(~${avg_out:.0f} outbound + ~${avg_ret:.0f} return)*" if avg_out and avg_ret else ""),
             "",
-            "> *These are market averages for planning purposes. Actual prices may vary.*",
+            f"🏨 **Hotel** ({destination}): **~${avg_hotel:.0f}/night**"
+            + (f" (~${hotel_total:.0f} for {trip_days} nights)" if trip_days else ""),
+            "",
+            "> *Market averages for planning purposes only. Actual prices may vary.*",
         ]
         return "\n".join(lines)
 
@@ -187,6 +172,59 @@ class ItineraryFormatterNode:
         except Exception:
             pass
         return gist
+
+
+def _fmt_time(iso: str) -> str:
+    """Convert an ISO datetime string to a compact display like '07 Jun, 19:40'."""
+    if not iso:
+        return ""
+    try:
+        # Handle both "2026-06-07T19:40:00+03:00" and "19:40" plain strings
+        if "T" in iso:
+            date_part, time_part = iso.split("T", 1)
+            time_part = time_part[:5]               # HH:MM
+            year, month, day = date_part.split("-")
+            months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
+            month_name = months[int(month) - 1]
+            return f"{int(day)} {month_name}, {time_part}"
+        return iso[:5]  # already HH:MM
+    except Exception:
+        return iso
+
+
+def _fmt_flight_line(label: str, flight: dict, from_city: str, to_city: str) -> str:
+    """Format a single flight as a compact markdown line."""
+    airline  = flight.get("airline", "")
+    num      = flight.get("flight_number", "")
+    price    = float(flight.get("price", 0) or 0)
+    dep_raw  = flight.get("departure_time", "")
+    arr_raw  = flight.get("arrival_time", "")
+    stops    = flight.get("transfers") or flight.get("stops")
+    duration = flight.get("duration_minutes")
+
+    parts = [f"{label}:"]
+    if airline or num:
+        parts.append(f"{airline} {num}".strip())
+    if from_city and to_city:
+        parts.append(f"({from_city} → {to_city})")
+
+    dep_str = _fmt_time(dep_raw)
+    arr_str = _fmt_time(arr_raw)
+    if dep_str and arr_str:
+        parts.append(f"| Dep: {dep_str} — Arr: {arr_str}")
+    elif dep_str:
+        parts.append(f"| Dep: {dep_str}")
+
+    if duration:
+        h, m = divmod(int(duration), 60)
+        parts.append(f"| {h}h {m:02d}m" if h else f"| {m}min")
+
+    if stops is not None:
+        stops_str = "Direct" if int(stops) == 0 else f"{stops} stop{'s' if int(stops) > 1 else ''}"
+        parts.append(f"| {stops_str}")
+
+    parts.append(f"| **${price:.0f}**")
+    return " ".join(parts)
 
 
 def _extract_gist(reason_raw) -> str:

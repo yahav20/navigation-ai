@@ -46,6 +46,7 @@ STRICT RULES — violating any of these causes immediate failure:
 2. NEVER invent events, activities, or slots not present in the input data.
 3. NEVER leave placeholder text like "$XX", "Tips here", or "[Theme]" in the output.
 4. Output ONLY the markdown — no JSON, no preamble, no explanation.
+5. Do NOT add a hotel/accommodation section — the formatter prepends it automatically.
 
 QUALITY CHECK — before writing, verify:
 - Every day has at least 2 activities (meal slots do NOT count as activities).
@@ -80,7 +81,7 @@ MARKDOWN FORMAT (output this if the plan is acceptable):
 [✅ Within budget / ⚠️ Over budget — based on grand_total vs budget]
 
 ---
-💡 **Paris tips:** [Write 1-2 genuine, specific tips for this destination — never leave this as a placeholder]
+💡 **[Destination] tips:** [Write 1-2 genuine, specific tips for this destination — never leave this as a placeholder]
 """
 
 
@@ -205,17 +206,17 @@ def _generate_fallback_markdown(results: dict, trip_days: int, budget: float) ->
     """Plain-text itinerary renderer — used when the LLM quality review fails."""
     lines = ["# ✈️ Your Trip Itinerary\n"]
 
-    # Hotel is sourced from travel_plan (with_travel_data mode) or not shown
-    # (standalone mode). Either way there is no fetch_hotels result key.
+    # Hotel: only show in with_travel_data mode (standalone has no real hotel name).
     hotel_name = None
     for key, val in results.items():
         if key.startswith("build_day_schedule"):
             inner = _unwrap(val)
-            if isinstance(inner, dict) and inner.get("hotel"):
-                hotel_name = inner["hotel"]
+            hotel = inner.get("hotel") if isinstance(inner, dict) else None
+            if hotel and hotel.strip():  # skip empty placeholder
+                hotel_name = hotel
                 break
     if hotel_name:
-        lines.append(f"## 🏨 Accommodation\n**{hotel_name}**\n")
+        lines.append(f"## 🏨 Accommodation\n\n**{hotel_name}**\n")
 
     for d in range(1, trip_days + 1):
         key = next(
