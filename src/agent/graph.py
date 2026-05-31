@@ -37,13 +37,13 @@ from agent.state import AgentState
 from tools.advisor_tools import advisor_tools
 
 #      -Itinerary Agent :
-from agent.nodes.itinerary.itinerary_enrichment import ItineraryEnrichmentNode
+from agent.nodes.itinerary.plan_check import PlanCheckNode
 from agent.nodes.itinerary.planner   import ItineraryPlannerNode
 from agent.nodes.itinerary.executor  import ItineraryExecutorNode
 from agent.nodes.itinerary.replanner import ItineraryReplannerNode
 from agent.nodes.itinerary.formatter import ItineraryFormatterNode
 from agent.nodes.itinerary.itinerary_edges import (
-    after_itinerary_enrichment,
+    after_plan_check,
     after_itinerary_planner,
     after_itinerary_replanner,
 )
@@ -74,8 +74,8 @@ def build_graph(
     router_node = RouterNode(extraction_model)
 
     #   -Itinerary
-    itinerary_enrichment_node = ItineraryEnrichmentNode(extraction_model)
-    itinerary_planner_node    = ItineraryPlannerNode(response_model)
+    plan_check_node        = PlanCheckNode()
+    itinerary_planner_node = ItineraryPlannerNode(response_model)
     itinerary_executor_node   = ItineraryExecutorNode(response_model)
     itinerary_replanner_node  = ItineraryReplannerNode(response_model)
     itinerary_formatter_node  = ItineraryFormatterNode(response_model)
@@ -108,8 +108,8 @@ def build_graph(
     builder.add_node("summary", summary_node)
 
     #   -Itinerary
-    builder.add_node("itinerary_enrichment", itinerary_enrichment_node)
-    builder.add_node("itinerary_planner",    itinerary_planner_node)
+    builder.add_node("plan_check",        plan_check_node)
+    builder.add_node("itinerary_planner", itinerary_planner_node)
     builder.add_node("itinerary_executor",   itinerary_executor_node)
     builder.add_node("itinerary_replanner",  itinerary_replanner_node)
     builder.add_node("itinerary_formatter",  itinerary_formatter_node)
@@ -140,11 +140,10 @@ def build_graph(
         "router",
         after_router,
         {
-            "extract_metadata":    "extract_metadata",
-            "adjustments":         "adjustments",
-            "advisor_planner":     "advisor_planner",
-            "general_chat":        "general_chat",
-            "itinerary_enrichment": "itinerary_enrichment",
+            "extract_metadata": "extract_metadata",
+            "adjustments":      "adjustments",
+            "advisor_planner":  "advisor_planner",
+            "general_chat":     "general_chat",
             END: END,
         },
     )
@@ -152,13 +151,13 @@ def build_graph(
     builder.add_edge("extract_metadata", "enrichment")
     builder.add_edge("adjustments", "enrichment")
 
-    #   -enrichment:     -flight_search only (itinerary goes directly via router)
     builder.add_conditional_edges(
         "enrichment",
         after_enrichment,
         {
             "flight_search": "flight_search",
-            END: END
+            "plan_check":    "plan_check",
+            END: END,
         }
     )
 
@@ -184,11 +183,11 @@ def build_graph(
 
     # -----   -Itinerary (Plan & Execute + Replanner) -----
     builder.add_conditional_edges(
-        "itinerary_enrichment",
-        after_itinerary_enrichment,
+        "plan_check",
+        after_plan_check,
         {
             "itinerary_planner": "itinerary_planner",
-            END: END,
+            "summary":           "summary",
         }
     )
 

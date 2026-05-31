@@ -406,7 +406,7 @@ class ItineraryExecutorNode:
     def _build_config_from_travel_plan(
         self, state, day_num, trip_days, candidates,
     ) -> DayConfig:
-        # Raw hotel resolved by ItineraryEnrichmentNode (has lat/lng/breakfast)
+        # Raw hotel resolved by PlanCheckNode (has lat/lng/price)
         hotel = state.get("itinerary_selected_hotel") or {}
         flight_out = state.get("itinerary_selected_outbound_flight") or {}
         flight_ret = state.get("itinerary_selected_return_flight") or {}

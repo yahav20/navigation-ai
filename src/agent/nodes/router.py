@@ -72,12 +72,11 @@ class RouterNode:
         final_intent = classification.intent
 
         # Guardrail 0: Preserve build_itinerary intent across enrichment turns.
-        # ItineraryEnrichmentNode may ask several follow-up questions before setting
-        # itinerary_enrichment_complete=True. On each follow-up the user is answering
-        # an enrichment question — not starting a new intent. Keep the intent as
-        # build_itinerary so the graph stays on the itinerary path.
+        # EnrichmentNode may ask follow-up questions (destination, days, etc.) before
+        # setting enrichment_complete=True. Keep build_itinerary so the graph stays
+        # on the itinerary path and eventually reaches plan_check.
         if (state.get("intent") == "build_itinerary"
-                and not state.get("itinerary_enrichment_complete", False)):
+                and not state.get("enrichment_complete", False)):
             final_intent = "build_itinerary"
 
         # Guardrail 1: Both high-level planning and micro-planning require a destination.

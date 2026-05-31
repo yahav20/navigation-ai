@@ -2,10 +2,10 @@
 Routing edges for the Plan-and-Execute itinerary agent.
 =======================================================
 Flow:
-  itinerary_enrichment →(conditional)→ itinerary_planner | END
-  itinerary_planner    →(conditional)→ itinerary_executor | itinerary_formatter
-  itinerary_executor   → itinerary_replanner
-  itinerary_replanner  →(conditional)→ itinerary_executor | itinerary_planner | itinerary_formatter
+  plan_check        →(conditional)→ itinerary_planner | summary
+  itinerary_planner →(conditional)→ itinerary_executor | itinerary_formatter
+  itinerary_executor → itinerary_replanner
+  itinerary_replanner →(conditional)→ itinerary_executor | itinerary_planner | itinerary_formatter
 """
 from __future__ import annotations
 
@@ -14,15 +14,16 @@ from langgraph.graph import END
 from agent.state import AgentState
 
 
-def after_itinerary_enrichment(state: AgentState) -> str:
+def after_plan_check(state: AgentState) -> str:
     """
-    Route from ItineraryEnrichmentNode.
-    If all required fields are collected → planner.
-    Otherwise the node asked a follow-up question → stop and wait for the user.
+    Route from PlanCheckNode.
+      with_travel_data / standalone → itinerary_planner
+      redirect_to_travel            → summary  (user chose to plan flights first)
     """
-    if state.get("itinerary_enrichment_complete"):
+    mode = state.get("itinerary_mode")
+    if mode in ("with_travel_data", "standalone"):
         return "itinerary_planner"
-    return END
+    return "summary"
 
 
 def after_itinerary_planner(state: AgentState) -> str:

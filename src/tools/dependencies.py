@@ -1,4 +1,4 @@
 """Shared data provider instance used by tool modules."""
-from providers import SQLiteDataProvider
+from providers.dal import HybridDAL
 
-data_provider = SQLiteDataProvider()
+data_provider = HybridDAL()

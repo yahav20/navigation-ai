@@ -1,7 +1,10 @@
-"""Deterministic flight search node for the travel-planning path."""
+"""Deterministic flight search node — pulls outbound + return flights via the API-first helper."""
+
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta
 
 from agent.state import AgentState
-from tools.dependencies import data_provider
+from providers.flights import search_flights_with_fallback
 
 
 def _is_direct_flight(item: object) -> bool:
@@ -18,25 +21,53 @@ def _usable_flights(items: object) -> list[dict]:
     return [item for item in items if _is_direct_flight(item) or _is_connecting_route(item)]
 
 
+def _return_date(trip_start: str, trip_days: int) -> str:
+    """Compute the return-leg query string from trip_start + trip_days.
+
+    YYYY-MM-DD -> YYYY-MM-DD shifted forward by trip_days.
+    YYYY-MM -> YYYY-MM unchanged (Travelpayouts treats this as a month-wide query,
+    which is the best we can do when the user only named a month).
+    """
+    try:
+        start = datetime.strptime(trip_start, "%Y-%m-%d").date()
+    except ValueError:
+        return trip_start  # month-wide
+    return (start + timedelta(days=max(trip_days, 1))).strftime("%Y-%m-%d")
+
+
 class FlightSearchNode:
-    """Fetch flights once and persist only route options needed by the graph."""
+    """Fetch outbound + return flights once and persist them on the state."""
 
     def __call__(self, state: AgentState) -> dict:
-        """Return flight_options and has_flights for the requested route."""
+        """Return flight_options, return_flight_options, and has_flights for the requested route."""
         origin = state.get("current_city")
         destination = state.get("destination_city")
+        trip_start = state.get("trip_start")
+        trip_days = int(state.get("trip_days") or 3)
 
-        if not origin or not destination:
-            return {"flight_options": [], "has_flights": False}
+        if not origin or not destination or not trip_start:
+            return {
+                "flight_options": [],
+                "return_flight_options": [],
+                "has_flights": False,
+            }
 
-        direct_options = _usable_flights(data_provider.fetch_flights(origin, destination))
-        if direct_options:
-            return {"flight_options": direct_options, "has_flights": True}
+        return_at = _return_date(trip_start, trip_days)
+        # Outbound + return legs are independent — fetch them concurrently so
+        # the user waits on max(outbound, return) instead of their sum.
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            outbound_future = pool.submit(
+                search_flights_with_fallback, origin, destination, trip_start,
+            )
+            return_future = pool.submit(
+                search_flights_with_fallback, destination, origin, return_at,
+            )
 
-        connecting_options = _usable_flights(
-            data_provider.find_connecting_flights(origin, destination),
-        )
+        outbound = _usable_flights(outbound_future.result())
+        inbound = _usable_flights(return_future.result())
+
         return {
-            "flight_options": connecting_options,
-            "has_flights": bool(connecting_options),
+            "flight_options": outbound,
+            "return_flight_options": inbound,
+            "has_flights": bool(outbound) and bool(inbound),
         }

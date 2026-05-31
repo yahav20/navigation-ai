@@ -12,6 +12,16 @@ class TravelMetadata(BaseModel):
     destination_city: str | None = Field(default=None, description="The city the user wants to travel to")
     budget: float | None = Field(default=None, description="The user's travel budget as a number, if mentioned")
     trip_days: int | None = Field(default=None, description="Number of days the user wants to spend on the trip, if mentioned")
+    trip_start: str | None = Field(
+        default=None,
+        description=(
+            "Approximate trip start. Use YYYY-MM-DD when the user names a specific day "
+            "(e.g. 'leaving June 10' -> '2026-06-10'). Use YYYY-MM when the user only "
+            "names a month or a relative period (e.g. 'in June' -> '2026-06', "
+            "'next month' resolved against today's date). Return null if nothing about "
+            "timing is mentioned."
+        ),
+    )
 
 
 class UserPreferences(BaseModel):
@@ -61,10 +71,60 @@ class FlightPick(BaseModel):
     airline: str | None = Field(default=None, description="Primary airline name from the payload")
     price: float = Field(description="Total flight price in USD from the payload")
     description: str = Field(description="One short line explaining why this flight is recommended")
+    duration_minutes: int | None = Field(
+        default=None,
+        description=(
+            "Total trip duration in minutes. Copy the source flight's `duration_minutes` "
+            "when present (single-segment offers). For multi-leg routes, sum "
+            "`route[i].duration_minutes` across all legs. Leave null when no leg has a duration."
+        ),
+    )
+    departure_time: str | None = Field(
+        default=None,
+        description=(
+            "Source flight's `departure_time` (or first leg's `departure_time` for multi-leg routes) "
+            "as the ISO string from the payload. Leave null when the payload has no departure time."
+        ),
+    )
+    destination_airport: str | None = Field(
+        default=None,
+        description=(
+            "IATA code of the final arrival airport from the source flight's `destination_airport` "
+            "field (helpful when a city has multiple airports, e.g. CDG vs ORY). Leave null when absent."
+        ),
+    )
+    stop_airports: list[str] = Field(
+        default_factory=list,
+        description=(
+            "IATA codes of the intermediate stop airports (origin + final destination excluded) "
+            "from the source flight's `stop_airports` array. Empty for direct flights. Copy as-is."
+        ),
+    )
+    stops: int = Field(
+        default=0,
+        description=(
+            "Number of layovers. Copy the source flight's `transfers` value when present, "
+            "otherwise set to `len(route) - 1` when the source has a `route` array, "
+            "otherwise 0 for a single direct segment."
+        ),
+    )
     legs: list[FlightLeg] = Field(
         default_factory=list,
-        description="One entry per leg ONLY when the source flight has a `route`. Leave empty for direct flights.",
+        description=(
+            "One entry per leg ONLY when the source flight has an itemized `route` array "
+            "(SQLite-backed multi-leg routes). Leave empty when the source is a single "
+            "direct/connecting offer from the live API — `stops` already conveys the layover count."
+        ),
     )
+
+
+class FlightPairing(BaseModel):
+    """A complete round-trip option: one outbound + one return + the combined price."""
+
+    outbound: FlightPick = Field(description="The outbound (origin → destination) flight picked from the payload's `flights` array.")
+    return_flight: FlightPick = Field(description="The return (destination → origin) flight picked from the payload's `return_flights` array.")
+    total_price: float = Field(description="Sum of outbound.price and return_flight.price in USD.")
+    description: str = Field(description="One short line on why this pairing works as a complete round trip (timing, price, layovers).")
 
 
 class HotelPick(BaseModel):
@@ -83,13 +143,32 @@ class ActivityPick(BaseModel):
     description: str = Field(description="One short line on why this activity fits the trip and the user preferences")
 
 
+class RestaurantPick(BaseModel):
+    """A curated restaurant suggested to the traveller."""
+
+    name: str = Field(description="Restaurant name from the payload")
+    price_tier: str | None = Field(default=None, description="Price tier label from the payload (e.g. '$', '$$', '$$$')")
+    rating: float | None = Field(default=None, description="Rating from the payload, if available")
+    description: str = Field(description="One short line on why this restaurant is recommended")
+
+
 class TravelPlanCuration(BaseModel):
     """LLM-produced curation of a deterministic travel payload."""
 
     intro: str = Field(description="One-sentence opening that confirms the trip plan")
-    flights: list[FlightPick] = Field(default_factory=list, description="1-3 flight options chosen from the payload, best first")
-    hotels: list[HotelPick] = Field(default_factory=list, description="1-3 hotel options chosen from the payload, best first")
+    flight_pairings: list[FlightPairing] = Field(
+        default_factory=list,
+        description=(
+            "Exactly 3 round-trip options (or fewer only if the payload has fewer than 3 viable "
+            "combinations). Each pairing combines one outbound flight from `flights` with one "
+            "return flight from `return_flights`. Pick combinations that actually fit together — "
+            "vary across budget/speed tradeoffs (cheapest, fastest, balanced), and prefer pairings "
+            "where the airlines, timings, or layover styles complement each other."
+        ),
+    )
+    hotels: list[HotelPick] = Field(default_factory=list, description="Exactly 3 hotel options chosen from the payload (fewer only if payload has fewer than 3). Pick at varied price points: one budget-friendly, one mid-range, one premium — so the user sees real choices.")
     activities: list[ActivityPick] = Field(default_factory=list, description="Up to 5 activities chosen from the payload, respecting user preferences")
+    restaurants: list[RestaurantPick] = Field(default_factory=list, description="Up to 3 restaurant picks from the payload's restaurants list")
     sign_off: str = Field(description="One brief closing sentence")
 
 
@@ -98,12 +177,14 @@ class TravelPlan(BaseModel):
 
     intro: str
     sign_off: str
-    flights: list[FlightPick]
+    flight_pairings: list[FlightPairing] = Field(default_factory=list)
     hotels: list[HotelPick]
     activities: list[ActivityPick]
+    restaurants: list[RestaurantPick] = Field(default_factory=list)
     origin: str | None
     destination: str | None
     trip_days: int
+    trip_start: str | None = None
     total_budget: float | None
     weather: dict[str, str]
     best_time: dict[str, Any]

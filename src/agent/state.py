@@ -23,22 +23,23 @@ class AgentState(TypedDict):
     trip_days: int                 # number of trip days; defaults to 3 if user skips after being asked
     summary: str                   # rolling conversation summary maintained by summary_node
     alternative_destinations: list # populated when fetch_flights returns no results for the route
-    flight_options: NotRequired[list[dict]]  # deterministic flight results used only for branching/response context
-    has_flights: NotRequired[bool]           # True when flight_options contains usable route data
+    trip_start: NotRequired[str]             # approximate trip start as YYYY-MM-DD or YYYY-MM
+    flight_options: NotRequired[list[dict]]  # deterministic outbound flight results
+    return_flight_options: NotRequired[list[dict]]  # deterministic return flight results (destination -> origin)
+    has_flights: NotRequired[bool]           # True when both outbound and return options are usable
     travel_plan: NotRequired[dict]           # curated TravelPlan dump produced by TravelAgentNode for the formatter
     itinerary_plan: NotRequired[dict]        # curated day-by-day itinerary produced by itinerary agent
     intent: str                    # intent classification
 
     # --- Itinerary Step-by-Step Execution ---
-    current_step_index: NotRequired[int]        # Tracks which step the Executor should run next
-    itinerary_feasible: NotRequired[bool]       # True if plan is progressing, False on hard failure
-    itinerary_fallback_reason: NotRequired[str] # Set by Replanner on max retries; read by Formatter
-    itinerary_mode: NotRequired[str]            # "with_travel_data" | "standalone"
-    replanner_action: NotRequired[str]          # Edge routing signal: "continue" | "replan" | "done"
-    itinerary_enrichment_complete: NotRequired[bool]          # True once ItineraryEnrichmentNode passes through
-    itinerary_selected_hotel: NotRequired[dict]               # Raw hotel dict (lat/lng/price) from DB
-    itinerary_selected_outbound_flight: NotRequired[dict]     # Raw outbound flight dict (times/price)
-    itinerary_selected_return_flight: NotRequired[dict]       # Raw return flight dict (times/price)
+    current_step_index: NotRequired[int]               # Tracks which step the Executor should run next
+    itinerary_feasible: NotRequired[bool]              # True if plan is progressing, False on hard failure
+    itinerary_fallback_reason: NotRequired[str]        # Set by Replanner on max retries; read by Formatter
+    itinerary_mode: NotRequired[str]                   # "with_travel_data" | "standalone" | "redirect_to_travel"
+    replanner_action: NotRequired[str]                 # Edge routing signal: "continue" | "replan" | "done"
+    itinerary_selected_hotel: NotRequired[dict]        # Raw hotel dict (lat/lng/price) from DB
+    itinerary_selected_outbound_flight: NotRequired[dict]  # Raw outbound flight dict (times/price)
+    itinerary_selected_return_flight: NotRequired[dict]    # Raw return flight dict (times/price)
 
     # --- Advisor ---
     advisor_plan: list                 # list of {tool_name, args} dicts produced by advisor_planner
