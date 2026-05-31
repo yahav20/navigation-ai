@@ -120,7 +120,7 @@ def _run_turn(
 
     while True:
         last_node_start = time.perf_counter()
-        pending_interrupt: str | None = None
+        pending_interrupt: str | dict | None = None
 
         with ui.thinking(current_state) as display:
             for mode, data in graph.stream(stream_input, config, stream_mode=["values", "updates"]):
@@ -132,7 +132,8 @@ def _run_turn(
                     # LangGraph surfaces interrupt() calls as a special update key.
                     if node_name == "__interrupt__":
                         interrupts = data["__interrupt__"]
-                        pending_interrupt = str(interrupts[0].value) if interrupts else ""
+                        # Preserve dict payloads (choice widgets) intact; stringify plain text.
+                        pending_interrupt = interrupts[0].value if interrupts else ""
                         continue
 
                     if node_name not in _SELF_REPORTING_NODES:
@@ -164,8 +165,20 @@ def _run_turn(
             break
 
         # ── HITL: show the question and collect the user's choice ──────
-        ui.render_agent_message("Atlas", pending_interrupt)
-        user_response = ui.ask_user(prompt_session, state=current_state)
+        if isinstance(pending_interrupt, dict) and "options" in pending_interrupt:
+            # Structured interrupt: render the question then show arrow-key picker.
+            question = pending_interrupt.get("question", "")
+            if question:
+                ui.render_agent_message("Atlas", question)
+            user_response = ui.ask_choice(
+                options=pending_interrupt["options"],
+                state=current_state,
+            )
+        else:
+            # Plain-text interrupt: free-form input.
+            ui.render_agent_message("Atlas", str(pending_interrupt))
+            user_response = ui.ask_user(prompt_session, state=current_state)
+
         if user_response is None or user_response.strip().lower() in ("exit", "quit"):
             break
 

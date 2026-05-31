@@ -42,16 +42,20 @@ class PlanCheckNode:
             resolved["itinerary_mode"] = "with_travel_data"
             return resolved
 
-        # ── Human-in-the-Loop: ask user to choose a path ──────────────
+        # ── Human-in-the-Loop: present a choice widget to the user ───────
         dest_label = destination or "your destination"
-        question = (
-            f"I don't have a travel plan with flights and hotels for your trip to "
-            f"{dest_label} yet.\n\n"
-            "Would you like me to **search for flights and hotels first**, "
-            "or build a **standalone day-by-day itinerary** without specific bookings?\n\n"
-            "Reply **yes** to search for flights & hotels, or **no** for a standalone itinerary."
-        )
-        user_choice: str = interrupt(question)
+        user_choice: str = interrupt({
+            "question": (
+                f"I don't have a travel plan with flights and hotels for your trip to "
+                f"**{dest_label}** yet.\n\n"
+                "Would you like me to search for flights and hotels first, "
+                "or build a standalone day-by-day itinerary without specific bookings?"
+            ),
+            "options": [
+                ("yes", "Search for flights & hotels first"),
+                ("no",  "Build a standalone itinerary"),
+            ],
+        })
 
         if user_choice.strip().lower() in ("yes", "y"):
             # Switch intent to travel planning so after_enrichment routes to

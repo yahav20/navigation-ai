@@ -42,6 +42,15 @@ _PROMPT_STYLE = PTStyle.from_dict({
     "state.sep": "ansibrightblack",
 })
 
+_CHOICE_STYLE = PTStyle.from_dict({
+    "state.corner": "ansibrightmagenta",
+    "state.label": "ansibrightblack",
+    "state.value": "ansiwhite bold",
+    "state.sep": "ansibrightblack",
+    "choice.selected": "ansibrightmagenta bold",
+    "choice.normal": "ansiwhite",
+})
+
 
 def render_banner(provider: str, session_id: str, checkpoint_db: Path, resuming: bool) -> None:
     """Print the startup banner, session info, and the first agent greeting."""
@@ -248,6 +257,74 @@ def ask_user(
         layout=Layout(HSplit([VSplit([label, input_win]), state_win])),
         key_bindings=kb,
         style=_PROMPT_STYLE,
+        full_screen=False,
+    )
+
+    try:
+        return app.run()
+    except (EOFError, KeyboardInterrupt):
+        return None
+
+
+def ask_choice(
+    options: list[tuple[str, str]],
+    state: tuple[str, str, str, str, str] | None = None,
+) -> str | None:
+    """Render an arrow-key selection widget.
+
+    options — list of (value, display_label) pairs
+    Returns the value of the chosen option, or None on Ctrl-C / Ctrl-D.
+    """
+    if not options:
+        return None
+
+    selected = [0]
+    console.print()
+
+    def get_text() -> list[tuple[str, str]]:
+        result: list[tuple[str, str]] = []
+        for i, (_value, label) in enumerate(options):
+            if i == selected[0]:
+                result.append(("class:choice.selected", f"  ❯  {label}"))
+            else:
+                result.append(("class:choice.normal", f"     {label}"))
+            result.append(("", "\n"))
+        return result
+
+    kb = KeyBindings()
+
+    @kb.add("up")
+    def _(event):
+        selected[0] = (selected[0] - 1) % len(options)
+
+    @kb.add("down")
+    def _(event):
+        selected[0] = (selected[0] + 1) % len(options)
+
+    @kb.add("enter")
+    def _(event):
+        event.app.exit(result=options[selected[0]][0])
+
+    @kb.add("c-c")
+    @kb.add("c-d")
+    def _(event):
+        event.app.exit(exception=KeyboardInterrupt())
+
+    choice_win = Window(
+        FormattedTextControl(get_text, focusable=True),
+        height=len(options),
+        always_hide_cursor=True,
+    )
+    state_win = Window(
+        FormattedTextControl(_state_html(state) if state is not None else ""),
+        height=1,
+        always_hide_cursor=True,
+    )
+
+    app: Application = Application(
+        layout=Layout(HSplit([choice_win, state_win])),
+        key_bindings=kb,
+        style=_CHOICE_STYLE,
         full_screen=False,
     )
 
