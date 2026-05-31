@@ -187,6 +187,7 @@ def build_graph(
         after_plan_check,
         {
             "itinerary_planner": "itinerary_planner",
+            "extract_metadata":  "extract_metadata",
             "summary":           "summary",
         }
     )

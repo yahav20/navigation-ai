@@ -18,11 +18,13 @@ def after_plan_check(state: AgentState) -> str:
     """
     Route from PlanCheckNode.
       with_travel_data / standalone → itinerary_planner
-      redirect_to_travel            → summary  (user chose to plan flights first)
+      redirect_to_travel            → extract_metadata  (run travel planning flow)
     """
     mode = state.get("itinerary_mode")
     if mode in ("with_travel_data", "standalone"):
         return "itinerary_planner"
+    if mode == "redirect_to_travel":
+        return "extract_metadata"
     return "summary"
 
 

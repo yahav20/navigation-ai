@@ -17,7 +17,6 @@ from __future__ import annotations
 
 from typing import Optional
 
-from langchain_core.messages import AIMessage
 from langgraph.types import interrupt
 
 from agent.state import AgentState
@@ -55,16 +54,13 @@ class PlanCheckNode:
         user_choice: str = interrupt(question)
 
         if user_choice.strip().lower() in ("yes", "y"):
+            # Switch intent to travel planning so after_enrichment routes to
+            # flight_search instead of looping back to plan_check.
+            # extract_metadata re-reads the conversation history (which already
+            # contains dates / budget the user provided) so trip_start is set.
             return {
+                "intent":        "new_travel_plan",
                 "itinerary_mode": "redirect_to_travel",
-                "messages": [AIMessage(
-                    content=(
-                        f"Great! Let me help you find flights and hotels to {dest_label}. "
-                        "Please share your travel dates (e.g. 'leaving June 15') and I'll "
-                        "search for the best options. Once we have your travel plan, just ask "
-                        "me to build your day-by-day itinerary!"
-                    )
-                )],
             }
 
         return {"itinerary_mode": "standalone"}
