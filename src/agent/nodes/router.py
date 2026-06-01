@@ -114,6 +114,7 @@ class RouterNode:
                 "how many days", "how long to spend", "days in",
                 "romantic", "budget-friendly", "best city for",
                 "recommend a city", "where should i go for",
+                "tell me about", "what is", "history of", "what is the",
             ]
             if any(sig in content_lower for sig in _GENERAL_CHAT_SIGNALS):
                 final_intent = "general_chat"

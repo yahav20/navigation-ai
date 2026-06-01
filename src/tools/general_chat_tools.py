@@ -1,4 +1,4 @@
-"""Dedicated tools for the general chat agent - currency, safety, visa, packing."""
+"""Dedicated tools for the general chat agent - currency, safety, visa, packing, wikipedia."""
 from __future__ import annotations
 
 import json
@@ -567,10 +567,13 @@ def get_local_customs(destination: str) -> dict:
 # Public exports
 # ---------------------------------------------------------------------------
 
+from tools.wikipedia_tool import get_wikipedia_summary
+
 general_chat_tools = [
     get_currency_exchange,
     get_travel_safety_info,
     get_visa_requirements,
     get_packing_list,
     get_local_customs,
+    get_wikipedia_summary,
 ]
