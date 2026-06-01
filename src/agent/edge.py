@@ -62,6 +62,8 @@ def after_router(state: AgentState) -> str:
         return "extract_metadata"
     elif intent == "general_chat":
         return "general_chat"
+    elif intent == "out_of_scope":
+        return "out_of_scope"
     else:
         return END
 

@@ -46,15 +46,23 @@ class RouterNode:
            destination ideas, activities in a city, weather, city overviews, trip duration,
            budget exploration, travel recommendations — anything that is asking for travel INFO.
            Even questions like "I'm going to Tokyo, what should I do?" belong here.
+           City-specific questions (weather, activities, safety in a city) ALWAYS go here,
+           even if they sound casual.
         2. 'new_travel_plan': User commits to a SPECIFIC destination and wants flights/hotels/costs.
            ("I want to fly to Rome — show me flights", "Let's book a trip to Madrid").
            ONLY use when the user is ready to START PLANNING a specific trip, not just exploring.
-        3. 'build_itinerary': ONLY when user EXPLICITLY asks for a day-by-day schedule.
+        3. 'build_itinerary': ONLY when user EXPLICITLY asks for a day-by-day SCHEDULE.
            ("Build a 3-day itinerary for Rome", "plan my days in Paris", "replan for $700").
-           "How should I split my time?" or "how many days per city?" → 'advisor', NOT here.
+           "How should I split my time?", "what should I do in Paris for 3 days?",
+           "give me ideas for a trip", or "can you help me plan my trip?" → 'advisor', NOT here.
         4. 'update_travel_plan': Changing an existing confirmed plan's parameters (budget, dates, destination).
-        5. 'general_chat': ONLY pure non-travel conversation — "Hello", "Thanks", "What can you do?".
-           NEVER use for any travel question, even casual ones.
+        5. 'general_chat': ONLY for greetings ("Hello", "Thanks", "What can you do?") and general
+           travel LOGISTICS that are NOT destination-specific: visa requirements, tipping etiquette,
+           currency, packing tips, meta questions about the bot ("what do you remember?").
+           NOT for city-specific questions ("What's the weather in Paris?" → 'advisor').
+           NEVER use for any destination discovery or travel information query.
+        6. 'out_of_scope': ONLY for queries with ZERO travel relevance — food recipes, math,
+           coding, general trivia. If there is any doubt, prefer 'general_chat' over 'out_of_scope'.
 
         TRANSITION RULE (critical): If the system is in ACTIVE ADVISOR FLOW and the user
         says something like "plan this trip", "let's go", "book this", "sounds good let's do it",
@@ -100,5 +108,9 @@ class RouterNode:
             trigger_words = ["replan", "full plan", "schedule", "schedule", "plan", "  itinerary", "day-by-day", "day by day", "build my trip", "build this trip", "plan this trip", "sounds good let's do it", "let's go", "I want to go there"]
             if any(word in content_lower for word in trigger_words):
                 final_intent = "build_itinerary"
+
+        # Guardrail 5: out_of_scope cannot be overridden by trip context
+        if final_intent == "out_of_scope":
+            return {"intent": "out_of_scope"}
 
         return {"intent": final_intent}
