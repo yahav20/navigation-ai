@@ -49,9 +49,10 @@ class RouterNode:
         2. 'new_travel_plan': User commits to a SPECIFIC destination and wants flights/hotels/costs.
            ("I want to fly to Rome — show me flights", "Let's book a trip to Madrid").
            ONLY use when the user is ready to START PLANNING a specific trip, not just exploring.
-        3. 'build_itinerary': ONLY when user EXPLICITLY asks for a day-by-day schedule.
+        3. 'build_itinerary': ONLY when user EXPLICITLY asks for a day-by-day SCHEDULE.
            ("Build a 3-day itinerary for Rome", "plan my days in Paris", "replan for $700").
-           "How should I split my time?" or "how many days per city?" → 'advisor', NOT here.
+           "How should I split my time?", "what should I do in Paris for 3 days?",
+           "give me ideas for a trip", or "can you help me plan my trip?" → 'advisor', NOT here.
         4. 'update_travel_plan': Changing an existing confirmed plan's parameters (budget, dates, destination).
         5. 'general_chat': Conversational queries that do NOT require trip planning. Use for:
            - Greetings, thanks, "what can you do?"
@@ -79,6 +80,14 @@ class RouterNode:
         # Exception: if we were in an advisor flow, keep it as advisor
         final_intent = classification.intent
 
+        # Guardrail 0: Preserve build_itinerary intent across enrichment turns.
+        # EnrichmentNode may ask follow-up questions (destination, days, etc.) before
+        # setting enrichment_complete=True. Keep build_itinerary so the graph stays
+        # on the itinerary path and eventually reaches plan_check.
+        if (state.get("intent") == "build_itinerary"
+                and not state.get("enrichment_complete", False)):
+            final_intent = "build_itinerary"
+
         # Guardrail 1: Both high-level planning and micro-planning require a destination.
         # If the user asks for a plan or itinerary but we don't have a destination, route to advisor.
         if final_intent in ["new_travel_plan", "build_itinerary"]:
@@ -97,7 +106,7 @@ class RouterNode:
         if final_intent == "update_travel_plan":
             content_lower = last_msg.content.lower()
             # If the user used planning/replanning trigger words, force route to Planner
-            trigger_words = ["replan", "full plan", "schedule", "לוז", "תכנון מלא", "תבנה לי"]
+            trigger_words = ["replan", "full plan", "schedule", "schedule", "plan", "  itinerary", "day-by-day", "day by day", "build my trip", "build this trip", "plan this trip", "sounds good let's do it", "let's go", "I want to go there"]
             if any(word in content_lower for word in trigger_words):
                 final_intent = "build_itinerary"
 
@@ -118,5 +127,8 @@ class RouterNode:
             ]
             if any(sig in content_lower for sig in _GENERAL_CHAT_SIGNALS):
                 final_intent = "general_chat"
+        # Guardrail 6: out_of_scope cannot be overridden by trip context
+        if final_intent == "out_of_scope":
+            return {"intent": "out_of_scope"}
 
         return {"intent": final_intent}

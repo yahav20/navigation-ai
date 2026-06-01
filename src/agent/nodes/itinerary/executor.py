@@ -1,64 +1,28 @@
 """
-ItineraryExecutorNode — v4
+ItineraryExecutorNode — v5
 ==========================
 
-ARCHITECTURE
-────────────
-The Executor runs ONE step per graph invocation. After each step it writes
-`itinerary_feasible` into state so the Observer can gate the next step.
+Runs ONE step per graph invocation. After each step it writes
+`itinerary_feasible` into state so the Replanner can gate the next step.
 
 Flow per invocation:
   1. Load plan, results, history from state
-  2. Anti-loop guard — if step_type failed too many times → fallback_used
-  3. Dispatch to the correct handler:
-       fetch_*          → _run_fetch_step  (ReAct: Thought → Tool → Reflect)
-       fetch_activities → _run_fetch_step  THEN _select_activities (separate concern)
-       build_day_*      → _run_build_day   (pure Python, no LLM thought needed)
-       verify_budget    → _run_verify_budget (pure Python)
-  4. Write structured result to step_results
-  5. Append to execution_history
-  6. If result.status == "failed" → set itinerary_feasible=False so Observer
-     knows to halt and replan BEFORE advancing to the next step
+  2. Dispatch to the correct handler based on step_type
+  3. Write structured result to step_results
+  4. Advance current_step_index
+  5. If result.status == "failed" → set itinerary_feasible=False
 
-CRITICAL FIX: fetch_activities dispatch
-  fetch_activities was registered in TOOL_REGISTRY *and* had a dead elif branch.
-  Now: fetch_activities is NOT in TOOL_REGISTRY. It has its own dedicated
-  handler (_run_fetch_activities) that fetches, then runs ActivitySelector.
+Two modes (read from state["itinerary_mode"]):
+  with_travel_data — DayConfig uses real arrival/departure/hotel from travel_plan.
+                     verify_budget uses real flight + hotel prices.
+  standalone       — DayConfig has no flight anchors, all days start at 08:00.
+                     verify_budget calls get_average_location_cost for estimates.
 
-CRITICAL FIX: failure signalling
-  On any failed step the Executor now sets itinerary_feasible=False in the
-  returned state. The Observer reads this on the *next* invocation's mid-exec
-  check and triggers a replan before the next step runs.
-
-STRUCTURED STEP RESULTS
-  Every entry in step_results:
-    {
-      "status":      "success" | "failed" | "fallback_used",
-      "data":        <raw output or None>,
-      "error":       <str | None>,
-      "replan_hint": <actionable string for Planner>,
-      "trace": {
-        "thought":     str,
-        "action":      str,
-        "args":        dict,
-        "observation": str,
-        "reflection":  str,
-      }
-    }
-
-EXECUTION HISTORY
-  plan_state["execution_history"] — list of:
-    { step_type, step_id, status, error, replan_hint, args }
-  Used by anti-loop guard and Observer's replan context builder.
-
-TOOL DE-DUPLICATION
-  Same (step_type, canonical_args) that previously succeeded → cache hit,
-  no tool call. Failed steps are always retried (Planner put them there
-  for a reason). build_day_schedule and verify_budget are never cached.
-
-ANTI-LOOP GUARD
-  If a step_type appears as "failed" ≥ MAX_STEP_RETRIES times in
-  execution_history → return status="fallback_used" immediately.
+Step handlers:
+  fetch_activities → _run_fetch_activities  (fetch + ActivitySelector)
+  fetch_weather    → _run_fetch_step        (simple tool call)
+  build_day_*      → _run_build_day         (pure Python, ScheduleEngine)
+  verify_budget    → _run_verify_budget     (pure Python, mode-aware)
 """
 from __future__ import annotations
 
@@ -70,53 +34,27 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from agent.nodes.itinerary.schemas import ExecutionPlan
 from agent.nodes.itinerary.itinerary_tools import (
-    search_outbound_flights, search_return_flights,
-    search_hotels, search_activities,
-    get_weather, calculate_trip_cost,
+    search_activities, get_weather, calculate_trip_cost, get_average_location_cost,
 )
 from agent.nodes.itinerary.schedule_engine import DayConfig, DayScheduleBuilder
 from agent.nodes.itinerary.activity_selector import select_activities_per_day, resolve_candidates
 from agent.state import AgentState
 
-# ── Safety limits ──────────────────────────────────────────────────────────
-MAX_STEP_RETRIES = 2   # failures of same step_type before fallback_used
-
-# ── Tool registry — fetch_* steps only (NOT fetch_activities or compute steps)
-# Each entry: step_type → (tool_fn, arg_builder_fn)
-# ──────────────────────────────────────────────────────────────────────────
-
-def _args_fetch_flights(destination: str, origin: str, **_) -> dict:
-    return {"origin": origin, "destination": destination}
-
-def _args_fetch_return_flights(destination: str, origin: str, **_) -> dict:
-    return {"origin": destination, "destination": origin}
-
-def _args_fetch_hotels(destination: str, prefs: dict, **_) -> dict:
-    dietary = str(prefs.get("dietary_restrictions", "")).lower()
-    return {"city": destination, "kosher_only": "kosher" in dietary}
-
+# ── Tool registry — simple fetch_* steps only ─────────────────────────────
 def _args_fetch_weather(destination: str, **_) -> dict:
     return {"city": destination}
 
 TOOL_REGISTRY: dict[str, tuple] = {
-    "fetch_flights":        (search_outbound_flights,  _args_fetch_flights),
-    "fetch_return_flights": (search_return_flights,    _args_fetch_return_flights),
-    "fetch_hotels":         (search_hotels,            _args_fetch_hotels),
-    "fetch_weather":        (get_weather,              _args_fetch_weather),
-    # fetch_activities intentionally EXCLUDED — handled by _run_fetch_activities
+    "fetch_weather": (get_weather, _args_fetch_weather),
 }
 
-# ── Step types that MUST succeed before build_day_schedule can run ─────────
-# Used by the Planner dependency validator (see planner.py) AND by the
-# Executor to generate an accurate replan_hint when a build step finds
-# its prerequisites missing.
-BUILD_PREREQUISITES = {"fetch_flights", "fetch_return_flights", "fetch_hotels", "fetch_activities"}
+# ── Build prerequisites — must have successful results before build_day ───
+BUILD_PREREQUISITES = {"fetch_activities"}
 
 # ── ReAct prompts ──────────────────────────────────────────────────────────
 
 REACT_THOUGHT_SYSTEM = """
 You are a travel data-fetching agent about to execute one step.
-
 Given the step type and its arguments, produce a brief reasoning trace.
 
 Respond ONLY as JSON (no markdown fences):
@@ -132,7 +70,7 @@ You are evaluating the result of one travel data-fetching step.
 Rules:
 - A non-empty list or dict with real data → "success"
 - An empty list [], empty dict {}, or None → "failed"
-- A dict containing an "error" key → "failed"
+- A dict containing an "error" key with a value → "failed"
 
 Respond ONLY as JSON (no markdown fences):
 {
@@ -143,19 +81,20 @@ Respond ONLY as JSON (no markdown fences):
 """
 
 
-# ── Node ───────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Node
+# ---------------------------------------------------------------------------
 
 class ItineraryExecutorNode:
     def __init__(self, llm: BaseChatModel) -> None:
         self.llm = llm
 
-    # ── Main entry point ───────────────────────────────────────────────────
-
     def __call__(self, state: AgentState) -> dict:
-        plan_state    = state.get("itinerary_plan", {})
-        plan          = ExecutionPlan(**plan_state["execution_plan"])
-        results       = dict(plan_state.get("step_results", {}))
+        plan_state = state.get("itinerary_plan", {})
+        plan       = ExecutionPlan(**plan_state["execution_plan"])
+        results    = dict(plan_state.get("step_results", {}))
         history: list[dict] = list(plan_state.get("execution_history", []))
+        mode       = state.get("itinerary_mode", "standalone")
 
         destination = state.get("destination_city", "")
         origin      = state.get("current_city", "")
@@ -166,9 +105,8 @@ class ItineraryExecutorNode:
         current_index = state.get("current_step_index", 0)
 
         if current_index >= len(plan.steps):
-            # All steps done — let the Observer finalise
             return _state_update(current_index, plan_state, results, history,
-                                 ["✅ All steps complete — passing to Observer."],
+                                 ["✅ All steps complete — passing to Replanner."],
                                  feasible=True)
 
         step     = plan.steps[current_index]
@@ -179,27 +117,8 @@ class ItineraryExecutorNode:
             + (f" (Day {step.day})" if step.day else "")
         ]
 
-        ctx = dict(destination=destination, origin=origin, trip_days=trip_days,
-                   budget=budget, prefs=prefs)
-
-        # ── Anti-loop guard ────────────────────────────────────────────────
-        prior_fails = _prior_failures(history, step.step_type)
-        if prior_fails >= MAX_STEP_RETRIES:
-            result = _wrap_result(
-                status="fallback_used",
-                data=None,
-                error=f"`{step.step_type}` has failed {prior_fails} times previously.",
-                replan_hint=(
-                    f"`{step.step_type}` repeatedly failed. "
-                    "Escalate to Fallback or remove from plan."
-                ),
-                trace=_minimal_trace(step.step_type, {},
-                                     f"{prior_fails} prior failures — anti-loop guard.",
-                                     "Refusing to retry."),
-            )
-            log_lines.append(f"🚫 Anti-loop: {prior_fails} prior failures — escalating to fallback.")
-            return self._commit(step, step_key, result, current_index,
-                                plan_state, results, history, log_lines)
+        ctx = dict(destination=destination, origin=origin,
+                   trip_days=trip_days, budget=budget, prefs=prefs)
 
         # ── Dispatch ───────────────────────────────────────────────────────
         if step.step_type in TOOL_REGISTRY:
@@ -210,71 +129,59 @@ class ItineraryExecutorNode:
 
         elif step.step_type == "build_day_schedule":
             current_plan_keys = {f"{s.step_type}_{s.step_id}" for s in plan.steps}
-            result = self._run_build_day(step, results, destination, trip_days,
-                                         current_plan_keys)
+            result = self._run_build_day(
+                step, results, destination, trip_days, current_plan_keys, mode, state,
+            )
 
         elif step.step_type == "verify_budget":
-            result = self._run_verify_budget(results, budget, trip_days)
+            result = self._run_verify_budget(results, budget, trip_days, destination, origin, mode, state)
 
         else:
             result = _wrap_result(
                 status="failed",
                 data=None,
                 error=f"Unknown step_type: `{step.step_type}`",
-                replan_hint=f"Remove or correct unknown step `{step.step_type}` from the plan.",
+                replan_hint=f"Remove unknown step `{step.step_type}` from the plan.",
                 trace=_minimal_trace(step.step_type, {}, "No handler registered.", ""),
             )
 
         return self._commit(step, step_key, result, current_index,
                             plan_state, results, history, log_lines)
 
-    # ── Commit result and build state update ───────────────────────────────
+    # ── Commit ─────────────────────────────────────────────────────────────
 
-    def _commit(
-        self,
-        step,
-        step_key: str,
-        result: dict,
-        current_index: int,
-        plan_state: dict,
-        results: dict,
-        history: list[dict],
-        log_lines: list[str],
-    ) -> dict:
+    def _commit(self, step, step_key, result, current_index,
+                plan_state, results, history, log_lines) -> dict:
         results[step_key] = result
         history.append(_history_entry(step, result))
 
         status = result.get("status", "unknown")
         icon   = {"success": "✅", "failed": "❌", "fallback_used": "🚫"}.get(status, "•")
-        log_lines.append(f"{icon} **{status}**" + (f" — {result['error']}" if result.get("error") else ""))
+        log_lines.append(
+            f"{icon} **{status}**"
+            + (f" — {result['error']}" if result.get("error") else "")
+        )
         if result.get("replan_hint"):
             log_lines.append(f"💡 *Hint:* {result['replan_hint']}")
 
         feasible = status == "success"
-
         return _state_update(current_index, plan_state, results, history,
                              log_lines, feasible=feasible)
 
-    # ── Fetch step handler (ReAct loop) ────────────────────────────────────
+    # ── fetch_weather handler (ReAct) ──────────────────────────────────────
 
-    def _run_fetch_step(self, step, results: dict, history: list[dict], ctx: dict) -> dict:
+    def _run_fetch_step(self, step, results, history, ctx) -> dict:
         tool_fn, arg_builder = TOOL_REGISTRY[step.step_type]
         args = _canonical_args(arg_builder(**ctx))
 
-        # ── Cache hit ──
         cached = _find_cached_result(results, history, step.step_type, args)
         if cached is not None:
             return _wrap_result(
                 status="success", data=cached, error=None, replan_hint="",
-                trace=_minimal_trace(step.step_type, args,
-                                     "Cache hit — reusing prior result.",
-                                     "Valid cached data; no tool call needed."),
+                trace=_minimal_trace(step.step_type, args, "Cache hit.", "Valid cached data."),
             )
 
-        # ── ReAct: Thought ──
         thought_json = self._react_thought(step.step_type, args, ctx)
-
-        # ── Action: call the tool ──
         try:
             raw = tool_fn.invoke(args)
             observation = json.dumps(raw, ensure_ascii=False)[:600]
@@ -282,20 +189,16 @@ class ItineraryExecutorNode:
             raw = None
             observation = f"Tool exception: {exc}"
 
-        # ── Reflection: evaluate result ──
         reflection = self._react_reflect(step.step_type, args, raw, observation)
         status     = reflection.get("status", "failed" if _is_empty(raw) else "success")
         hint       = reflection.get("replan_hint", "")
-        ref_text   = reflection.get("reflection", "")
 
-        # Hard override — empty/None always fails regardless of LLM reflection
         if _is_empty(raw):
             status = "failed"
             if not hint:
                 hint = (
-                    f"`{step.step_type}` returned no data for "
-                    f"origin='{ctx.get('origin')}' destination='{ctx.get('destination')}'. "
-                    "Check spelling, verify DB has this route/city."
+                    f"`{step.step_type}` returned no data for destination "
+                    f"'{ctx.get('destination')}'. Check city name spelling."
                 )
 
         return _wrap_result(
@@ -308,43 +211,33 @@ class ItineraryExecutorNode:
                 "action":      step.step_type,
                 "args":        args,
                 "observation": observation,
-                "reflection":  ref_text,
+                "reflection":  reflection.get("reflection", ""),
             },
         )
 
-    # ── fetch_activities handler (fetch + ActivitySelector) ────────────────
+    # ── fetch_activities handler ───────────────────────────────────────────
 
-    def _run_fetch_activities(
-        self, step, results: dict, history: list[dict], ctx: dict, trip_days: int
-    ) -> dict:
-        """
-        Two-phase:
-          1. Fetch raw activities from DB (same ReAct pattern as other fetches)
-          2. Run ActivitySelector (LLM ranks + clusters by day)
-        Both phases must succeed for status="success".
-        ActivitySelector failure falls back to rating-sorted round-robin.
-        """
+    def _run_fetch_activities(self, step, results, history, ctx, trip_days) -> dict:
         destination = ctx["destination"]
         prefs       = ctx["prefs"]
         dietary     = str(prefs.get("dietary_restrictions", "")).lower()
 
         args = _canonical_args({
-            "city":                 destination,
-            "kosher_only":          "kosher" in dietary,
-            "vegetarian_friendly":  "vegetarian" in dietary,
-            "vegan_friendly":       "vegan" in dietary,
+            "city":                destination,
+            "kosher_only":         "kosher" in dietary,
+            "vegetarian_friendly": "vegetarian" in dietary,
+            "vegan_friendly":      "vegan" in dietary,
         })
 
-        # Cache check
         cached = _find_cached_result(results, history, "fetch_activities", args)
         if cached is not None:
             return _wrap_result(
                 status="success", data=cached, error=None, replan_hint="",
                 trace=_minimal_trace("fetch_activities", args,
-                                     "Cache hit.", "Using cached activities + selection."),
+                                     "Cache hit.", "Using cached activities."),
             )
 
-        # Phase 1 — Fetch
+        # Phase 1 — fetch
         thought_json = self._react_thought("fetch_activities", args, ctx)
         try:
             raw: list[dict] = search_activities.invoke(args)
@@ -360,22 +253,17 @@ class ItineraryExecutorNode:
                 error=observation,
                 replan_hint=(
                     f"No activities found for '{destination}'. "
-                    "Verify city name spelling or check that the DB has activities for this city."
+                    "Verify city name or check that the DB has activities for this city."
                 ),
                 trace={
-                    "thought":     thought_json.get("thought", ""),
-                    "action":      "fetch_activities",
-                    "args":        args,
+                    "thought": thought_json.get("thought", ""),
+                    "action": "fetch_activities", "args": args,
                     "observation": observation,
-                    "reflection":  "Empty activity list — cannot build schedule.",
+                    "reflection": "Empty activity list — cannot build schedule.",
                 },
             )
 
         # Phase 2 — ActivitySelector
-        selector_thought = (
-            f"Running ActivitySelector for {trip_days} days. "
-            f"Applying geographic clustering and energy-curve ordering."
-        )
         try:
             selection = select_activities_per_day(
                 llm=self.llm,
@@ -385,19 +273,15 @@ class ItineraryExecutorNode:
                 destination=destination,
             )
             selector_obs = (
-                f"ActivitySelector assigned activities to {len(selection)} days: "
-                + ", ".join(f"day_{d}: {len(v)} activities" for d, v in
-                            enumerate(selection.values(), 1))
+                f"ActivitySelector assigned activities to {len(selection)} days."
             )
         except Exception as exc:
-            # Fallback: round-robin by rating — still success, degraded quality
             sorted_acts = sorted(raw, key=lambda a: -a.get("rating", 0))
-            names = [a["name"] for a in sorted_acts]
             selection = {
-                f"day_{d}": names[(d - 1) * 5: d * 5]
+                f"day_{d}": [a["name"] for a in sorted_acts[(d - 1) * 5: d * 5]]
                 for d in range(1, trip_days + 1)
             }
-            selector_obs = f"ActivitySelector LLM failed ({exc}); used rating-sorted fallback."
+            selector_obs = f"ActivitySelector failed ({exc}); used rating-sorted fallback."
 
         data = {"activities": raw, "selection": selection}
         return _wrap_result(
@@ -406,7 +290,7 @@ class ItineraryExecutorNode:
             error=None,
             replan_hint="",
             trace={
-                "thought":     thought_json.get("thought", "") + " | " + selector_thought,
+                "thought":     thought_json.get("thought", ""),
                 "action":      "fetch_activities",
                 "args":        args,
                 "observation": observation + " | " + selector_obs,
@@ -414,16 +298,15 @@ class ItineraryExecutorNode:
             },
         )
 
-    # ── build_day_schedule handler (pure Python — no LLM thought) ──────────
+    # ── build_day_schedule handler ─────────────────────────────────────────
 
     def _run_build_day(
-        self, step, results: dict, destination: str, trip_days: int,
-        current_plan_keys: set[str],
+        self, step, results, destination, trip_days,
+        current_plan_keys, mode, state,
     ) -> dict:
         day_num = step.day or 1
         action  = f"build_day_schedule (Day {day_num})"
 
-        # ── Prerequisite check ─────────────────────────────────────────────
         missing = _missing_prerequisites(results)
         if missing:
             return _wrap_result(
@@ -431,29 +314,20 @@ class ItineraryExecutorNode:
                 data=None,
                 error=f"Day {day_num}: prerequisites missing: {missing}",
                 replan_hint=(
-                    f"Day {day_num} cannot be built: {missing} have no successful result yet. "
-                    f"Re-include {missing} in the plan before build_day_schedule steps."
+                    f"Day {day_num} cannot be built: {missing} have no successful result. "
+                    f"Re-include them in the plan before build_day_schedule."
                 ),
                 trace=_minimal_trace(action, {"day": day_num},
-                                     f"Prerequisites missing: {missing}",
-                                     "Cannot build schedule without flight/hotel/activity data."),
+                                     f"Prerequisites missing: {missing}", ""),
             )
 
-        # ── Resolve inputs ─────────────────────────────────────────────────
-        outbound  = _cheapest_data(results, "fetch_flights")
-        ret       = _cheapest_data(results, "fetch_return_flights")
-        hotel_raw = _cheapest_data(results, "fetch_hotels")
         acts_data = _unwrap_data(results, "fetch_activities")
-
         all_activities: list[dict] = []
         selection: dict[str, list[str]] = {}
         if isinstance(acts_data, dict):
             all_activities = acts_data.get("activities", [])
             selection      = acts_data.get("selection", {})
 
-        # Activities for this day (exclude already-scheduled in THIS plan run only —
-        # stale build_day_schedule_* results from prior plan attempts use renumbered
-        # step_ids and would otherwise pollute `used`, emptying day candidates).
         day_names  = selection.get(f"day_{day_num}", [])
         used       = _used_activities(results, current_plan_keys)
         day_names  = [n for n in day_names if n not in used]
@@ -466,38 +340,17 @@ class ItineraryExecutorNode:
                 error=f"Day {day_num}: no activity candidates after deduplication.",
                 replan_hint=(
                     f"Day {day_num} has no unscheduled candidates. "
-                    "Re-run fetch_activities so ActivitySelector can reassign activities, "
-                    "or increase activities pool for this destination."
+                    "Re-run fetch_activities so ActivitySelector can reassign."
                 ),
                 trace=_minimal_trace(action, {"day": day_num},
-                                     "resolve_candidates returned [].",
-                                     "No schedulable activities for this day."),
+                                     "resolve_candidates returned [].", ""),
             )
 
         # ── Build DayConfig ────────────────────────────────────────────────
-        hotel_name  = _safe_get(hotel_raw, "name", "Hotel")
-        hotel_lat   = float(_safe_get(hotel_raw, "latitude") or _safe_get(hotel_raw, "lat") or 48.85)
-        hotel_lng   = float(_safe_get(hotel_raw, "longitude") or _safe_get(hotel_raw, "lng") or 2.35)
-        hotel_bk    = bool(_safe_get(hotel_raw, "breakfast_available", False))
-        hotel_price = float(_safe_get(hotel_raw, "price_per_night", 0))
-
-        arrival_raw    = _safe_get(outbound, "arrival_time",   "14:00")
-        departure_raw  = _safe_get(ret,      "departure_time", "20:00")
-        arrival_time   = _normalize_time(str(arrival_raw))
-        departure_time = _normalize_time(str(departure_raw))
-
-        cfg = DayConfig(
-            day_number=day_num,
-            total_days=trip_days,
-            hotel_name=hotel_name,
-            hotel_lat=hotel_lat,
-            hotel_lng=hotel_lng,
-            hotel_has_breakfast=hotel_bk,
-            is_first_day=(day_num == 1),
-            arrival_time=arrival_time if day_num == 1 else None,
-            is_last_day=(day_num == trip_days),
-            departure_time=departure_time if day_num == trip_days else None,
-        )
+        if mode == "with_travel_data":
+            cfg = self._build_config_from_travel_plan(state, day_num, trip_days, candidates)
+        else:
+            cfg = self._build_config_standalone(state, day_num, trip_days, candidates)
 
         # ── Run ScheduleEngine ─────────────────────────────────────────────
         try:
@@ -510,10 +363,9 @@ class ItineraryExecutorNode:
                 error=f"ScheduleEngine exception on Day {day_num}: {exc}",
                 replan_hint=(
                     f"ScheduleEngine crashed on Day {day_num}: {exc}. "
-                    "Check activity opening/closing times and coordinates in the DB."
+                    "Check activity opening/closing times and coordinates."
                 ),
-                trace=_minimal_trace(action, {"day": day_num},
-                                     f"ScheduleEngine raised: {exc}", ""),
+                trace=_minimal_trace(action, {"day": day_num}, str(exc), ""),
             )
 
         if not slots:
@@ -522,16 +374,13 @@ class ItineraryExecutorNode:
                 data=None,
                 error=f"Day {day_num}: ScheduleEngine produced no slots.",
                 replan_hint=(
-                    f"Day {day_num}: ScheduleEngine returned empty schedule. "
-                    "All candidates may be outside their operating hours on this day. "
+                    f"Day {day_num}: all candidates may be outside operating hours. "
                     "Try different activities or broaden the candidates pool."
                 ),
                 trace=_minimal_trace(action, {"day": day_num, "candidates": len(candidates)},
-                                     "ScheduleEngine.build() returned [].",
-                                     "No valid time window found for any candidate."),
+                                     "build() returned [].", ""),
             )
 
-        # ── Assemble result ────────────────────────────────────────────────
         day_cost = round(sum(float(s.get("estimated_cost", 0)) for s in slots), 2)
         day_themes = {
             1:         f"Arrival & first impressions of {destination}",
@@ -540,53 +389,102 @@ class ItineraryExecutorNode:
         theme = day_themes.get(day_num, f"Day {day_num} — Explore {destination}")
 
         data = {
-            "day":                 day_num,
-            "theme":               theme,
-            "slots":               slots,
-            "day_cost":            day_cost,
-            "hotel":               hotel_name,
-            "hotel_price_per_night": hotel_price,
+            "day":   day_num,
+            "theme": theme,
+            "slots": slots,
+            "day_cost": day_cost,
+            "hotel":    cfg.hotel_name,
+            "hotel_price_per_night": 0.0 if mode == "standalone" else self._hotel_price(state),
         }
-
         return _wrap_result(
-            status="success",
-            data=data,
-            error=None,
-            replan_hint="",
-            trace=_minimal_trace(
-                action, {"day": day_num, "candidates": len(candidates)},
-                f"Built {len(slots)} slots. Day cost: ${day_cost}.",
-                f"Day {day_num} schedule complete.",
-            ),
+            status="success", data=data, error=None, replan_hint="",
+            trace=_minimal_trace(action, {"day": day_num, "candidates": len(candidates)},
+                                 f"Built {len(slots)} slots. Day cost: ${day_cost}.",
+                                 f"Day {day_num} complete."),
         )
 
-    # ── verify_budget handler (pure Python) ────────────────────────────────
+    def _build_config_from_travel_plan(
+        self, state, day_num, trip_days, candidates,
+    ) -> DayConfig:
+        # Raw hotel resolved by PlanCheckNode (has lat/lng/price)
+        hotel = state.get("itinerary_selected_hotel") or {}
+        flight_out = state.get("itinerary_selected_outbound_flight") or {}
+        flight_ret = state.get("itinerary_selected_return_flight") or {}
 
-    def _run_verify_budget(self, results: dict, budget: float, trip_days: int) -> dict:
-        # ── Prerequisite check ─────────────────────────────────────────────
+        hotel_name = hotel.get("name", "Hotel")
+        hotel_lat  = float(hotel.get("latitude") or hotel.get("lat") or 48.85)
+        hotel_lng  = float(hotel.get("longitude") or hotel.get("lng") or 2.35)
+        hotel_bk   = bool(hotel.get("breakfast_included") or hotel.get("breakfast_available", False))
+
+        arrival_raw   = flight_out.get("arrival_time",   "14:00") if day_num == 1        else None
+        departure_raw = flight_ret.get("departure_time", "20:00") if day_num == trip_days else None
+
+        prefs = state.get("user_preferences") or {}
+        return DayConfig(
+            day_number=day_num,
+            total_days=trip_days,
+            hotel_name=hotel_name,
+            hotel_lat=hotel_lat,
+            hotel_lng=hotel_lng,
+            hotel_has_breakfast=hotel_bk,
+            is_first_day=(day_num == 1),
+            arrival_time=_normalize_time(str(arrival_raw)) if arrival_raw else None,
+            is_last_day=(day_num == trip_days),
+            departure_time=_normalize_time(str(departure_raw)) if departure_raw else None,
+            day_start_time=prefs.get("day_start_time", "09:00"),
+            day_end_time=prefs.get("day_end_time",   "21:00"),
+        )
+
+    def _build_config_standalone(
+        self, state, day_num, trip_days, candidates,
+    ) -> DayConfig:
+        """Derive a city-centre home base from activity coordinates."""
+        lats = [c.lat for c in candidates if c.lat]
+        lngs = [c.lng for c in candidates if c.lng]
+        center_lat = sum(lats) / len(lats) if lats else 0.0
+        center_lng = sum(lngs) / len(lngs) if lngs else 0.0
+
+        prefs = state.get("user_preferences") or {}
+        return DayConfig(
+            day_number=day_num,
+            total_days=trip_days,
+            hotel_name="",
+            hotel_lat=center_lat,
+            hotel_lng=center_lng,
+            hotel_has_breakfast=False,
+            is_first_day=(day_num == 1),
+            arrival_time=None,
+            is_last_day=(day_num == trip_days),
+            departure_time=None,
+            day_start_time=prefs.get("day_start_time", "09:00"),
+            day_end_time=prefs.get("day_end_time",   "21:00"),
+        )
+
+    def _hotel_price(self, state) -> float:
+        tp = state.get("travel_plan") or {}
+        hotels = tp.get("hotels", [])
+        if hotels:
+            return float(hotels[0].get("price_per_night", 0))
+        return 0.0
+
+    # ── verify_budget handler ──────────────────────────────────────────────
+
+    def _run_verify_budget(self, results, budget, trip_days, destination, origin, mode, state=None) -> dict:
         missing = _missing_prerequisites(results)
         if missing:
             return _wrap_result(
                 status="failed",
                 data=None,
                 error=f"verify_budget prerequisites missing: {missing}",
-                replan_hint=(
-                    f"Cannot calculate budget: {missing} have no successful result. "
-                    f"Re-include those fetch steps in the plan."
-                ),
+                replan_hint=f"Cannot calculate budget: {missing} have no result yet.",
                 trace=_minimal_trace("verify_budget", {"budget": budget},
                                      f"Missing: {missing}", ""),
             )
 
-        outbound = _cheapest_data(results, "fetch_flights")
-        ret      = _cheapest_data(results, "fetch_return_flights")
-        hotel    = _cheapest_data(results, "fetch_hotels")
-
-        # Aggregate actual costs from built day schedules
+        # Collect activities + meals cost from built day schedules
         activities_cost = 0.0
         meals_cost      = 0.0
         days_built      = 0
-
         for key, wrapped in results.items():
             if not key.startswith("build_day_schedule"):
                 continue
@@ -603,11 +501,53 @@ class ItineraryExecutorNode:
 
         meal_per_day = meals_cost / days_built if days_built > 0 else 60.0
 
+        # Get flight + hotel prices based on mode
+        avg_prices: Optional[dict] = None  # populated in standalone mode for formatter
+
+        if mode == "with_travel_data":
+            # Read actual flight prices from the resolved raw flights
+            _state = state or {}
+            outbound_fl = _state.get("itinerary_selected_outbound_flight") or {}
+            return_fl   = _state.get("itinerary_selected_return_flight") or {}
+            flight_price = float(outbound_fl.get("price", 0) or 0)
+            ret_price    = float(return_fl.get("price", 0) or return_fl.get("total_price", 0) or 0)
+
+            # Read hotel price from any built day result
+            hotel_per_night = 0.0
+            for key, wrapped in results.items():
+                if key.startswith("build_day_schedule"):
+                    dd = _inner_data(wrapped)
+                    if isinstance(dd, dict) and dd.get("hotel_price_per_night"):
+                        hotel_per_night = float(dd["hotel_price_per_night"])
+                        break
+        else:
+            # Standalone: fetch average prices for the formatter display, but do NOT
+            # count flights in the budget — the user opted not to book flights.
+            try:
+                avg = get_average_location_cost.invoke({
+                    "destination": destination,
+                    "origin":      origin,
+                    "trip_days":   trip_days,
+                })
+                hotel_per_night = float(avg.get("avg_hotel_per_night", 120))
+                avg_prices = avg
+            except Exception:
+                hotel_per_night = 120.0
+                avg_prices = {
+                    "avg_flight_price":        400.0,
+                    "avg_return_flight_price": 400.0,
+                    "avg_hotel_per_night":     hotel_per_night,
+                    "note": "estimated fallback",
+                }
+            # Flights are not booked in standalone — exclude from the budget gate.
+            flight_price = 0.0
+            ret_price    = 0.0
+
         try:
             data = calculate_trip_cost.invoke({
-                "flight_price":                  float(_safe_get(outbound, "price", 0)),
-                "return_flight_price":           float(_safe_get(ret,      "price", 0)),
-                "hotel_price_per_night":         float(_safe_get(hotel,    "price_per_night", 0)),
+                "flight_price":                  flight_price,
+                "return_flight_price":           ret_price,
+                "hotel_price_per_night":         hotel_per_night,
                 "trip_days":                     trip_days,
                 "estimated_activities_budget":   activities_cost,
                 "estimated_meals_budget_per_day": meal_per_day,
@@ -617,42 +557,49 @@ class ItineraryExecutorNode:
                 status="failed",
                 data=None,
                 error=f"calculate_trip_cost raised: {exc}",
-                replan_hint=f"Budget tool failed: {exc}. Check flight/hotel prices are numeric.",
+                replan_hint=f"Budget tool failed: {exc}.",
                 trace=_minimal_trace("verify_budget", {}, str(exc), ""),
             )
 
-        grand_total  = float(data.get("grand_total", 0))
-        over_budget  = bool(budget) and grand_total > budget * 1.05
-        observation  = (
+        grand_total = float(data.get("grand_total", 0))
+        over_budget = bool(budget) and grand_total > budget * 1.05
+        observation = (
             f"Grand total: ${grand_total:.0f} | Budget: ${budget or 'flexible'} | "
             + ("⚠️ OVER BUDGET" if over_budget else "✅ Within budget")
         )
-
         replan_hint = ""
         if over_budget:
             overage = grand_total - budget
             replan_hint = (
                 f"Budget exceeded by ${overage:.0f}. "
-                "Options: (1) cheaper hotel tier, "
-                "(2) reduce trip_days by 1–2, "
-                "(3) remove highest-cost activities from the selection."
+                "Options: cheaper activities, reduce trip_days by 1-2."
             )
 
+        # Standalone: drop the 0-valued flight rows — they're misleading in the budget table.
+        if mode == "standalone":
+            data.pop("outbound_flight", None)
+            data.pop("return_flight", None)
+
+        # Store average prices in the payload so formatter can render estimated prices section.
+        if avg_prices is not None:
+            data["avg_prices"] = avg_prices
+
         return _wrap_result(
-            status="success",       # budget check is informational — Observer decides action
+            status="success",
             data=data,
             error=None,
             replan_hint=replan_hint,
-            trace=_minimal_trace("verify_budget", {"trip_days": trip_days, "budget": budget},
-                                 observation, "Over budget." if over_budget else "Within budget."),
+            trace=_minimal_trace("verify_budget",
+                                 {"trip_days": trip_days, "budget": budget},
+                                 observation,
+                                 "Over budget." if over_budget else "Within budget."),
         )
 
-    # ── ReAct helpers (used only for fetch_* steps) ────────────────────────
+    # ── ReAct helpers ──────────────────────────────────────────────────────
 
-    def _react_thought(self, step_type: str, args: dict, ctx: dict) -> dict:
+    def _react_thought(self, step_type, args, ctx) -> dict:
         prompt = (
-            f"Step: {step_type}\n"
-            f"Args: {json.dumps(args, ensure_ascii=False)}\n"
+            f"Step: {step_type}\nArgs: {json.dumps(args, ensure_ascii=False)}\n"
             f"Context: destination={ctx.get('destination')}, origin={ctx.get('origin')}, "
             f"budget=${ctx.get('budget')}, days={ctx.get('trip_days')}"
         )
@@ -661,15 +608,13 @@ class ItineraryExecutorNode:
                 SystemMessage(content=REACT_THOUGHT_SYSTEM),
                 HumanMessage(content=prompt),
             ]).content.strip()
-            raw = _strip_fences(raw)
-            return json.loads(raw)
+            return json.loads(_strip_fences(raw))
         except Exception:
             return {"thought": f"Executing {step_type}.", "replan_hint": ""}
 
-    def _react_reflect(self, step_type: str, args: dict, result, observation: str) -> dict:
+    def _react_reflect(self, step_type, args, result, observation) -> dict:
         prompt = (
-            f"Step: {step_type}\n"
-            f"Args: {json.dumps(args, ensure_ascii=False)}\n"
+            f"Step: {step_type}\nArgs: {json.dumps(args, ensure_ascii=False)}\n"
             f"Observation (truncated): {observation[:500]}"
         )
         try:
@@ -677,8 +622,7 @@ class ItineraryExecutorNode:
                 SystemMessage(content=REACT_REFLECT_SYSTEM),
                 HumanMessage(content=prompt),
             ]).content.strip()
-            raw = _strip_fences(raw)
-            return json.loads(raw)
+            return json.loads(_strip_fences(raw))
         except Exception:
             empty = _is_empty(result)
             return {
@@ -693,15 +637,15 @@ class ItineraryExecutorNode:
 # ---------------------------------------------------------------------------
 
 def _is_empty(val) -> bool:
-    """True when val conveys no usable data."""
     if val is None:
         return True
     if isinstance(val, list):
         return len(val) == 0
     if isinstance(val, dict):
-        return bool(val.get("error")) or not any(
-            v for k, v in val.items() if k != "error"
-        )
+        error_val = val.get("error")
+        if error_val:   # non-None, non-empty string
+            return True
+        return not any(v for k, v in val.items() if k != "error")
     return False
 
 
@@ -717,15 +661,7 @@ def _canonical_args(args: dict) -> dict:
     return {k: v for k, v in sorted(args.items())}
 
 
-def _prior_failures(history: list[dict], step_type: str) -> int:
-    return sum(1 for h in history
-               if h.get("step_type") == step_type and h.get("status") == "failed")
-
-
-def _find_cached_result(
-    results: dict, history: list[dict], step_type: str, args: dict
-) -> Optional[dict]:
-    """Return cached successful result for identical (step_type, args). None if not found."""
+def _find_cached_result(results, history, step_type, args) -> Optional[dict]:
     never_cache = {"build_day_schedule", "verify_budget"}
     if step_type in never_cache:
         return None
@@ -735,8 +671,7 @@ def _find_cached_result(
                 and h.get("args") == args):
             k = next(
                 (k for k in results
-                 if k.startswith(step_type)
-                 and _inner_data(results[k]) is not None),
+                 if k.startswith(step_type) and _inner_data(results[k]) is not None),
                 None,
             )
             if k:
@@ -745,12 +680,10 @@ def _find_cached_result(
 
 
 def _inner_data(wrapped) -> Optional[dict]:
-    """Extract the data payload from a v3 wrapped result or return the raw value."""
     if isinstance(wrapped, dict) and "status" in wrapped:
         if wrapped.get("status") == "success":
             return wrapped.get("data")
-        return None   # failed result — not usable as cache
-    # v2 raw result
+        return None
     if isinstance(wrapped, dict) and not wrapped.get("error"):
         return wrapped
     if isinstance(wrapped, list):
@@ -758,8 +691,7 @@ def _inner_data(wrapped) -> Optional[dict]:
     return None
 
 
-def _unwrap_data(results: dict, prefix: str) -> Optional[dict]:
-    """Find the first successful result for a given prefix and return its data."""
+def _unwrap_data(results, prefix) -> Optional[dict]:
     for key in results:
         if key.startswith(prefix):
             return _inner_data(results[key])
@@ -767,61 +699,17 @@ def _unwrap_data(results: dict, prefix: str) -> Optional[dict]:
 
 
 def _missing_prerequisites(results: dict) -> list[str]:
-    """
-    Return prerequisite step_types that have no successful result yet.
-    Used by build_day_schedule and verify_budget to detect dependency failures.
-    Only checks the truly blocking ones (flights + hotels + activities).
-    """
-    # fetch_weather is informational — not a hard prerequisite
-    hard_prereqs = {"fetch_flights", "fetch_hotels", "fetch_activities"}
-    missing = []
-    for prereq in hard_prereqs:
-        found = any(
-            key.startswith(prereq) and _inner_data(results[key]) is not None
-            for key in results
+    hard_prereqs = {"fetch_activities"}
+    return [
+        p for p in hard_prereqs
+        if not any(
+            k.startswith(p) and _inner_data(results[k]) is not None
+            for k in results
         )
-        if not found:
-            missing.append(prereq)
-    return missing
+    ]
 
 
-def _cheapest_data(results: dict, prefix: str) -> Optional[dict]:
-    """
-    Return the cheapest item from a fetch result's data payload.
-    Handles: list of flights, list of hotels, or single dict.
-    """
-    data = _unwrap_data(results, prefix)
-    if data is None:
-        return None
-
-    # Hotels tool wraps in {"hotels": [...]}
-    if isinstance(data, dict) and "hotels" in data:
-        items = data["hotels"]
-    elif isinstance(data, list):
-        items = data
-    elif isinstance(data, dict):
-        return data
-    else:
-        return None
-
-    if not items:
-        return None
-
-    def _price(item: dict) -> float:
-        if not isinstance(item, dict):
-            return 9999.0
-        if "price" in item:
-            return float(item["price"])
-        if "price_per_night" in item:
-            return float(item["price_per_night"])
-        return 9999.0
-
-    priced = [i for i in items if isinstance(i, dict) and
-              ("price" in i or "price_per_night" in i)]
-    return min(priced, key=_price) if priced else (items[0] if items else None)
-
-
-def _used_activities(results: dict, current_plan_keys: set[str]) -> set:
+def _used_activities(results, current_plan_keys) -> set:
     used: set[str] = set()
     for key, wrapped in results.items():
         if key not in current_plan_keys:
@@ -835,12 +723,6 @@ def _used_activities(results: dict, current_plan_keys: set[str]) -> set:
     return used
 
 
-def _safe_get(d: Optional[dict], key: str, default=None):
-    if not d or not isinstance(d, dict):
-        return default
-    return d.get(key) or default
-
-
 def _normalize_time(raw: str) -> str:
     if not raw:
         return "12:00"
@@ -851,29 +733,17 @@ def _normalize_time(raw: str) -> str:
     return raw[:5]
 
 
-def _minimal_trace(action: str, args: dict, observation: str, reflection: str) -> dict:
-    return {
-        "thought":     "",
-        "action":      action,
-        "args":        args,
-        "observation": observation,
-        "reflection":  reflection,
-    }
+def _minimal_trace(action, args, observation, reflection) -> dict:
+    return {"thought": "", "action": action, "args": args,
+            "observation": observation, "reflection": reflection}
 
 
-def _wrap_result(
-    status: str, data, error: Optional[str], replan_hint: str, trace: dict
-) -> dict:
-    return {
-        "status":      status,
-        "data":        data,
-        "error":       error,
-        "replan_hint": replan_hint,
-        "trace":       trace,
-    }
+def _wrap_result(status, data, error, replan_hint, trace) -> dict:
+    return {"status": status, "data": data, "error": error,
+            "replan_hint": replan_hint, "trace": trace}
 
 
-def _history_entry(step, result: dict) -> dict:
+def _history_entry(step, result) -> dict:
     return {
         "step_type":   step.step_type,
         "step_id":     step.step_id,
@@ -884,14 +754,8 @@ def _history_entry(step, result: dict) -> dict:
     }
 
 
-def _state_update(
-    current_index: int,
-    plan_state: dict,
-    results: dict,
-    history: list[dict],
-    log_lines: list[str],
-    feasible: bool,
-) -> dict:
+def _state_update(current_index, plan_state, results, history,
+                  log_lines, feasible) -> dict:
     return {
         "current_step_index": current_index + 1,
         "itinerary_feasible": feasible,

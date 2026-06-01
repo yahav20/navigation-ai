@@ -31,7 +31,7 @@ def get_models(provider: str = "google", mode: str = "travel") -> tuple[Runnable
         raise ValueError(msg)
 
     if provider == "groq":
-        base = ChatGroq(model="llama-3.1-8b-instant", temperature=0)
+        base = ChatGroq(model="llama-3.3-70b-versatile", temperature=0)
     elif provider == "ollama":
         base = ChatOllama(model="gpt-oss:120b-cloud", temperature=0)
     elif provider == "openai":

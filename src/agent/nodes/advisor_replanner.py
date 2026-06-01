@@ -37,12 +37,18 @@ class _RemainingPlan(BaseModel):
 # ---------------------------------------------------------------------------
 
 def build_data_collected(tool_results: list[dict]) -> str:
-    """Build the combined DATA COLLECTED block from all accumulated tool results."""
-    if not tool_results:
+    """Build the combined DATA COLLECTED block from all accumulated tool results.
+
+    Error and empty results are excluded — they add noise and confuse the formatter.
+    The replanner already handles failures by substituting sibling tools, so by the
+    time this function is called, only the successful results matter.
+    """
+    usable = [r for r in tool_results if not _is_empty(r["result"])]
+    if not usable:
         return "DATA COLLECTED:\n- No data gathered.\nREADY FOR FORMATTING."
     blocks = [
         format_tool_result(r["tool_name"], r.get("args", {}), r["result"])
-        for r in tool_results
+        for r in usable
     ]
     return "DATA COLLECTED:\n" + "\n\n".join(blocks) + "\nREADY FOR FORMATTING."
 

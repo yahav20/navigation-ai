@@ -13,9 +13,11 @@ _provider = SQLiteDataProvider()
 def find_destinations_by_vibe(category: str) -> list[dict]:
     """Find cities that have activities matching a given category.
 
+    Takes ONE argument only: category (str). Do NOT pass a city parameter.
     Available categories: Culture, Entertainment, Family, History, Nature, Nightlife, Sightseeing.
     Use this to answer vibe-based questions like 'where should I go for nightlife?'
     or 'I want a nature-focused trip, where should I go?'
+    Example: find_destinations_by_vibe(category="Culture")
     """
     category = category.strip()
     return _provider.search_by_activity_category(category)

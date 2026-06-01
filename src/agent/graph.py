@@ -1,4 +1,5 @@
 """Build the LangGraph state graph for the travel agent."""
+from langchain_core.messages import AIMessage
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
@@ -40,16 +41,24 @@ from tools.general_chat_tools import general_chat_tools
 _all_chat_tools = advisor_tools + general_chat_tools
 
 #      -Itinerary Agent :
-from agent.nodes.itinerary.planner import ItineraryPlannerNode
-from agent.nodes.itinerary.executor import ItineraryExecutorNode
-from agent.nodes.itinerary.observer import ItineraryObserverNode
-from agent.nodes.itinerary.fallback import ItineraryFallbackNode
+from agent.nodes.itinerary.plan_check import PlanCheckNode
+from agent.nodes.itinerary.planner   import ItineraryPlannerNode
+from agent.nodes.itinerary.executor  import ItineraryExecutorNode
+from agent.nodes.itinerary.replanner import ItineraryReplannerNode
 from agent.nodes.itinerary.formatter import ItineraryFormatterNode
 from agent.nodes.itinerary.itinerary_edges import (
+    after_plan_check,
     after_itinerary_planner,
-    after_itinerary_observer,
-    after_itinerary_fallback,
+    after_itinerary_replanner,
 )
+
+
+def _out_of_scope_node(state: AgentState) -> dict:
+    return {"messages": [AIMessage(
+        content="I'm a travel assistant — I can only help with trips, destinations, and travel questions. "
+                "Is there somewhere you'd like to explore? ✈️",
+        name="out_of_scope",
+    )]}
 
 
 def build_graph(
@@ -77,11 +86,11 @@ def build_graph(
     router_node = RouterNode(extraction_model)
 
     #   -Itinerary
+    plan_check_node        = PlanCheckNode()
     itinerary_planner_node = ItineraryPlannerNode(response_model)
-    itinerary_executor_node = ItineraryExecutorNode(response_model)
-    itinerary_observer_node = ItineraryObserverNode(response_model)
-    itinerary_fallback_node = ItineraryFallbackNode(response_model)
-    itinerary_formatter_node = ItineraryFormatterNode(response_model)
+    itinerary_executor_node   = ItineraryExecutorNode(response_model)
+    itinerary_replanner_node  = ItineraryReplannerNode(response_model)
+    itinerary_formatter_node  = ItineraryFormatterNode(response_model)
 
     # 2. Create nodes for the advisor path (uses its own model)
     _, advisor_extraction_model = get_models(provider, mode="advisor")
@@ -111,11 +120,11 @@ def build_graph(
     builder.add_node("summary", summary_node)
 
     #   -Itinerary
+    builder.add_node("plan_check",        plan_check_node)
     builder.add_node("itinerary_planner", itinerary_planner_node)
-    builder.add_node("itinerary_executor", itinerary_executor_node)
-    builder.add_node("itinerary_observer", itinerary_observer_node)
-    builder.add_node("itinerary_fallback", itinerary_fallback_node)
-    builder.add_node("itinerary_formatter", itinerary_formatter_node)
+    builder.add_node("itinerary_executor",   itinerary_executor_node)
+    builder.add_node("itinerary_replanner",  itinerary_replanner_node)
+    builder.add_node("itinerary_formatter",  itinerary_formatter_node)
 
     # Advisor nodes
     builder.add_node("advisor_planner", advisor_planner_node)
@@ -126,6 +135,9 @@ def build_graph(
     # General chat nodes
     builder.add_node("general_chat", general_chat_node)
     builder.add_node("chat_tools", ToolNode(_all_chat_tools))
+
+    # Out-of-scope rejection node (no LLM call — static message, goes straight to END)
+    builder.add_node("out_of_scope", _out_of_scope_node)
 
     # 5. Define edges — travel planning path
     builder.add_edge(START, "security_gate")
@@ -147,21 +159,22 @@ def build_graph(
             "adjustments": "adjustments",
             "advisor_planner": "advisor_planner",
             "general_chat": "general_chat",
+            "out_of_scope": "out_of_scope",
             END: END,
         },
     )
+    builder.add_edge("out_of_scope", END)
 
     builder.add_edge("extract_metadata", "enrichment")
     builder.add_edge("adjustments", "enrichment")
 
-    #   -enrichment:     -flight_search  -itinerary_planner
     builder.add_conditional_edges(
         "enrichment",
         after_enrichment,
         {
             "flight_search": "flight_search",
-            "itinerary_planner": "itinerary_planner",
-            END: END
+            "plan_check":    "plan_check",
+            END: END,
         }
     )
 
@@ -185,40 +198,40 @@ def build_graph(
     builder.add_edge("formatter_alternative", "summary")
     builder.add_edge("formatter", "summary")
 
-    # -----   -Itinerary (Plan & Execute) -----
+    # -----   -Itinerary (Plan & Execute + Replanner) -----
+    builder.add_conditional_edges(
+        "plan_check",
+        after_plan_check,
+        {
+            "itinerary_planner": "itinerary_planner",
+            "extract_metadata":  "extract_metadata",
+            "summary":           "summary",
+        }
+    )
+
     builder.add_conditional_edges(
         "itinerary_planner",
         after_itinerary_planner,
         {
-            "itinerary_executor": "itinerary_executor",
-            "itinerary_fallback": "itinerary_fallback"
-        }
-    )
-    builder.add_edge("itinerary_executor", "itinerary_observer")
-
-    builder.add_conditional_edges(
-        "itinerary_observer",
-        after_itinerary_observer,
-        {
-            "itinerary_executor": "itinerary_executor",
-            "itinerary_planner": "itinerary_planner",
-            "itinerary_fallback": "itinerary_fallback",
+            "itinerary_executor":  "itinerary_executor",
             "itinerary_formatter": "itinerary_formatter",
-            "alternative_destination": "alternative_destination",  # no-flights early exit
         }
     )
 
+    builder.add_edge("itinerary_executor", "itinerary_replanner")
+
     builder.add_conditional_edges(
-        "itinerary_fallback",
-        after_itinerary_fallback,
+        "itinerary_replanner",
+        after_itinerary_replanner,
         {
-            "itinerary_planner": "itinerary_planner",
-            "itinerary_formatter": "itinerary_formatter"
+            "itinerary_executor":  "itinerary_executor",
+            "itinerary_planner":   "itinerary_planner",
+            "itinerary_formatter": "itinerary_formatter",
         }
     )
 
     builder.add_edge("itinerary_formatter", "summary")
-    # ----------------------------------------------------
+    # ------------------------------------------------------
 
     builder.add_edge("summary", END)
 
