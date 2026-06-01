@@ -1,4 +1,6 @@
 """Construct chat models for travel and recommendation paths."""
+import os
+
 from langchain_core.language_models import BaseChatModel
 from langchain_core.runnables import Runnable
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -27,7 +29,8 @@ def get_models(provider: str = "google", mode: str = "travel") -> tuple[Runnable
         raise ValueError(msg)
 
     if provider == "groq":
-        base = ChatGroq(model="llama-3.1-8b-instant", temperature=0)
+        groq_model = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
+        base = ChatGroq(model=groq_model, temperature=0)
     elif provider == "ollama":
         base = ChatOllama(model="gpt-oss:120b-cloud", temperature=0)
     elif provider == "openai":
