@@ -30,7 +30,7 @@ import json
 from typing import Optional
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage
 
 from agent.nodes.itinerary.schemas import ExecutionPlan
 from agent.nodes.itinerary.itinerary_tools import (
@@ -51,34 +51,6 @@ TOOL_REGISTRY: dict[str, tuple] = {
 # ── Build prerequisites — must have successful results before build_day ───
 BUILD_PREREQUISITES = {"fetch_activities"}
 
-# ── ReAct prompts ──────────────────────────────────────────────────────────
-
-REACT_THOUGHT_SYSTEM = """
-You are a travel data-fetching agent about to execute one step.
-Given the step type and its arguments, produce a brief reasoning trace.
-
-Respond ONLY as JSON (no markdown fences):
-{
-  "thought": "<why this step is needed and any constraints to watch>",
-  "replan_hint": "<what should change if this step returns empty or errors>"
-}
-"""
-
-REACT_REFLECT_SYSTEM = """
-You are evaluating the result of one travel data-fetching step.
-
-Rules:
-- A non-empty list or dict with real data → "success"
-- An empty list [], empty dict {}, or None → "failed"
-- A dict containing an "error" key with a value → "failed"
-
-Respond ONLY as JSON (no markdown fences):
-{
-  "status": "success" | "failed",
-  "reflection": "<one-sentence evaluation>",
-  "replan_hint": "<specific corrective action for the Planner; empty string on success>"
-}
-"""
 
 
 # ---------------------------------------------------------------------------
@@ -168,7 +140,7 @@ class ItineraryExecutorNode:
         return _state_update(current_index, plan_state, results, history,
                              log_lines, feasible=feasible)
 
-    # ── fetch_weather handler (ReAct) ──────────────────────────────────────
+    # ── fetch_weather handler ───────────────────────────────────────────────
 
     def _run_fetch_step(self, step, results, history, ctx) -> dict:
         tool_fn, arg_builder = TOOL_REGISTRY[step.step_type]
@@ -178,10 +150,9 @@ class ItineraryExecutorNode:
         if cached is not None:
             return _wrap_result(
                 status="success", data=cached, error=None, replan_hint="",
-                trace=_minimal_trace(step.step_type, args, "Cache hit.", "Valid cached data."),
+                trace=_minimal_trace(step.step_type, args, "Cache hit.", ""),
             )
 
-        thought_json = self._react_thought(step.step_type, args, ctx)
         try:
             raw = tool_fn.invoke(args)
             observation = json.dumps(raw, ensure_ascii=False)[:600]
@@ -189,30 +160,24 @@ class ItineraryExecutorNode:
             raw = None
             observation = f"Tool exception: {exc}"
 
-        reflection = self._react_reflect(step.step_type, args, raw, observation)
-        status     = reflection.get("status", "failed" if _is_empty(raw) else "success")
-        hint       = reflection.get("replan_hint", "")
-
         if _is_empty(raw):
-            status = "failed"
-            if not hint:
-                hint = (
+            return _wrap_result(
+                status="failed",
+                data=None,
+                error=observation,
+                replan_hint=(
                     f"`{step.step_type}` returned no data for destination "
                     f"'{ctx.get('destination')}'. Check city name spelling."
-                )
+                ),
+                trace=_minimal_trace(step.step_type, args, observation, ""),
+            )
 
         return _wrap_result(
-            status=status,
+            status="success",
             data=raw,
-            error=observation if status == "failed" else None,
-            replan_hint=hint,
-            trace={
-                "thought":     thought_json.get("thought", ""),
-                "action":      step.step_type,
-                "args":        args,
-                "observation": observation,
-                "reflection":  reflection.get("reflection", ""),
-            },
+            error=None,
+            replan_hint="",
+            trace=_minimal_trace(step.step_type, args, observation, ""),
         )
 
     # ── fetch_activities handler ───────────────────────────────────────────
@@ -237,8 +202,6 @@ class ItineraryExecutorNode:
                                      "Cache hit.", "Using cached activities."),
             )
 
-        # Phase 1 — fetch
-        thought_json = self._react_thought("fetch_activities", args, ctx)
         try:
             raw: list[dict] = search_activities.invoke(args)
             observation = f"Fetched {len(raw) if isinstance(raw, list) else 0} activities."
@@ -255,12 +218,8 @@ class ItineraryExecutorNode:
                     f"No activities found for '{destination}'. "
                     "Verify city name or check that the DB has activities for this city."
                 ),
-                trace={
-                    "thought": thought_json.get("thought", ""),
-                    "action": "fetch_activities", "args": args,
-                    "observation": observation,
-                    "reflection": "Empty activity list — cannot build schedule.",
-                },
+                trace=_minimal_trace("fetch_activities", args, observation,
+                                     "Empty activity list — cannot build schedule."),
             )
 
         # Phase 2 — ActivitySelector
@@ -289,13 +248,9 @@ class ItineraryExecutorNode:
             data=data,
             error=None,
             replan_hint="",
-            trace={
-                "thought":     thought_json.get("thought", ""),
-                "action":      "fetch_activities",
-                "args":        args,
-                "observation": observation + " | " + selector_obs,
-                "reflection":  "Activities fetched and assigned to days.",
-            },
+            trace=_minimal_trace("fetch_activities", args,
+                                 observation + " | " + selector_obs,
+                                 "Activities fetched and assigned to days."),
         )
 
     # ── build_day_schedule handler ─────────────────────────────────────────
@@ -595,41 +550,6 @@ class ItineraryExecutorNode:
                                  "Over budget." if over_budget else "Within budget."),
         )
 
-    # ── ReAct helpers ──────────────────────────────────────────────────────
-
-    def _react_thought(self, step_type, args, ctx) -> dict:
-        prompt = (
-            f"Step: {step_type}\nArgs: {json.dumps(args, ensure_ascii=False)}\n"
-            f"Context: destination={ctx.get('destination')}, origin={ctx.get('origin')}, "
-            f"budget=${ctx.get('budget')}, days={ctx.get('trip_days')}"
-        )
-        try:
-            raw = self.llm.invoke([
-                SystemMessage(content=REACT_THOUGHT_SYSTEM),
-                HumanMessage(content=prompt),
-            ]).content.strip()
-            return json.loads(_strip_fences(raw))
-        except Exception:
-            return {"thought": f"Executing {step_type}.", "replan_hint": ""}
-
-    def _react_reflect(self, step_type, args, result, observation) -> dict:
-        prompt = (
-            f"Step: {step_type}\nArgs: {json.dumps(args, ensure_ascii=False)}\n"
-            f"Observation (truncated): {observation[:500]}"
-        )
-        try:
-            raw = self.llm.invoke([
-                SystemMessage(content=REACT_REFLECT_SYSTEM),
-                HumanMessage(content=prompt),
-            ]).content.strip()
-            return json.loads(_strip_fences(raw))
-        except Exception:
-            empty = _is_empty(result)
-            return {
-                "status":      "failed" if empty else "success",
-                "reflection":  "LLM reflection unavailable.",
-                "replan_hint": f"`{step_type}` returned empty." if empty else "",
-            }
 
 
 # ---------------------------------------------------------------------------
