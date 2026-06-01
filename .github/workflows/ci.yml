@@ -29,7 +29,7 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt pytest pytest-mock
       - name: Run unit tests
-        run: pytest tests/ -m unit -v --tb=short
+        run: pytest tests/test_unit.py -m unit -v --tb=short
 
   # ── Job 3: Integration Smoke ─────────────────────────────────────────────
   integration:
@@ -48,4 +48,4 @@ jobs:
       - name: Create data directory
         run: mkdir -p data
       - name: Run integration smoke test
-        run: pytest tests/ -m integration -v --timeout=120
+        run: pytest tests/test_integration_smoke.py -m integration -v --timeout=120
