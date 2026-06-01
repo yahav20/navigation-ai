@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main]
+
+jobs:
+
+  # ── Job 1: Lint ──────────────────────────────────────────────────────────
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: pip install ruff
+      - run: ruff check src tests
+
+  # ── Job 2: Unit Tests ────────────────────────────────────────────────────
+  unit-tests:
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - name: Install dependencies
+        run: pip install -r requirements.txt pytest pytest-mock
+      - name: Run unit tests
+        run: pytest tests/ -m unit -v --tb=short
+
+  # ── Job 3: Integration Smoke ─────────────────────────────────────────────
+  integration:
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request'
+    env:
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      MODEL_PROVIDER: groq
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - name: Install dependencies
+        run: pip install -r requirements.txt pytest pytest-timeout
+      - name: Create data directory
+        run: mkdir -p data
+      - name: Run integration smoke test
+        run: pytest tests/ -m integration -v --timeout=120
