@@ -47,5 +47,7 @@ jobs:
         run: pip install -r requirements.txt pytest pytest-timeout
       - name: Create data directory
         run: mkdir -p data
+      - name: Initialise travel database
+        run: python data/init_db.py
       - name: Run integration smoke test
         run: pytest tests/test_integration_smoke.py -m integration -v --timeout=120
