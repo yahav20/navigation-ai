@@ -36,6 +36,9 @@ from agent.nodes.travel_agent import TravelAgentNode
 from agent.nodes.security_gate import security_gate_node
 from agent.state import AgentState
 from tools.advisor_tools import advisor_tools
+from tools.general_chat_tools import general_chat_tools
+
+_all_chat_tools = advisor_tools + general_chat_tools
 
 #      -Itinerary Agent :
 from agent.nodes.itinerary.plan_check import PlanCheckNode
@@ -96,8 +99,8 @@ def build_graph(
     advisor_replanner_node = AdvisorReplannerNode(advisor_extraction_model)
     advisor_formatter_node = AdvisorFormatterNode(advisor_extraction_model)
 
-    # 3. Create nodes for the general chat path (reuses advisor tools)
-    chat_model_with_tools, _ = get_models(provider, mode="advisor")
+    # 3. Create nodes for the general chat path (advisor tools + dedicated chat tools)
+    chat_model_with_tools, _ = get_models(provider, mode="chat")
     general_chat_node = GeneralChatNode(chat_model_with_tools, extraction_model)
 
     # 4. Build the graph
@@ -131,7 +134,7 @@ def build_graph(
 
     # General chat nodes
     builder.add_node("general_chat", general_chat_node)
-    builder.add_node("chat_tools", ToolNode(advisor_tools))
+    builder.add_node("chat_tools", ToolNode(_all_chat_tools))
 
     # Out-of-scope rejection node (no LLM call — static message, goes straight to END)
     builder.add_node("out_of_scope", _out_of_scope_node)

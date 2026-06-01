@@ -8,10 +8,14 @@ from langchain_openai import ChatOpenAI
 
 from tools import core_tools
 from tools.advisor_tools import advisor_tools
+from tools.general_chat_tools import general_chat_tools
+
+_chat_tools = advisor_tools + general_chat_tools
 
 _TOOL_SETS = {
     "travel": core_tools,
     "advisor": advisor_tools,
+    "chat": _chat_tools,
 }
 
 def get_models(provider: str = "google", mode: str = "travel") -> tuple[Runnable, BaseChatModel]:
@@ -37,5 +41,8 @@ def get_models(provider: str = "google", mode: str = "travel") -> tuple[Runnable
 
     if mode == "advisor":
         return base.bind_tools(advisor_tools), base
+
+    if mode == "chat":
+        return base.bind_tools(_chat_tools), base
 
     return base, base
