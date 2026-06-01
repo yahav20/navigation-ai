@@ -62,7 +62,7 @@ def after_router(state: AgentState) -> str:
         return END
 
 
-CHAT_MAX_STEPS = 2
+CHAT_MAX_STEPS = 3
 
 def chat_should_continue(state: AgentState) -> str:
     """Route to chat_tools if the agent issued tool calls, otherwise go to summary."""
