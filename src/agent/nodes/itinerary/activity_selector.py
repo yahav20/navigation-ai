@@ -100,7 +100,6 @@ def select_activities_per_day(
         for a in sorted_activities[:25]
     ]
 
-    # 3. יצירת ההודעה הרזה והחסכונית בטוקנים
     user_msg = (
         f"Destination: {destination}\n"
         f"Trip duration: {trip_days} days\n"
@@ -110,9 +109,14 @@ def select_activities_per_day(
     )
 
     try:
-        # אפשר להשאיר את הגבלת הטוקנים של התשובה כדי להיות סופר-בטוחים
-        small_llm = llm.bind(max_tokens=600)
-        
+        # Bind a token limit using the correct parameter name per provider.
+        # Groq/OpenAI use max_tokens; Gemini rejects it (uses its own internal limit).
+        provider_cls = type(llm).__name__
+        if "Google" in provider_cls or "Gemini" in provider_cls:
+            small_llm = llm  # Gemini: no max_tokens binding
+        else:
+            small_llm = llm.bind(max_tokens=600)
+
         raw = small_llm.invoke([
             SystemMessage(content=SELECTOR_SYSTEM),
             HumanMessage(content=user_msg),

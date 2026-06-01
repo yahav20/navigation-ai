@@ -71,6 +71,13 @@ For each activity:
 
 ---
 
+### 🍽️ **Restaurants** (omit this whole section if restaurants is empty)
+For each restaurant pick (number them 1., 2., 3.):
+**N. {name}** {price_tier if not null, wrapped in parentheses} {rating ★ if not null}
+* {description}
+
+---
+
 ### 🌤️ **Destination Insights** (omit this section if both weather and best_time are empty)
 * **Best Time to Visit:** join best_time.months with commas; if best_time.reason is present append ' — {reason}'
 * **Average Weather:** (omit any season not in the weather dict)
