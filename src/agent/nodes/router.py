@@ -71,6 +71,14 @@ class RouterNode:
         # Exception: if we were in an advisor flow, keep it as advisor
         final_intent = classification.intent
 
+        # Guardrail 0: Preserve build_itinerary intent across enrichment turns.
+        # EnrichmentNode may ask follow-up questions (destination, days, etc.) before
+        # setting enrichment_complete=True. Keep build_itinerary so the graph stays
+        # on the itinerary path and eventually reaches plan_check.
+        if (state.get("intent") == "build_itinerary"
+                and not state.get("enrichment_complete", False)):
+            final_intent = "build_itinerary"
+
         # Guardrail 1: Both high-level planning and micro-planning require a destination.
         # If the user asks for a plan or itinerary but we don't have a destination, route to advisor.
         if final_intent in ["new_travel_plan", "build_itinerary"]:
@@ -89,7 +97,7 @@ class RouterNode:
         if final_intent == "update_travel_plan":
             content_lower = last_msg.content.lower()
             # If the user used planning/replanning trigger words, force route to Planner
-            trigger_words = ["replan", "full plan", "schedule", "לוז", "תכנון מלא", "תבנה לי"]
+            trigger_words = ["replan", "full plan", "schedule", "schedule", "plan", "  itinerary", "day-by-day", "day by day", "build my trip", "build this trip", "plan this trip", "sounds good let's do it", "let's go", "I want to go there"]
             if any(word in content_lower for word in trigger_words):
                 final_intent = "build_itinerary"
 

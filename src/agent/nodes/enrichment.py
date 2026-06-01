@@ -10,6 +10,45 @@ from agent.state import AgentState
 from providers import SQLiteDataProvider
 from tools import enrichment_tool_map, enrichment_tools
 
+# Deterministic fallback: well-known country → primary city for flight resolution.
+# Used when the user names a country and the DB lookup finds no matching cities.
+_COUNTRY_TO_CITY: dict[str, str] = {
+    "israel": "Tel Aviv",
+    "france": "Paris",
+    "uk": "London",
+    "england": "London",
+    "britain": "London",
+    "great britain": "London",
+    "usa": "New York City",
+    "united states": "New York City",
+    "united states of america": "New York City",
+    "america": "New York City",
+    "japan": "Tokyo",
+    "germany": "Berlin",
+    "netherlands": "Amsterdam",
+    "holland": "Amsterdam",
+    "spain": "Madrid",
+    "italy": "Rome",
+    "portugal": "Lisbon",
+    "australia": "Sydney",
+    "canada": "Toronto",
+    "china": "Beijing",
+    "india": "Mumbai",
+    "brazil": "São Paulo",
+    "mexico": "Mexico City",
+    "russia": "Moscow",
+    "turkey": "Istanbul",
+    "greece": "Athens",
+    "thailand": "Bangkok",
+    "uae": "Dubai",
+    "united arab emirates": "Dubai",
+    "south korea": "Seoul",
+    "korea": "Seoul",
+    "egypt": "Cairo",
+    "jordan": "Amman",
+    "morocco": "Casablanca",
+}
+
 data_provider = SQLiteDataProvider()
 
 OPTION_THRESHOLD = 2
@@ -264,6 +303,12 @@ def _phase2a_origin_country(
     if len(cities) == 1:
         return None, cities[0]
 
+    # No DB results: try the static country→city fallback before giving up.
+    if origin:
+        fallback_city = _COUNTRY_TO_CITY.get(origin.strip().lower())
+        if fallback_city:
+            return None, fallback_city
+
     return None, origin
 
 
@@ -304,7 +349,46 @@ def _phase2_country_destination(
     if len(cities) == 1:
         return None, cities[0]
 
+    # No DB results: try the static country→city fallback before giving up.
+    if destination:
+        fallback_city = _COUNTRY_TO_CITY.get(destination.strip().lower())
+        if fallback_city:
+            return None, fallback_city
+
     return None, destination
+
+
+# ---------------------------------------------------------------------------
+# Typo normalisation
+# ---------------------------------------------------------------------------
+
+import re
+
+_TYPO_MAP: list[tuple[str, str]] = [
+    # Verb typos
+    (r"\bwanbt\b", "want"),
+    (r"\bwannt\b", "want"),
+    (r"\bwnat\b",  "want"),
+    # Dietary / kosher variants
+    (r"\bcosher\b", "kosher"),
+    (r"\bkashre\b", "kosher"),
+    (r"\bkasher\b", "kosher"),
+    (r"\bkoshre\b", "kosher"),
+    (r"\bkoshe\b",  "kosher"),
+    # Other common dietary
+    (r"\bvegn\b",       "vegan"),
+    (r"\bvgen\b",       "vegan"),
+    (r"\bvegeterian\b", "vegetarian"),
+    (r"\bhalall\b",     "halal"),
+    (r"\bhalel\b",      "halal"),
+]
+
+
+def _normalise_typos(text: str) -> str:
+    """Apply a deterministic list of typo corrections to *text* (case-insensitive)."""
+    for pattern, replacement in _TYPO_MAP:
+        text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+    return text
 
 
 def _extract_general_preferences(
@@ -319,17 +403,28 @@ def _extract_general_preferences(
     if not last_user_message:
         return {}
 
+    # Pre-process: deterministically normalise common typos before sending to the LLM.
+    raw_content: str = last_user_message.content
+    normalised_content = _normalise_typos(raw_content)
+
     extracted: UserPreferences = extraction_model.with_structured_output(UserPreferences).invoke([
         {
             "role": "system",
             "content": (
                 "Extract any travel preferences the user has explicitly expressed in their latest message. "
                 "Look for dietary restrictions, preferred airlines, mobility/accessibility needs, or hotel vibes. "
-                "CRITICAL: Do NOT guess, split, or calculate flight/hotel budgets from the user's total budget. " # 🔴  
-                "Return null for anything not explicitly mentioned." # 🔴   explicitly
+                "IMPORTANT — handle common typos and misspellings gracefully:\n"
+                "  - 'wanbt', 'wannt', 'wan't' → 'want'\n"
+                "  - 'cosher', 'kasher', 'koshre', 'koshe' → 'kosher' (dietary_restrictions = 'kosher')\n"
+                "  - 'vegn', 'vgen' → 'vegan'\n"
+                "  - 'vegeterian', 'vegetarian' → 'vegetarian'\n"
+                "  - 'halall', 'halel' → 'halal'\n"
+                "Treat 'kosher hotel', 'cosher hotel', 'kasher hotel' as dietary_restrictions = 'kosher'. "
+                "CRITICAL: Do NOT guess, split, or calculate flight/hotel budgets from the user's total budget. "
+                "Return null for anything not explicitly mentioned."
             ),
         },
-        {"role": "user", "content": last_user_message.content},
+        {"role": "user", "content": normalised_content},
     ])
 
 

@@ -6,7 +6,8 @@ class SQLiteHotelQueriesMixin:
 
     def fetch_hotels(self, city: str, max_price: int | None = None) -> list:
         """Return hotels in the given city, optionally filtered by max price."""
-        sql = """SELECT h.name, h.price_per_night, h.stars
+        sql = """SELECT h.name, h.price_per_night, h.stars, h.min_age, h.hotel_type, h.distance_from_center_km,
+                         h.amenities, h.is_kosher, h.latitude, h.longitude 
                    FROM hotels h
                    JOIN cities c ON h.city_id = c.id
                   WHERE LOWER(c.name) = ?"""

@@ -225,7 +225,7 @@ class DayScheduleBuilder:
     def build(self, candidates: list[ActivityCandidate]) -> list[dict]:
         cfg = self.cfg
 
-        day_end = _parse_time(self._date, DAY_END)
+        day_end = _parse_time(self._date, cfg.day_end_time)
         departure_anchor = (
             _parse_time(self._date, cfg.departure_time) - timedelta(minutes=150)
             if cfg.is_last_day and cfg.departure_time
@@ -233,7 +233,7 @@ class DayScheduleBuilder:
         )
 
         # ── Cursor: current time & location ──
-        cursor = _parse_time(self._date, DAY_START_DEFAULT)
+        cursor = _parse_time(self._date, cfg.day_start_time)
         location = GeoPoint(cfg.hotel_lat, cfg.hotel_lng, "Hotel")
 
         # ── Day 1 arrival sequence ──
@@ -255,8 +255,7 @@ class DayScheduleBuilder:
                 break
 
             # ─ Hunger check: inject meal before activity if needed ─
-            if self._is_hungry(cursor) and not act.food_available:
-                    
+            if self._is_hungry(cursor):
                 cursor, location = self._inject_meal(cursor, departure_anchor, location, meal_candidates)
                 if cursor >= departure_anchor:
                     break
@@ -318,24 +317,44 @@ class DayScheduleBuilder:
                 estimated_cost=act.price,
             ))
 
-            if act.food_available:
-                self._last_food_time = act_end  # activity fed the user
-                if act_start.hour >= 11 and act_start.hour <= 15:
-                    self._had_lunch = True
-                elif act_start.hour >= 18:
-                    self._had_dinner = True
-
             cursor = act_end
             location = act_point
             used_names.add(act.name)
 
         # ── Final dinner ──
-        #     18:00    
-        if not self._had_dinner and cursor < departure_anchor and cursor.hour >= 18:
-            cursor, location = self._inject_dinner(cursor, departure_anchor, location, cfg, meal_candidates)
+        if not self._had_dinner and cursor < departure_anchor:
+            dinner_earliest = _parse_time(self._date, "18:00")
+            if cursor < dinner_earliest and dinner_earliest < departure_anchor:
+                self._push(TimeSlot(
+                    start=cursor, end=dinner_earliest,
+                    slot_type="rest",
+                    name="Free time — explore at your own pace",
+                    description="Browse local shops, relax at a café, or revisit a favourite spot",
+                    estimated_cost=0.0,
+                ))
+                cursor = dinner_earliest
+            if cursor < departure_anchor and cursor.hour >= 17:
+                cursor, location = self._inject_dinner(cursor, departure_anchor, location, cfg, meal_candidates)
+
+        if cfg.is_last_day and cfg.departure_time:
+            taxi_min = max(AIRPORT_HOTEL_MIN_MINUTES, 45)
+            taxi_cost = TAXI_BASE_COST + 30 * TAXI_COST_PER_KM
+            
+            transfer_start = max(cursor, departure_anchor)
+            transfer_end = transfer_start + timedelta(minutes=taxi_min)
+            
+            self._push(TimeSlot(
+                start=transfer_start,
+                end=transfer_end,
+                slot_type="transport",
+                name="City → Airport transfer",
+                description=f"Taxi to the airport for your {cfg.departure_time} flight",
+                estimated_cost=taxi_cost,
+                transport_mode="taxi"
+            ))
+        # =================================================================
 
         return [s.to_dict() for s in self._slots]
-
     # ── Arrival sequence (Day 1 only) ─────────────────────────────────────
 
     def _insert_arrival_sequence(
@@ -521,13 +540,21 @@ class DayScheduleBuilder:
 class DayConfig:
     day_number: int
     total_days: int
-    hotel_name: str
-    hotel_lat: float
-    hotel_lng: float
+
+    # Hotel fields are optional for standalone mode (no booking confirmed).
+    # In standalone mode, executor passes city-centre coordinates derived
+    # from the average lat/lng of the day's activity candidates.
+    hotel_name: str = "accommodation"
+    hotel_lat: float = 0.0
+    hotel_lng: float = 0.0
     hotel_has_breakfast: bool = False
 
     is_first_day: bool = False
-    arrival_time: Optional[str] = None      # "HH:MM" — only Day 1
+    arrival_time: Optional[str] = None      # "HH:MM" — Day 1 with_travel_data only
 
     is_last_day: bool = False
-    departure_time: Optional[str] = None    # "HH:MM" — only last day
+    departure_time: Optional[str] = None    # "HH:MM" — last day with_travel_data only
+
+    # Configurable schedule window — set from user_preferences
+    day_start_time: str = DAY_START_DEFAULT  # "HH:MM"
+    day_end_time:   str = DAY_END            # "HH:MM"
