@@ -69,7 +69,7 @@ OUTPUT: pure JSON only — no markdown, no explanation, no extra keys.
     "area": "main area for the day",
     "activities": ["Name1", "Name2", "Name3"],
     "lunch_restaurant": "Name from list or null",
-    "coffee_place": "Name from list or null",
+    "breakfast_place": "Name of cafe or bakery from restaurants list",
     "dinner_restaurant": "Name from list or null",
     "recommended_rest_blocks": [{"start":"HH:MM","end":"HH:MM","reason":"short reason"}]
   }
@@ -367,7 +367,7 @@ def resolve_candidates(
         meal_names: list[str] = [
             n for n in [
                 day_plan.get("lunch_restaurant"),
-                day_plan.get("coffee_place"),
+                day_plan.get("breakfast_place"),
                 day_plan.get("dinner_restaurant"),
             ] if n
         ]
@@ -454,7 +454,7 @@ def _empty_day_plan() -> dict:
     return {
         "theme": "Free Day", "area": "",
         "activities": [],
-        "lunch_restaurant": None, "coffee_place": None, "dinner_restaurant": None,
+        "lunch_restaurant": None, "breakfast_place": None, "dinner_restaurant": None,
         "recommended_rest_blocks": [],
     }
 
@@ -464,7 +464,7 @@ def _list_to_day_plan(names: list[str]) -> dict:
     return {
         "theme": "Explore", "area": "",
         "activities": list(names),
-        "lunch_restaurant": None, "coffee_place": None, "dinner_restaurant": None,
+        "lunch_restaurant": None, "breakfast_place": None, "dinner_restaurant": None,
         "recommended_rest_blocks": [],
     }
 

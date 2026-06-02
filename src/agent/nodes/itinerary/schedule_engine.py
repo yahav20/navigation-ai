@@ -191,7 +191,7 @@ class DayConfig:
     hotel_name:          str   = "Hotel"
     hotel_lat:           float = 0.0
     hotel_lng:           float = 0.0
-    hotel_has_breakfast: bool  = False
+  
 
     is_first_day:   bool         = False
     arrival_time:   Optional[str] = None   # "HH:MM" — Day 1 only
@@ -378,7 +378,7 @@ class DayScheduleBuilder:
         if cfg.is_first_day and cfg.arrival_time:
             cursor, location = self._arrival_sequence(cfg, blocked)
         else:
-            cursor = self._insert_breakfast(cfg, cursor)
+            cursor = self._insert_breakfast(cfg, cursor, breakfast_name=day_plan.get("breakfast_place"))
             self._last_food_time = cursor
 
         # ── Split candidates into sightseeing vs meal venues ─────────────────
@@ -591,10 +591,15 @@ class DayScheduleBuilder:
 
     # ── Breakfast ────────────────────────────────────────────────────────────
 
-    def _insert_breakfast(self, cfg: DayConfig, cursor: datetime) -> datetime:
-        cost = 0.0 if cfg.hotel_has_breakfast else MEAL_COSTS["breakfast"]
-        name = (f"Breakfast · {cfg.hotel_name}"
-                if cfg.hotel_has_breakfast else "Breakfast at local café")
+    def _insert_breakfast(self, cfg: DayConfig, cursor: datetime, breakfast_name: str | None = None) -> datetime:
+        cost = MEAL_COSTS["breakfast"]
+        
+        # מוודאים שהשם קיים, והוא לא המילה "null" או "none" שמגיעה מה-LLM
+        if breakfast_name and str(breakfast_name).lower().strip() not in ("null", "none"):
+            name = breakfast_name
+        else:
+            name = "Morning Coffee & Pastry"
+            
         end  = cursor + timedelta(minutes=BREAKFAST_DURATION)
         self._push(TimeSlot(
             start=cursor, end=end,
@@ -604,7 +609,6 @@ class DayScheduleBuilder:
         ))
         self._last_food_time = end
         return end
-
     # ── Pinned venue insertion ───────────────────────────────────────────────
 
     def _insert_pinned_meal(

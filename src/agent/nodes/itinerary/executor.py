@@ -315,66 +315,18 @@ class ItineraryExecutorNode:
 
         print(f"[DEBUG] final pool: {len(raw_attractions)} attractions, {len(raw_restaurants)} restaurants")
 
-        # ── 3. Resolve weather ────────────────────────────────────────────
+       # ── 3. Resolve weather ────────────────────────────────────────────
         weather_cond = _resolve_weather(results, destination)
         print(f"[DEBUG] weather_cond: {weather_cond!r}")
 
-        # ── 4. Blocked times from user prefs ──────────────────────────────
-        blocked_times = list(prefs.get("blocked_times") or [])
-        if blocked_times:
-            print(f"[DEBUG] blocked_times: {blocked_times}")
-
-        # ── 5. ActivitySelector — Day Planner LLM ────────────────────────
-        # Passes ONLY the fields ActivitySelector actually uses from prefs
-        planner_prefs = _extract_planner_prefs(prefs)
-        print(f"[DEBUG] calling ActivitySelector: prefs={planner_prefs}, weather={weather_cond!r}")
-        try:
-            selection = select_activities_per_day(
-                llm=self.llm,
-                activities=raw_attractions,
-                trip_days=trip_days,
-                prefs=planner_prefs,
-                destination=destination,
-                restaurants=raw_restaurants,
-                weather=weather_cond or None,
-                blocked_times=blocked_times or None,
-            )
-            selector_obs = f"Day Planner produced {len(selection)}-day plan."
-            print(f"[DEBUG] ActivitySelector OK: {selector_obs}")
-            for dk, dv in selection.items():
-                if isinstance(dv, dict):
-                    print(f"  [DEBUG] {dk}: theme={dv.get('theme')!r} "
-                          f"area={dv.get('area')!r} "
-                          f"acts={dv.get('activities')} "
-                          f"lunch={dv.get('lunch_restaurant')} "
-                          f"coffee={dv.get('coffee_place')} "
-                          f"dinner={dv.get('dinner_restaurant')} "
-                          f"rests={dv.get('recommended_rest_blocks')}")
-        except Exception as exc:
-            print(f"[DEBUG] ActivitySelector FAILED: {exc} — using rating fallback")
-            sorted_acts = sorted(raw_attractions, key=lambda a: -a.get("rating", 0))
-            selection = {
-                f"day_{d}": {
-                    "theme":             f"Day {d} — Explore {destination}",
-                    "area":              "",
-                    "activities":        [a["name"] for a in sorted_acts[(d - 1) * 5: d * 5]],
-                    "lunch_restaurant":  None,
-                    "coffee_place":      None,
-                    "dinner_restaurant": None,
-                    "recommended_rest_blocks": [],
-                }
-                for d in range(1, trip_days + 1)
-            }
-            selector_obs = f"Day Planner failed ({exc}); used rating-sorted fallback."
-
         observation = (
             f"Fetched {len(raw_attractions)} attractions + {len(raw_restaurants)} restaurants "
-            f"from Google Maps. Weather: {weather_cond or 'unknown'}. {selector_obs}"
+            f"from Google Maps. Weather: {weather_cond or 'unknown'}."
         )
         data = {
             "activities":  raw_attractions,
             "restaurants": raw_restaurants,
-            "selection":   selection,
+            # מחקנו מפה את ה-selection! הוא ייווצר בנפרד לכל יום.
         }
         return _wrap_result(
             status="success",
@@ -386,7 +338,7 @@ class ItineraryExecutorNode:
                 "action":      "fetch_activities",
                 "args":        cache_args,
                 "observation": observation,
-                "reflection":  "Attractions and restaurants fetched; day plans created.",
+                "reflection":  "Attractions and restaurants fetched successfully.",
             },
         )
 
@@ -418,32 +370,56 @@ class ItineraryExecutorNode:
         acts_data = _unwrap_data(results, "fetch_activities")
         all_activities:  list[dict] = []
         all_restaurants: list[dict] = []
-        selection: dict = {}
         if isinstance(acts_data, dict):
             all_activities  = acts_data.get("activities",  [])
             all_restaurants = acts_data.get("restaurants", [])
-            selection       = acts_data.get("selection",   {})
 
-        print(f"[DEBUG] Day {day_num}: pool = {len(all_activities)} acts, {len(all_restaurants)} restaurants")
+        # ── סינון פעילויות שכבר נבחרו בימים קודמים ──
+        used = _used_activities(results, current_plan_keys)
+        available_activities = [a for a in all_activities if a.get("name") not in used]
+        available_restaurants = [r for r in all_restaurants if r.get("name") not in used]
 
-        # Support both new dict day-plan and legacy list-of-names
-        day_plan_raw = selection.get(f"day_{day_num}", {})
+        print(f"[DEBUG] Day {day_num}: pool = {len(available_activities)} acts, {len(available_restaurants)} restaurants remaining")
+
+        # ── קריאה ל-LLM לבניית יום אחד בלבד! ──
+        planner_prefs = _extract_planner_prefs(state.get("user_preferences", {}))
+        weather_cond = _resolve_weather(results, destination)
+        blocked_times = list(planner_prefs.get("blocked_times") or [])
+
+        try:
+            # אנחנו מרמים את ה-Selector ומוסרים לו trip_days=1 כדי שיחזיר JSON קצר רק של יום אחד
+            selection = select_activities_per_day(
+                llm=self.llm,
+                activities=available_activities,
+                trip_days=1,
+                prefs=planner_prefs,
+                destination=destination,
+                restaurants=available_restaurants,
+                weather=weather_cond or None,
+                blocked_times=blocked_times or None,
+            )
+            # ה-Selector תמיד יחזיר את זה תחת המפתח "day_1" כי אמרנו לו שיש רק יום אחד
+            day_plan_raw = selection.get("day_1", {})
+            print(f"[DEBUG] ActivitySelector generated plan for Day {day_num} successfully.")
+        except Exception as exc:
+            print(f"[DEBUG] ActivitySelector FAILED for Day {day_num}: {exc}")
+            # Fallback במקרה של שגיאה
+            sorted_acts = sorted(available_activities, key=lambda a: -a.get("rating", 0))
+            day_plan_raw = {
+                "theme": f"Day {day_num} — Explore {destination}",
+                "activities": [a["name"] for a in sorted_acts[:4]],
+                "lunch_restaurant": None,
+                "dinner_restaurant": None
+            }
+
         if isinstance(day_plan_raw, list):
             day_plan = {"activities": day_plan_raw}
         else:
             day_plan = day_plan_raw or {}
 
-        print(f"[DEBUG] Day {day_num} plan: theme={day_plan.get('theme')!r} "
-              f"area={day_plan.get('area')!r} "
-              f"acts={day_plan.get('activities')} "
-              f"lunch={day_plan.get('lunch_restaurant')} "
-              f"coffee={day_plan.get('coffee_place')} "
-              f"dinner={day_plan.get('dinner_restaurant')}")
-
+        # ── שימוש ב-resolve_candidates אחרי שהמודל בחר ──
         day_names  = day_plan.get("activities", [])
-        used       = _used_activities(results, current_plan_keys)
-        day_names  = [n for n in day_names if n not in used]
-        candidates = resolve_candidates(all_activities, day_plan, all_restaurants)
+        candidates = resolve_candidates(available_activities, day_plan, available_restaurants)
 
         print(f"[DEBUG] Day {day_num}: {len(candidates)} candidates resolved "
               f"({len(used)} names already used across other days)")
@@ -541,7 +517,7 @@ class ItineraryExecutorNode:
         hotel_name = hotel.get("name", "Hotel")
         hotel_lat  = float(hotel.get("latitude") or hotel.get("lat") or 48.85)
         hotel_lng  = float(hotel.get("longitude") or hotel.get("lng") or 2.35)
-        hotel_bk   = bool(hotel.get("breakfast_included") or hotel.get("breakfast_available", False))
+        
 
         arrival_raw   = flight_out.get("arrival_time",   "14:00") if day_num == 1        else None
         departure_raw = flight_ret.get("departure_time", "20:00") if day_num == trip_days else None
@@ -558,7 +534,6 @@ class ItineraryExecutorNode:
             hotel_name=hotel_name,
             hotel_lat=hotel_lat,
             hotel_lng=hotel_lng,
-            hotel_has_breakfast=hotel_bk,
             is_first_day=(day_num == 1),
             arrival_time=_normalize_time(str(arrival_raw)) if arrival_raw else None,
             is_last_day=(day_num == trip_days),
@@ -592,7 +567,6 @@ class ItineraryExecutorNode:
             hotel_name="",
             hotel_lat=center_lat,
             hotel_lng=center_lng,
-            hotel_has_breakfast=False,
             is_first_day=(day_num == 1),
             arrival_time=None,
             is_last_day=(day_num == trip_days),
