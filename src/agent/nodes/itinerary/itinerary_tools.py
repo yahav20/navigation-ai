@@ -14,6 +14,7 @@ from __future__ import annotations
 from typing import Optional
 from langchain_core.tools import tool, ToolException
 
+from providers.flights import search_flights_with_fallback
 from security import validate_city, validate_positive_number
 from tools.dependencies import data_provider
 
@@ -147,8 +148,8 @@ def get_average_location_cost(destination: str, origin: str, trip_days: int) -> 
         destination = validate_city(destination)
         origin      = validate_city(origin)
 
-        flights_out    = data_provider.fetch_flights(origin, destination) or []
-        flights_return = data_provider.fetch_flights(destination, origin) or []
+        flights_out    = search_flights_with_fallback(origin, destination) or []
+        flights_return = search_flights_with_fallback(destination, origin) or []
         all_hotels     = data_provider.fetch_hotels(destination) or []
 
         def _avg_price(items: list, key: str, fallback: float) -> float:

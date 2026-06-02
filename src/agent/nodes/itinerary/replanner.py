@@ -92,6 +92,24 @@ If mode=standalone, add this footnote after the budget status: "*Grand total cov
 """
 
 
+STEP_CRITIC_SYSTEM = """
+You are a travel data quality critic evaluating the result of a single data-fetching step.
+
+Rules:
+- A result with real, usable data → "success"
+- An empty result, missing key fields, or an error → "failed"
+
+Respond ONLY as JSON (no markdown fences):
+{
+  "status": "success" | "failed",
+  "verdict": "<one-sentence quality assessment>",
+  "replan_hint": "<specific corrective action for the Planner; empty string on success>"
+}
+"""
+
+_FETCH_STEP_TYPES = {"fetch_activities", "fetch_weather"}
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -290,6 +308,44 @@ def _generate_fallback_markdown(results: dict, trip_days: int, budget: float, mo
     return "\n".join(lines)
 
 
+def _build_critic_summary(step_type: str, data) -> str:
+    """Build a concise, non-truncated summary of fetch results for the critic."""
+    if data is None:
+        return "null — no data returned"
+    if step_type == "fetch_activities":
+        activities = data.get("activities", []) if isinstance(data, dict) else data
+        if not isinstance(activities, list) or not activities:
+            return "empty activity list"
+        names = [a.get("name", "?") for a in activities[:10]]
+        return f"{len(activities)} activities fetched. Sample: {', '.join(names)}"
+    if step_type == "fetch_weather":
+        if isinstance(data, dict):
+            pairs = [f"{k}: {v}" for k, v in data.items() if k != "error"]
+            return f"Weather data: {'; '.join(pairs)}" if pairs else "empty weather dict"
+        return f"weather result: {str(data)[:200]}"
+    return f"{len(data)} items" if isinstance(data, list) else str(data)[:200]
+
+
+def _is_result_empty(val) -> bool:
+    if val is None:
+        return True
+    if isinstance(val, list):
+        return len(val) == 0
+    if isinstance(val, dict):
+        if val.get("error"):
+            return True
+        return not any(v for k, v in val.items() if k != "error")
+    return False
+
+
+def _strip_json_fences(s: str) -> str:
+    if s.startswith("```"):
+        parts = s.split("```")
+        s = parts[1] if len(parts) > 1 else s
+        s = s.lstrip("json").strip().rstrip("```").strip()
+    return s
+
+
 # ---------------------------------------------------------------------------
 # Node
 # ---------------------------------------------------------------------------
@@ -308,14 +364,15 @@ class ItineraryReplannerNode:
         budget        = state.get("total_budget", 0)
         trip_days     = state.get("trip_days", 3)
 
-        # ── A. Last step failed ────────────────────────────────────────────
-        if not feasible:
-            last_step  = plan_steps[current_index - 1] if current_index > 0 else {}
-            step_type  = last_step.get("step_type", "unknown")
-            step_id    = last_step.get("step_id", 0)
-            last_key   = f"{step_type}_{step_id}"
-            last_result = results.get(last_key, {})
+        # Identify the last executed step (used by all branches below)
+        last_step   = plan_steps[current_index - 1] if current_index > 0 else {}
+        step_type   = last_step.get("step_type", "unknown")
+        step_id     = last_step.get("step_id", 0)
+        last_key    = f"{step_type}_{step_id}"
+        last_result = results.get(last_key, {})
 
+        # ── A. Hard failure detected by Executor ──────────────────────────
+        if not feasible:
             error_msg   = last_result.get("error", "step failed")
             replan_hint = last_result.get("replan_hint", "")
 
@@ -372,14 +429,68 @@ class ItineraryReplannerNode:
                 )],
             }
 
-        # ── B. More steps remain — keep going ─────────────────────────────
+        # ── B. Per-step critic for fetch results ───────────────────────────
+        if step_type in _FETCH_STEP_TYPES:
+            verdict = self._evaluate_step_result(step_type, last_result)
+            if verdict["status"] == "failed":
+                if replan_count >= MAX_REPLANS:
+                    hard_reason = json.dumps({
+                        "error_code":    "MAX_REPLANS",
+                        "error_message": (
+                            f"Gave up after {replan_count} replan attempts. "
+                            f"Critic: {verdict['verdict']}"
+                        ),
+                        "failed_step":   step_type,
+                        "replan_hint":   verdict.get("replan_hint", ""),
+                    }, ensure_ascii=False)
+                    return {
+                        "itinerary_feasible":       False,
+                        "replanner_action":         "done",
+                        "itinerary_fallback_reason": hard_reason,
+                        "messages": [AIMessage(
+                            content=(
+                                f"❌ **REPLANNER → DONE (max replans={MAX_REPLANS} reached)**\n"
+                                f"*Critic:* `{step_type}` — {verdict['verdict']}"
+                            ),
+                            name="replanner_log",
+                        )],
+                    }
+                replan_ctx = _build_replan_context(
+                    error_code="CRITIC_REJECT",
+                    error_message=verdict["verdict"],
+                    failed_step=step_type,
+                    replan_hint=verdict.get("replan_hint") or f"Data quality check failed for `{step_type}`.",
+                    step_results=results,
+                    state=state,
+                )
+                return {
+                    "itinerary_feasible": False,
+                    "replanner_action":   "replan",
+                    "itinerary_plan": {
+                        **plan_state,
+                        "replan_context": replan_ctx,
+                        "replan_count":   replan_count,
+                    },
+                    "messages": [AIMessage(
+                        content=(
+                            f"🔄 **REPLANNER → REPLAN** (critic reject, "
+                            f"attempt {replan_count}/{MAX_REPLANS})\n"
+                            f"*Step:* `{step_type}`\n"
+                            f"*Verdict:* {verdict['verdict']}\n"
+                            f"*Hint:* {verdict.get('replan_hint', '')}"
+                        ),
+                        name="replanner_log",
+                    )],
+                }
+
+        # ── C. More steps remain — keep going ─────────────────────────────
         if current_index < len(plan_steps):
             return {
                 "replanner_action": "continue",
                 "itinerary_feasible": True,
             }
 
-        # ── C. All steps done — LLM quality review + markdown generation ──
+        # ── D. All steps done — LLM quality review + markdown generation ──
         mode        = state.get("itinerary_mode", "standalone")
         travel_plan = state.get("travel_plan")
         origin      = state.get("current_city", "")
@@ -460,4 +571,29 @@ class ItineraryReplannerNode:
             "itinerary_feasible": True,
             "replanner_action":   "done",
             "messages": [AIMessage(content="✅ **Itinerary complete.**", name="replanner_log")],
+        }
+
+    # ── Per-step critic ────────────────────────────────────────────────────
+
+    def _evaluate_step_result(self, step_type: str, result: dict) -> dict:
+        """LLM critic that evaluates the quality of a fetch step's output."""
+        data    = result.get("data")
+        summary = _build_critic_summary(step_type, data)
+        prompt  = f"Step: {step_type}\nResult summary: {summary}"
+        try:
+            raw    = self.llm.invoke([
+                SystemMessage(content=STEP_CRITIC_SYSTEM),
+                HumanMessage(content=prompt),
+            ]).content.strip()
+            parsed = json.loads(_strip_json_fences(raw))
+            if isinstance(parsed, dict) and "status" in parsed:
+                return parsed
+        except Exception:
+            pass
+        # Fallback: deterministic empty check
+        empty = _is_result_empty(data)
+        return {
+            "status":      "failed" if empty else "success",
+            "verdict":     "LLM critic unavailable — falling back to empty check.",
+            "replan_hint": f"`{step_type}` returned no usable data." if empty else "",
         }

@@ -3,7 +3,7 @@ ItineraryPlannerNode — v4
 =========================
 Generates a minimal ordered execution plan for the schedule builder.
 
-Two modes (set by ItineraryEnrichmentNode / edge.py):
+Two modes (set by PlanCheckNode / edge.py):
   with_travel_data — state["travel_plan"] already has flights + hotel.
                      Steps include build_day_schedule anchored to real
                      arrival/departure times, and verify_budget uses real prices.
