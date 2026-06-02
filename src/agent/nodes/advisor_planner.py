@@ -526,6 +526,8 @@ class AdvisorPlannerNode:
         ctx_parts = []
         if state.get("current_city"):
             ctx_parts.append(f"Origin: {state['current_city']}")
+        if state.get("destination_city"):
+            ctx_parts.append(f"Destination: {state['destination_city']}")
         if state.get("total_budget") is not None:
             ctx_parts.append(f"Budget: ${state['total_budget']:.0f}")
         if state.get("trip_days") is not None:
