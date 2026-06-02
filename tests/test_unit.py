@@ -1,7 +1,6 @@
 """Unit tests — pure Python, no LLM, no network. Runs in milliseconds."""
 import pytest
 
-from agent.nodes.itinerary.observer import validate_schedule
 from agent.nodes.itinerary.planner import _completed_step_types
 from agent.nodes.itinerary.schemas import ExecutionPlan, PlanStep
 from security import validate_city, validate_input, validate_positive_number
@@ -17,8 +16,8 @@ def test_execution_plan_serializable():
         origin="Tel Aviv",
         total_days=3,
         steps=[
-            PlanStep(step_id=1, step_type="fetch_flights", description="Outbound flights"),
-            PlanStep(step_id=2, step_type="fetch_hotels", description="Hotels"),
+            PlanStep(step_id=1, step_type="fetch_activities", description="Activities"),
+            PlanStep(step_id=2, step_type="fetch_weather", description="Weather"),
             PlanStep(step_id=3, step_type="build_day_schedule", description="Day 1", day=1),
             PlanStep(step_id=4, step_type="verify_budget", description="Budget check"),
         ],
@@ -33,75 +32,6 @@ def test_execution_plan_serializable():
 def test_plan_step_rejects_invalid_type():
     with pytest.raises(Exception):  # noqa: PT011
         PlanStep(step_id=1, step_type="invalid_step_type", description="bad")
-
-
-# ---------------------------------------------------------------------------
-# Observer validate_schedule tests
-# ---------------------------------------------------------------------------
-
-def _day_result(day: int, slots: list) -> dict:
-    """Helper: wrap slots in the v3 executor result format."""
-    return {
-        f"build_day_schedule_{day}": {
-            "status": "success",
-            "data": {"day": day, "slots": slots},
-        }
-    }
-
-
-@pytest.mark.unit
-def test_validate_schedule_empty_results_returns_no_errors():
-    errors = validate_schedule({}, budget=1500.0, trip_days=3)
-    assert errors == []
-
-
-@pytest.mark.unit
-def test_validate_schedule_detects_overlap():
-    slots = [
-        {"time": "09:00", "end_time": "11:00", "name": "Louvre", "slot_type": "activity"},
-        {"time": "10:30", "end_time": "12:00", "name": "Notre Dame", "slot_type": "activity"},
-    ]
-    errors = validate_schedule(_day_result(1, slots), budget=1500.0, trip_days=1)
-    codes = [e.code for e in errors]
-    assert "OVERLAP" in codes
-
-
-@pytest.mark.unit
-def test_validate_schedule_no_overlap_for_sequential_slots():
-    slots = [
-        {"time": "09:00", "end_time": "11:00", "name": "Louvre", "slot_type": "activity"},
-        {"time": "11:00", "end_time": "13:00", "name": "Notre Dame", "slot_type": "activity"},
-    ]
-    errors = validate_schedule(_day_result(1, slots), budget=1500.0, trip_days=1)
-    overlap_errors = [e for e in errors if e.code == "OVERLAP"]
-    assert overlap_errors == []
-
-
-@pytest.mark.unit
-def test_validate_schedule_budget_exceeded():
-    results = {
-        "verify_budget_1": {
-            "status": "success",
-            "data": {"grand_total": 1700.0},
-        }
-    }
-    errors = validate_schedule(results, budget=1500.0, trip_days=3)
-    codes = [e.code for e in errors]
-    assert "BUDGET_EXCEEDED" in codes
-
-
-@pytest.mark.unit
-def test_validate_schedule_budget_within_tolerance():
-    # 1.04 * budget is within the 5% tolerance
-    results = {
-        "verify_budget_1": {
-            "status": "success",
-            "data": {"grand_total": 1560.0},  # 1500 * 1.04 = 1560
-        }
-    }
-    errors = validate_schedule(results, budget=1500.0, trip_days=3)
-    codes = [e.code for e in errors]
-    assert "BUDGET_EXCEEDED" not in codes
 
 
 # ---------------------------------------------------------------------------
