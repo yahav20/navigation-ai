@@ -299,6 +299,9 @@ def handle_verify_budget(
         day_data = _inner_data(wrapped)
         if not isinstance(day_data, dict) or not day_data.get("slots"):
             continue
+        # Exclude days beyond current trip_days (can happen after a trip_days reduction replan)
+        if day_data.get("day", 0) > trip_days:
+            continue
         days_built += 1
         for slot in day_data["slots"]:
             cost = float(slot.get("estimated_cost", 0))
@@ -331,17 +334,19 @@ def handle_verify_budget(
                 "trip_days":   trip_days,
             })
             hotel_per_night = float(avg.get("avg_hotel_per_night", 120))
+            flight_price    = float(avg.get("avg_flight_price", 400))
+            ret_price       = float(avg.get("avg_return_flight_price", 400))
             avg_prices = avg
         except Exception:
             hotel_per_night = 120.0
+            flight_price    = 400.0
+            ret_price       = 400.0
             avg_prices = {
                 "avg_flight_price":        400.0,
                 "avg_return_flight_price": 400.0,
                 "avg_hotel_per_night":     hotel_per_night,
                 "note": "estimated fallback",
             }
-        flight_price = 0.0
-        ret_price    = 0.0
 
     try:
         data = calculate_trip_cost.invoke({
@@ -367,13 +372,6 @@ def handle_verify_budget(
         f"Grand total: ${grand_total:.0f} | Budget: ${budget or 'flexible'} | "
         + ("⚠️ OVER BUDGET" if over_budget else "✅ Within budget")
     )
-    replan_hint = ""
-    if over_budget:
-        overage = grand_total - budget
-        replan_hint = (
-            f"Budget exceeded by ${overage:.0f}. "
-            "Options: cheaper activities, reduce trip_days by 1-2."
-        )
 
     if mode == "standalone":
         data.pop("outbound_flight", None)
@@ -381,15 +379,30 @@ def handle_verify_budget(
     if avg_prices is not None:
         data["avg_prices"] = avg_prices
 
+    if over_budget:
+        overage = grand_total - budget
+        replan_hint = (
+            f"Budget exceeded by ${overage:.0f}. "
+            "Options: cheaper activities, reduce trip_days by 1-2."
+        )
+        return _wrap_result(
+            status="over_budget",
+            data=data,
+            error=f"Budget exceeded by ${overage:.0f}.",
+            replan_hint=replan_hint,
+            trace=_minimal_trace("verify_budget",
+                                 {"trip_days": trip_days, "budget": budget},
+                                 observation, "Over budget."),
+        )
+
     return _wrap_result(
         status="success",
         data=data,
         error=None,
-        replan_hint=replan_hint,
+        replan_hint="",
         trace=_minimal_trace("verify_budget",
                              {"trip_days": trip_days, "budget": budget},
-                             observation,
-                             "Over budget." if over_budget else "Within budget."),
+                             observation, "Within budget."),
     )
 
 

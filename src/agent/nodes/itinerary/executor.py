@@ -107,7 +107,7 @@ def _commit(step, step_key, result, current_index,
     history.append(_history_entry(step, result))
 
     status = result.get("status", "unknown")
-    icon   = {"success": "✅", "failed": "❌", "fallback_used": "🚫"}.get(status, "•")
+    icon   = {"success": "✅", "failed": "❌", "fallback_used": "🚫", "over_budget": "⚠️"}.get(status, "•")
     log_lines.append(
         f"{icon} **{status}**"
         + (f" — {result['error']}" if result.get("error") else "")

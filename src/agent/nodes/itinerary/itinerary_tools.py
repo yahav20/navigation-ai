@@ -15,8 +15,10 @@ from typing import Optional
 from langchain_core.tools import tool, ToolException
 
 from providers.flights import search_flights_with_fallback
+from providers.xotelo import xotelo_list_hotels
 from security import validate_city, validate_positive_number
 from tools.dependencies import data_provider
+from tools.xotelo_hotels import TRIPADVISOR_LOCATION_KEYS
 
 
 # ---------------------------------------------------------------------------
@@ -150,7 +152,6 @@ def get_average_location_cost(destination: str, origin: str, trip_days: int) -> 
 
         flights_out    = search_flights_with_fallback(origin, destination) or []
         flights_return = search_flights_with_fallback(destination, origin) or []
-        all_hotels     = data_provider.fetch_hotels(destination) or []
 
         def _avg_price(items: list, key: str, fallback: float) -> float:
             prices = [
@@ -162,7 +163,15 @@ def get_average_location_cost(destination: str, origin: str, trip_days: int) -> 
 
         avg_flight        = _avg_price(flights_out,    "price", 400.0)
         avg_return_flight = _avg_price(flights_return, "price", 400.0)
-        avg_hotel         = _avg_price(all_hotels, "price_per_night", 120.0)
+
+        # Use Xotelo (external) hotel data; fall back to SQLite for unknown cities
+        location_key = TRIPADVISOR_LOCATION_KEYS.get(destination.lower())
+        xotelo_hotels = xotelo_list_hotels(location_key) if location_key else []
+        if xotelo_hotels:
+            avg_hotel = _avg_price(xotelo_hotels, "price_per_night", 120.0)
+        else:
+            db_hotels = data_provider.fetch_hotels(destination) or []
+            avg_hotel = _avg_price(db_hotels, "price_per_night", 120.0)
 
         return {
             "avg_flight_price":        avg_flight,

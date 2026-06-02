@@ -79,7 +79,9 @@ MARKDOWN FORMAT (output this if the plan is acceptable):
 | **Grand Total** | **$[grand_total from verify_budget]** |
 
 Label rules (read Mode from the TRIP header line):
-  - mode=with_travel_data → hotel label = "Hotel", no flights row (already booked)
+  - mode=with_travel_data → hotel label = "Hotel"
+                            AND add "Outbound Flight" and "Return Flight" rows using outbound_flight and return_flight from BUDGET TOTALS.
+                            Place the flight rows ABOVE the hotel row.
   - mode=standalone       → hotel label = "~ Hotel (estimated)"
                             AND add a "~ Flights (estimated)" row using approx_flights_estimated from BUDGET TOTALS
                             Place the flights row ABOVE the hotel row.
@@ -282,15 +284,23 @@ def _generate_fallback_markdown(results: dict, trip_days: int, budget: float, mo
             lines.append("|----------|------|")
             hotel_label_prefix = "~ " if mode == "standalone" else ""
             hotel_suffix = " (estimated)" if mode == "standalone" else ""
+            # with_travel_data: show real flight costs as separate rows
+            if mode == "with_travel_data":
+                ob_price = float(b.get("outbound_flight", 0) or 0)
+                ret_price = float(b.get("return_flight", 0) or 0)
+                if ob_price:
+                    lines.append(f"| Outbound Flight | ${ob_price:.0f} |")
+                if ret_price:
+                    lines.append(f"| Return Flight | ${ret_price:.0f} |")
             # Standalone: prepend estimated flights row
-            if mode == "standalone":
+            elif mode == "standalone":
                 avg_p = b.get("avg_prices") or {}
                 out = float(avg_p.get("avg_flight_price", 0) or 0)
                 ret = float(avg_p.get("avg_return_flight_price", 0) or 0)
                 if out or ret:
                     lines.append(f"| ~ Flights (estimated) | ${out + ret:.0f} |")
             for cat, val in b.items():
-                if cat in ("grand_total", "avg_prices"):
+                if cat in ("grand_total", "avg_prices", "outbound_flight", "return_flight"):
                     continue
                 if not isinstance(val, (int, float)):
                     continue
@@ -324,6 +334,11 @@ def _build_critic_summary(step_type: str, data) -> str:
             return f"Weather data: {'; '.join(pairs)}" if pairs else "empty weather dict"
         return f"weather result: {str(data)[:200]}"
     return f"{len(data)} items" if isinstance(data, list) else str(data)[:200]
+
+
+def _drop_stale_budget(results: dict) -> dict:
+    """Remove any verify_budget entries so the next run gets a fresh calculation."""
+    return {k: v for k, v in results.items() if not k.startswith("verify_budget")}
 
 
 def _is_result_empty(val) -> bool:
@@ -414,6 +429,7 @@ class ItineraryReplannerNode:
                 "replanner_action":   "replan",
                 "itinerary_plan": {
                     **plan_state,
+                    "step_results":  _drop_stale_budget(results),
                     "replan_context": replan_ctx,
                     "replan_count":   replan_count,  # Planner increments on its side
                 },
@@ -468,6 +484,7 @@ class ItineraryReplannerNode:
                     "replanner_action":   "replan",
                     "itinerary_plan": {
                         **plan_state,
+                        "step_results":  _drop_stale_budget(results),
                         "replan_context": replan_ctx,
                         "replan_count":   replan_count,
                     },
@@ -522,6 +539,7 @@ class ItineraryReplannerNode:
                         results_for_replan = {
                             k: v for k, v in results.items()
                             if not k.startswith("build_day_schedule")
+                            and not k.startswith("verify_budget")
                         }
                         replan_ctx = _build_replan_context(
                             error_code="LLM_REJECT",
