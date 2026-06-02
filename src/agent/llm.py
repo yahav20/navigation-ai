@@ -10,10 +10,14 @@ from langchain_openai import ChatOpenAI
 
 from tools import core_tools
 from tools.advisor_tools import advisor_tools
+from tools.general_chat_tools import general_chat_tools
+
+_chat_tools = advisor_tools + general_chat_tools
 
 _TOOL_SETS = {
     "travel": core_tools,
     "advisor": advisor_tools,
+    "chat": _chat_tools,
 }
 
 def get_models(provider: str = "google", mode: str = "travel") -> tuple[Runnable, BaseChatModel]:
@@ -29,8 +33,7 @@ def get_models(provider: str = "google", mode: str = "travel") -> tuple[Runnable
         raise ValueError(msg)
 
     if provider == "groq":
-        groq_model = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
-        base = ChatGroq(model=groq_model, temperature=0)
+        base = ChatGroq(model="llama-3.3-70b-versatile", temperature=0)
     elif provider == "ollama":
         base = ChatOllama(model="gpt-oss:120b-cloud", temperature=0)
     elif provider == "openai":
@@ -40,5 +43,8 @@ def get_models(provider: str = "google", mode: str = "travel") -> tuple[Runnable
 
     if mode == "advisor":
         return base.bind_tools(advisor_tools), base
+
+    if mode == "chat":
+        return base.bind_tools(_chat_tools), base
 
     return base, base

@@ -9,15 +9,17 @@ from agent.state import AgentState
 # Routing Function 1: From Enrichment
 # ---------------------------------------------------------
 def after_enrichment(state: AgentState) -> str:
-    """Route to flight search or itinerary planner when enrichment is complete."""
+    """Route after enrichment.
 
+    build_itinerary  → plan_check   (HITL checkpoint before itinerary)
+    everything else  → flight_search (standard travel-planning path)
+    Incomplete       → END          (enrichment asked a follow-up question)
+    """
     if not state.get("enrichment_complete", False):
         return END
 
-    intent = state.get("intent", "other")
-
-    if intent == "build_itinerary":
-        return "itinerary_planner"
+    if state.get("intent") == "build_itinerary":
+        return "plan_check"
 
     return "flight_search"
 
@@ -55,14 +57,18 @@ def after_router(state: AgentState) -> str:
     elif intent == "advisor":
         return "advisor_planner"
     elif intent == "build_itinerary":
+        # Share the same metadata + enrichment path as travel planning.
+        # plan_check (reached after enrichment) handles the HITL fork.
         return "extract_metadata"
     elif intent == "general_chat":
         return "general_chat"
+    elif intent == "out_of_scope":
+        return "out_of_scope"
     else:
         return END
 
 
-CHAT_MAX_STEPS = 2
+CHAT_MAX_STEPS = 3
 
 def chat_should_continue(state: AgentState) -> str:
     """Route to chat_tools if the agent issued tool calls, otherwise go to summary."""

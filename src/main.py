@@ -11,6 +11,7 @@ warnings.filterwarnings("ignore", category=LangChainPendingDeprecationWarning)
 
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer  # noqa: E402
 from langgraph.checkpoint.sqlite import SqliteSaver  # noqa: E402
+from langgraph.types import Command  # noqa: E402
 
 import ui  # noqa: E402
 from agent.graph import build_graph  # noqa: E402
@@ -96,7 +97,7 @@ def _interactive_loop(conn: sqlite3.Connection, session_id: str) -> None:
         turn_count += 1
 
         try:
-            current_state = _run_turn(graph, config, user_input, current_state, session_id)
+            current_state = _run_turn(graph, config, user_input, current_state, session_id, prompt_session)
         except Exception as e:  # noqa: BLE001  # top-level handler: report connection/runtime errors to user
             ui.render_error(e)
             break
@@ -108,44 +109,82 @@ def _run_turn(
     user_input: str,
     current_state: tuple[str, str, str, str, str],
     session_id: str = "unknown",
+    prompt_session=None,
 ) -> tuple[str, str, str, str, str]:
-    initial_state = {"messages": [("user", user_input)], "step_count": 0}
+    """Run one user turn, including any HITL interrupt-resume cycles."""
+    _SELF_REPORTING_NODES = {"advisor_planner", "advisor_executor", "advisor_replanner"}
+
+    # First stream input is the user's message; on interrupt-resume it becomes a Command.
+    stream_input = {"messages": [("user", user_input)], "step_count": 0}
     last_content = ""
 
-    _SELF_REPORTING_NODES = {"advisor_planner", "advisor_executor", "advisor_replanner"}
-    # LangGraph emits an `updates` message *after* a node finishes, so the
-    # wall-clock between consecutive updates is the latest node's runtime.
-    last_node_start = time.perf_counter()
-    with ui.thinking(current_state) as display:
-        for mode, data in graph.stream(initial_state, config, stream_mode=["values", "updates"]):
-            if mode == "updates":
-                node_name = next(iter(data))
-                elapsed_ms = (time.perf_counter() - last_node_start) * 1000
-                last_node_start = time.perf_counter()
-                if node_name not in _SELF_REPORTING_NODES:
-                    ui.render_node(node_name, elapsed_ms=elapsed_ms)
-                continue
+    while True:
+        last_node_start = time.perf_counter()
+        pending_interrupt: str | dict | None = None
 
-            messages = data.get("messages", [])
-            if not messages:
-                continue
+        with ui.thinking(current_state) as display:
+            for mode, data in graph.stream(stream_input, config, stream_mode=["values", "updates"]):
+                if mode == "updates":
+                    node_name = next(iter(data))
+                    elapsed_ms = (time.perf_counter() - last_node_start) * 1000
+                    last_node_start = time.perf_counter()
 
-            last_msg = messages[-1]
-            content = str(last_msg.content) if hasattr(last_msg, "content") else "No content"
-            content = scan_output(content, session_id=session_id)
-            current_state = (
-                data.get("current_city", "None"),
-                data.get("destination_city", "None"),
-                data.get("total_budget", "None"),
-                data.get("trip_days", "None"),
-                data.get("trip_start", "None"),
+                    # LangGraph surfaces interrupt() calls as a special update key.
+                    if node_name == "__interrupt__":
+                        interrupts = data["__interrupt__"]
+                        # Preserve dict payloads (choice widgets) intact; stringify plain text.
+                        pending_interrupt = interrupts[0].value if interrupts else ""
+                        continue
+
+                    if node_name not in _SELF_REPORTING_NODES:
+                        ui.render_node(node_name, elapsed_ms=elapsed_ms)
+                    continue
+
+                messages = data.get("messages", [])
+                if not messages:
+                    continue
+
+                last_msg = messages[-1]
+                content = str(last_msg.content) if hasattr(last_msg, "content") else "No content"
+                content = scan_output(content, session_id=session_id)
+                current_state = (
+                    data.get("current_city", "None"),
+                    data.get("destination_city", "None"),
+                    data.get("total_budget", "None"),
+                    data.get("trip_days", "None"),
+                    data.get("trip_start", "None"),
+                )
+                display.update(current_state)
+
+                if content != last_content:
+                    ui.render_agent_message(last_msg.__class__.__name__, content)
+                    last_content = content
+
+        # No interrupt — turn is complete.
+        if pending_interrupt is None:
+            break
+
+        # ── HITL: show the question and collect the user's choice ──────
+        if isinstance(pending_interrupt, dict) and "options" in pending_interrupt:
+            # Structured interrupt: render the question then show arrow-key picker.
+            question = pending_interrupt.get("question", "")
+            if question:
+                ui.render_agent_message("Atlas", question)
+            user_response = ui.ask_choice(
+                options=pending_interrupt["options"],
+                state=current_state,
             )
-            display.update(current_state)
+        else:
+            # Plain-text interrupt: free-form input.
+            ui.render_agent_message("Atlas", str(pending_interrupt))
+            user_response = ui.ask_user(prompt_session, state=current_state)
 
-            if content == last_content:
-                continue
-            ui.render_agent_message(last_msg.__class__.__name__, content)
-            last_content = content
+        if user_response is None or user_response.strip().lower() in ("exit", "quit"):
+            break
+
+        # Resume the paused graph with the user's answer.
+        stream_input = Command(resume=user_response.strip())
+        last_content = ""  # reset so the redirect AIMessage is shown
 
     return current_state
 

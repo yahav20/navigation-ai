@@ -41,20 +41,29 @@ class RouterNode:
         - Budget: {state.get("total_budget", "None")}
         - Days: {state.get("trip_days", "None")}
 
-        INTENT DEFINITIONS & DIFFERENCES (when in doubt, pick 'advisor'):
-        1. 'advisor': The DEFAULT for all travel questions. Use this for: "where should I go?",
-           destination ideas, activities in a city, weather, city overviews, trip duration,
-           budget exploration, travel recommendations — anything that is asking for travel INFO.
-           Even questions like "I'm going to Tokyo, what should I do?" belong here.
+        INTENT DEFINITIONS & DIFFERENCES (when in doubt, pick 'general_chat' for informational questions or 'advisor' for destination/planning questions):
+        1. 'advisor': For destination exploration and planning research. Use for: "where should I go?",
+           comparing destinations, activities in a city, city overviews, budget exploration,
+           travel recommendations when the user is deciding WHERE to go.
+           Do NOT use for currency, visa, safety, packing, or customs questions — those go to 'general_chat'.
         2. 'new_travel_plan': User commits to a SPECIFIC destination and wants flights/hotels/costs.
            ("I want to fly to Rome — show me flights", "Let's book a trip to Madrid").
            ONLY use when the user is ready to START PLANNING a specific trip, not just exploring.
-        3. 'build_itinerary': ONLY when user EXPLICITLY asks for a day-by-day schedule.
+        3. 'build_itinerary': ONLY when user EXPLICITLY asks for a day-by-day SCHEDULE.
            ("Build a 3-day itinerary for Rome", "plan my days in Paris", "replan for $700").
-           "How should I split my time?" or "how many days per city?" → 'advisor', NOT here.
+           "How should I split my time?", "what should I do in Paris for 3 days?",
+           "give me ideas for a trip", or "can you help me plan my trip?" → 'advisor', NOT here.
         4. 'update_travel_plan': Changing an existing confirmed plan's parameters (budget, dates, destination).
-        5. 'general_chat': ONLY pure non-travel conversation — "Hello", "Thanks", "What can you do?".
-           NEVER use for any travel question, even casual ones.
+        5. 'general_chat': Conversational queries that do NOT require trip planning. Use for:
+           - Greetings, thanks, "what can you do?"
+           - Currency / exchange rate questions ("how much is $500 in euros?")
+           - Visa requirement questions ("do I need a visa for Japan?")
+           - Travel safety questions ("is Rio safe to visit?")
+           - Packing list questions ("what should I pack for Tokyo?")
+           - Local customs / etiquette / tipping questions ("what are tipping rules in Japan?")
+           - Destination vibe / "where should I go for a romantic trip?"
+           - How many days to spend in a city ("how many days in Amsterdam?")
+           Do NOT use for questions that need flights, hotels, or day-by-day itinerary building.
 
         TRANSITION RULE (critical): If the system is in ACTIVE ADVISOR FLOW and the user
         says something like "plan this trip", "let's go", "book this", "sounds good let's do it",
@@ -70,6 +79,14 @@ class RouterNode:
         # Guardrail: If user tries to update but no active trip exists, convert to new plan
         # Exception: if we were in an advisor flow, keep it as advisor
         final_intent = classification.intent
+
+        # Guardrail 0: Preserve build_itinerary intent across enrichment turns.
+        # EnrichmentNode may ask follow-up questions (destination, days, etc.) before
+        # setting enrichment_complete=True. Keep build_itinerary so the graph stays
+        # on the itinerary path and eventually reaches plan_check.
+        if (state.get("intent") == "build_itinerary"
+                and not state.get("enrichment_complete", False)):
+            final_intent = "build_itinerary"
 
         # Guardrail 1: Both high-level planning and micro-planning require a destination.
         # If the user asks for a plan or itinerary but we don't have a destination, route to advisor.
@@ -89,8 +106,29 @@ class RouterNode:
         if final_intent == "update_travel_plan":
             content_lower = last_msg.content.lower()
             # If the user used planning/replanning trigger words, force route to Planner
-            trigger_words = ["replan", "full plan", "schedule", "לוז", "תכנון מלא", "תבנה לי"]
+            trigger_words = ["replan", "full plan", "schedule", "schedule", "plan", "  itinerary", "day-by-day", "day by day", "build my trip", "build this trip", "plan this trip", "sounds good let's do it", "let's go", "I want to go there"]
             if any(word in content_lower for word in trigger_words):
                 final_intent = "build_itinerary"
+
+        # Guardrail 5: Hard-redirect general-chat question types that the LLM
+        # tends to misclassify as 'advisor' (currency, visa, safety, packing, customs).
+        if final_intent == "advisor" and not has_active_trip:
+            content_lower = last_msg.content.lower()
+            _GENERAL_CHAT_SIGNALS = [
+                "exchange rate", "currency", "convert", "how much is",
+                "visa", "passport", "do i need a visa",
+                "safe to visit", "is it safe", "safety", "travel advisory",
+                "what to pack", "packing list", "what should i pack",
+                "customs", "tipping", "etiquette", "local customs",
+                "how many days", "how long to spend", "days in",
+                "romantic", "budget-friendly", "best city for",
+                "recommend a city", "where should i go for",
+                "tell me about", "what is", "history of", "what is the",
+            ]
+            if any(sig in content_lower for sig in _GENERAL_CHAT_SIGNALS):
+                final_intent = "general_chat"
+        # Guardrail 6: out_of_scope cannot be overridden by trip context
+        if final_intent == "out_of_scope":
+            return {"intent": "out_of_scope"}
 
         return {"intent": final_intent}

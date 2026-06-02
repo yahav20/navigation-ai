@@ -200,22 +200,32 @@ class IntentClassification(BaseModel):
         "advisor",
         "build_itinerary",
         "general_chat",
+        "out_of_scope",
     ] = Field(
         description=(
             "Classify the user's intent. When in doubt, choose 'advisor'.\n"
             "- 'advisor': The DEFAULT for ALL travel-related queries. Use this for: destination ideas "
             "('where should I go?'), activities in a city, weather, city profiles, best time to visit, "
             "trip duration advice, budget exploration, travel recommendations, ANY travel information query. "
-            "Also covers refining search parameters within an ACTIVE ADVISOR FLOW.\n"
+            "Also covers refining search parameters within an ACTIVE ADVISOR FLOW. "
+            "City-specific questions (weather in a city, activities in a city, safety in a city, "
+            "best time to visit a city) ALWAYS belong here — even if the question feels casual.\n"
             "- 'new_travel_plan': ONLY when the user commits to a SPECIFIC destination and wants to CHECK "
             "or BOOK flights, hotels, or costs. (e.g. 'I want to fly to Rome', 'show me hotels in Madrid', "
             "'let\\'s plan a trip to Tokyo'). Do NOT use just because a city is mentioned.\n"
             "- 'update_travel_plan': Changing parameters (budget, days, destination) of an ALREADY-PLANNED trip.\n"
-            "- 'build_itinerary': ONLY when user EXPLICITLY requests a day-by-day schedule or itinerary. "
-            "Trigger phrases: 'build an itinerary', 'plan my days', 'day-by-day schedule'. "
-            "Questions like 'how should I split my time' or 'how many days per city' are 'advisor', NOT 'build_itinerary'.\n"
-            "- 'general_chat': ONLY for pure non-travel conversation — greetings ('hello', 'hi', 'thanks'), "
-            "'what can you do?', completely off-topic chat. NEVER use for ANY travel-related question.\n"
+            "- 'build_itinerary': ONLY when user EXPLICITLY requests a day-by-day SCHEDULE. "
+            "Trigger phrases: 'build an itinerary', 'plan my days', 'day-by-day schedule', 'replan'. "
+            "Questions like 'how should I split my time', 'what should I do in Paris for 3 days', "
+            "'give me ideas for a 5-day trip', or 'can you help me plan my trip' are 'advisor', NOT 'build_itinerary'.\n"
+            "- 'general_chat': ONLY for greetings ('hello', 'hi', 'thanks'), 'what can you do?', "
+            "and general travel LOGISTICS that are not destination-specific: visa requirements, "
+            "tipping etiquette, currency exchange, packing tips, meta questions about the bot. "
+            "NOT for city-specific questions ('what's the weather in Paris?' → 'advisor'). "
+            "NEVER use for destination discovery or travel planning.\n"
+            "- 'out_of_scope': ONLY for queries with ZERO travel relevance — food recipes, math, "
+            "coding, general trivia, anything a travel assistant should not touch. "
+            "When in doubt, prefer 'general_chat' over 'out_of_scope'.\n"
         )
     )
     has_explicit_destination: bool = Field(
