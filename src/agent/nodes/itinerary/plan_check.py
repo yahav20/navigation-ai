@@ -53,7 +53,7 @@ class PlanCheckNode:
             ),
             "options": [
                 ("yes", "Search for flights & hotels first"),
-                ("no",  "Build a standalone itinerary"),
+                ("no",  "Build a generic itinerary"),
             ],
         })
 

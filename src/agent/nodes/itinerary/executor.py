@@ -569,13 +569,6 @@ def _is_empty(val) -> bool:
     return False
 
 
-def _strip_fences(s: str) -> str:
-    if s.startswith("```"):
-        parts = s.split("```")
-        s = parts[1] if len(parts) > 1 else s
-        s = s.lstrip("json").strip()
-    return s
-
 
 def _canonical_args(args: dict) -> dict:
     return {k: v for k, v in sorted(args.items())}
