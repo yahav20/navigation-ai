@@ -1,4 +1,6 @@
 """Construct chat models for travel and recommendation paths."""
+import os
+
 from langchain_core.language_models import BaseChatModel
 from langchain_core.runnables import Runnable
 from langchain_google_genai import ChatGoogleGenerativeAI
