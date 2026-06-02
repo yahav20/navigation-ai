@@ -61,24 +61,15 @@ def after_router(state: AgentState) -> str:
         # plan_check (reached after enrichment) handles the HITL fork.
         return "extract_metadata"
     elif intent == "general_chat":
-        return "general_chat"
+        return "advisor_planner"
     elif intent == "out_of_scope":
         return "out_of_scope"
     else:
         return END
 
 
-CHAT_MAX_STEPS = 3
-
-def chat_should_continue(state: AgentState) -> str:
-    """Route to chat_tools if the agent issued tool calls, otherwise go to summary."""
-    last_message = state["messages"][-1]
-    step_count = state.get("step_count", 0)
-
-    if step_count >= CHAT_MAX_STEPS:
-        return "summary"
-
-    if getattr(last_message, "tool_calls", None):
-        return "chat_tools"
-
-    return "summary"
+def after_advisor_planner(state: AgentState) -> str:
+    """Route to out_of_scope when planner detected a non-travel question, else to executor."""
+    if state.get("advisor_out_of_scope"):
+        return "out_of_scope"
+    return "advisor_executor"

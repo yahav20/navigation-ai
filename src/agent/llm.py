@@ -8,22 +8,18 @@ from langchain_openai import ChatOpenAI
 
 from tools import core_tools
 from tools.advisor_tools import advisor_tools
-from tools.general_chat_tools import general_chat_tools
-
-_chat_tools = advisor_tools + general_chat_tools
 
 _TOOL_SETS = {
     "travel": core_tools,
     "advisor": advisor_tools,
-    "chat": _chat_tools,
 }
 
 def get_models(provider: str = "google", mode: str = "travel") -> tuple[Runnable, BaseChatModel]:
     """Return (response_or_agent_model, extraction_model) for provider/mode.
 
     mode="travel"   — returns an unbound response model, no tool binding
-    mode="advisor"  — binds advisor discovery tools; used by general chat node and
-                      for tool schema reference (advisor path itself uses Plan-and-Execute)
+    mode="advisor"  — binds advisor discovery tools for tool schema reference
+                      (the advisor path itself uses Plan-and-Execute, not tool binding)
     """
     provider = provider.lower()
     if mode not in _TOOL_SETS:
@@ -41,8 +37,5 @@ def get_models(provider: str = "google", mode: str = "travel") -> tuple[Runnable
 
     if mode == "advisor":
         return base.bind_tools(advisor_tools), base
-
-    if mode == "chat":
-        return base.bind_tools(_chat_tools), base
 
     return base, base
