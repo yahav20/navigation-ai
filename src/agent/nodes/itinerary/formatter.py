@@ -113,7 +113,7 @@ class ItineraryFormatterNode:
         plan_state = state.get("itinerary_plan", {})
         results    = plan_state.get("step_results", {})
 
-        # Read average prices stored by executor in verify_budget result
+        # Read average prices from verify_budget_0 (injected by the Replanner)
         avg_prices: dict = {}
         budget_key = next((k for k in results if k.startswith("verify_budget")), None)
         if budget_key:

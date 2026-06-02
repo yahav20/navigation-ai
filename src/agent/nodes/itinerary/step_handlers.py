@@ -670,7 +670,7 @@ def _canonical_args(args: dict) -> dict:
 
 
 def _find_cached_result(results: dict, history: list, step_type: str, args: dict) -> Optional[dict]:
-    never_cache = {"build_day_schedule", "verify_budget"}
+    never_cache = {"build_day_schedule"}
     if step_type in never_cache:
         return None
     for h in history:

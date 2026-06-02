@@ -70,26 +70,6 @@ MARKDOWN FORMAT (output this if the plan is acceptable):
 [Repeat ## 📅 Day N section for every day in the trip]
 
 ---
-## 💰 Trip Budget Summary
-| Category | Cost |
-|----------|------|
-| [hotel label] ([N] nights) | $[hotel_total from verify_budget] |
-| Activities | $[activities_total from verify_budget] |
-| Meals | $[meals_total from verify_budget] |
-| **Grand Total** | **$[grand_total from verify_budget]** |
-
-Label rules (read Mode from the TRIP header line):
-  - mode=with_travel_data → hotel label = "Hotel"
-                            AND add "Outbound Flight" and "Return Flight" rows using outbound_flight and return_flight from BUDGET TOTALS.
-                            Place the flight rows ABOVE the hotel row.
-  - mode=standalone       → hotel label = "~ Hotel (estimated)"
-                            AND add a "~ Flights (estimated)" row using approx_flights_estimated from BUDGET TOTALS
-                            Place the flights row ABOVE the hotel row.
-
-[✅ Within budget / ⚠️ Over budget — based on grand_total vs budget]
-If mode=standalone, add this footnote after the budget status: "*Grand total covers activities, meals & estimated hotel. Flights are shown separately as an estimate.*"
-
----
 💡 **[Destination] tips:** [Write 1-2 genuine, specific tips for this destination — never leave this as a placeholder]
 """
 
@@ -206,23 +186,6 @@ def _build_summary(
             lines.append(f"  {t}-{et} ({dur}min) [{stype}] {name} ${cost:.0f}")
         lines.append("")
 
-    # ── Budget totals ────────────────────────────────────────────────────────
-    budget_key = next((k for k in results if k.startswith("verify_budget")), None)
-    if budget_key:
-        b = _unwrap(results.get(budget_key, {}))
-        if isinstance(b, dict):
-            totals = {k: v for k, v in b.items()
-                      if k not in ("avg_prices",) and isinstance(v, (int, float))}
-            # Standalone: surface estimated flight costs so the LLM can render them
-            avg_p = b.get("avg_prices") or {}
-            if mode == "standalone" and avg_p:
-                out = float(avg_p.get("avg_flight_price", 0) or 0)
-                ret = float(avg_p.get("avg_return_flight_price", 0) or 0)
-                if out or ret:
-                    totals["approx_flights_estimated"] = round(out + ret, 2)
-            lines.append(f"BUDGET TOTALS: {json.dumps(totals)}")
-            lines.append("")
-
     # ── Weather (brief) ──────────────────────────────────────────────────────
     weather_key = next((k for k in results if k.startswith("fetch_weather")), None)
     if weather_key:
@@ -275,45 +238,59 @@ def _generate_fallback_markdown(results: dict, trip_days: int, budget: float, mo
             )
         lines.append(f"\n**Day total: ${day_data.get('day_cost', 0):.0f}**")
 
+    budget_md = _budget_section_md(results, budget, mode)
+    if budget_md:
+        lines.append(budget_md)
+
+    return "\n".join(lines)
+
+
+def _budget_section_md(results: dict, budget: float, mode: str) -> str:
+    """Deterministic budget summary section — appended after the LLM day-schedule markdown."""
     budget_key = next((k for k in results if k.startswith("verify_budget")), None)
-    if budget_key:
-        b = _unwrap(results[budget_key])
-        if isinstance(b, dict) and b.get("grand_total") is not None:
-            lines.append("\n---\n## 💰 Budget Summary\n")
-            lines.append("| Category | Cost |")
-            lines.append("|----------|------|")
-            hotel_label_prefix = "~ " if mode == "standalone" else ""
-            hotel_suffix = " (estimated)" if mode == "standalone" else ""
-            # with_travel_data: show real flight costs as separate rows
-            if mode == "with_travel_data":
-                ob_price = float(b.get("outbound_flight", 0) or 0)
-                ret_price = float(b.get("return_flight", 0) or 0)
-                if ob_price:
-                    lines.append(f"| Outbound Flight | ${ob_price:.0f} |")
-                if ret_price:
-                    lines.append(f"| Return Flight | ${ret_price:.0f} |")
-            # Standalone: prepend estimated flights row
-            elif mode == "standalone":
-                avg_p = b.get("avg_prices") or {}
-                out = float(avg_p.get("avg_flight_price", 0) or 0)
-                ret = float(avg_p.get("avg_return_flight_price", 0) or 0)
-                if out or ret:
-                    lines.append(f"| ~ Flights (estimated) | ${out + ret:.0f} |")
-            for cat, val in b.items():
-                if cat in ("grand_total", "avg_prices", "outbound_flight", "return_flight"):
-                    continue
-                if not isinstance(val, (int, float)):
-                    continue
-                label = cat.replace("_", " ").title()
-                if "hotel" in cat.lower():
-                    label = f"{hotel_label_prefix}{label}{hotel_suffix}"
-                lines.append(f"| {label} | ${float(val):.0f} |")
-            grand = float(b.get("grand_total", 0))
-            lines.append(f"\n**Grand Total: ${grand:.0f}**")
-            if budget:
-                remaining = budget - grand
-                emoji = "✅" if remaining >= 0 else "⚠️"
-                lines.append(f"\n{emoji} Budget remaining: ${remaining:.0f}")
+    if not budget_key:
+        return ""
+    b = _unwrap(results[budget_key])
+    if not isinstance(b, dict) or b.get("grand_total") is None:
+        return ""
+
+    lines: list[str] = ["\n\n---------------------------------------------------------------------------------------\n"]
+    lines.append("## 💰 Budget Summary\n")
+    lines.append("| Category | Cost |")
+    lines.append("|----------|------|")
+    hotel_label_prefix = "~ " if mode == "standalone" else ""
+    hotel_suffix       = " (estimated)" if mode == "standalone" else ""
+
+    if mode == "with_travel_data":
+        ob_price  = float(b.get("outbound_flight",  0) or 0)
+        ret_price = float(b.get("return_flight",    0) or 0)
+        if ob_price:
+            lines.append(f"| Outbound Flight | ${ob_price:.0f} |")
+        if ret_price:
+            lines.append(f"| Return Flight | ${ret_price:.0f} |")
+    elif mode == "standalone":
+        avg_p = b.get("avg_prices") or {}
+        out = float(avg_p.get("avg_flight_price", 0) or 0)
+        ret = float(avg_p.get("avg_return_flight_price", 0) or 0)
+        if out or ret:
+            lines.append(f"| ~ Flights (estimated) | ${out + ret:.0f} |")
+
+    for cat, val in b.items():
+        if cat in ("grand_total", "avg_prices", "outbound_flight", "return_flight"):
+            continue
+        if not isinstance(val, (int, float)):
+            continue
+        label = cat.replace("_", " ").title()
+        if "hotel" in cat.lower():
+            label = f"{hotel_label_prefix}{label}{hotel_suffix}"
+        lines.append(f"| {label} | ${float(val):.0f} |")
+
+    grand = float(b.get("grand_total", 0))
+    lines.append(f"\n**Grand Total: ${grand:.0f}**")
+    if budget:
+        remaining = budget - grand
+        emoji = "✅" if remaining >= 0 else "⚠️"
+        lines.append(f"\n{emoji} Budget remaining: ${remaining:.0f}")
 
     return "\n".join(lines)
 
@@ -511,12 +488,27 @@ class ItineraryReplannerNode:
         mode        = state.get("itinerary_mode", "standalone")
         travel_plan = state.get("travel_plan")
         origin      = state.get("current_city", "")
+        destination = state.get("destination_city", "")
+
+        # Compute budget once here so the LLM summary includes a budget table
+        # and the Critic can read the result without recomputing.
+        results_with_budget = dict(results)
+        try:
+            from agent.nodes.itinerary.step_handlers import handle_verify_budget
+            budget_result = handle_verify_budget(
+                results, budget, trip_days, destination, origin, mode, state,
+            )
+            results_with_budget["verify_budget_0"] = budget_result
+        except Exception:
+            pass
 
         try:
+            # Pass plain results (no budget data) — the LLM reviews schedule quality only.
+            # Budget is appended deterministically after the LLM generates day schedules.
             summary = _build_summary(
                 results, budget, trip_days,
                 mode=mode, travel_plan=travel_plan,
-                origin=origin, destination=state.get("destination_city", ""),
+                origin=origin, destination=destination,
             )
             output  = self.llm.invoke([
                 SystemMessage(content=REVIEW_SYSTEM),
@@ -582,10 +574,20 @@ class ItineraryReplannerNode:
         if content.startswith("```"):
             content = content.split("```")[1].lstrip("markdown").strip().rstrip("```").strip()
 
-        markdown = content if content else _generate_fallback_markdown(results, trip_days, budget, mode)
+        if content:
+            # LLM generated day schedules + tips; append the deterministic budget table.
+            budget_md = _budget_section_md(results_with_budget, budget, mode)
+            markdown  = content + ("\n" + budget_md if budget_md else "")
+        else:
+            markdown = _generate_fallback_markdown(results_with_budget, trip_days, budget, mode)
 
         return {
-            "itinerary_plan": {**plan_state, "final_markdown": markdown},
+            "itinerary_plan": {
+                **plan_state,
+                "final_markdown": markdown,
+                # Persist the budget result so the Critic can read it without recomputing.
+                "step_results": results_with_budget,
+            },
             "itinerary_feasible": True,
             "replanner_action":   "done",
             "messages": [AIMessage(content="✅ **Itinerary complete.**", name="replanner_log")],

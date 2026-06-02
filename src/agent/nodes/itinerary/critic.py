@@ -2,7 +2,7 @@
 ItineraryCriticNode — Budget Reflection gate between Replanner and Formatter.
 
 Strategy (applied in order):
-  1. Pass:             verify_budget returned "success" → route to formatter unchanged.
+  1. Pass:             budget within limits → route to formatter unchanged.
   2. Replan cheaper:   first over-budget hit → inject budget constraint, loop to planner.
   3. Switch travel:    second hit, with_travel_data mode → silently swap to cheapest
                        available flight/hotel if combined savings cover the gap.
@@ -11,6 +11,10 @@ Strategy (applied in order):
                          reduce_day     → decrement trip_days, loop to planner
                          adjust_prefs   → second interrupt for free-text, loop to planner
                          abort          → formatter (sorry message)
+
+Budget is no longer a plan step. The Replanner computes it after all day schedules
+are built and stores the result under "verify_budget_0" in step_results. The Critic
+reads it from there (falling back to computing it directly if absent).
 """
 from __future__ import annotations
 
@@ -19,9 +23,28 @@ from typing import Optional
 
 from langgraph.types import interrupt
 
+from agent.nodes.itinerary.step_handlers import handle_verify_budget
 from agent.state import AgentState
 
 MAX_CRITIC_ATTEMPTS = 1  # auto-replan attempts before escalating to HITL
+
+
+def _plan_for_replan(plan_state: dict, replan_context_json: str) -> dict:
+    """Return a cleaned plan_state ready for the Planner to rebuild day schedules.
+
+    Strips stale build_day_schedule and verify_budget results so _completed_step_types
+    in the Planner won't consider them done and will re-emit those steps.
+    """
+    clean_results = {
+        k: v for k, v in plan_state.get("step_results", {}).items()
+        if not k.startswith("build_day_schedule") and not k.startswith("verify_budget")
+    }
+    updated = dict(plan_state)
+    updated["step_results"]   = clean_results
+    updated["replan_count"]   = 0
+    if replan_context_json:
+        updated["replan_context"] = replan_context_json
+    return updated
 
 
 class ItineraryCriticNode:
@@ -33,13 +56,20 @@ class ItineraryCriticNode:
         budget     = float(state.get("total_budget") or 0)
         trip_days  = int(state.get("trip_days") or 1)
 
-        # ── 1. Locate verify_budget raw result ────────────────────────────
-        budget_key = next((k for k in results if k.startswith("verify_budget")), None)
-        if not budget_key or not budget:
+        if not budget:
             return {"critic_action": "pass"}
 
-        raw_result = results[budget_key]
-        status     = raw_result.get("status", "success")
+        # ── 1. Obtain budget result (from replanner injection or fresh compute) ──
+        raw_result = results.get("verify_budget_0")
+        if raw_result is None:
+            mode        = state.get("itinerary_mode", "standalone")
+            origin      = state.get("current_city", "")
+            destination = state.get("destination_city", "")
+            raw_result  = handle_verify_budget(
+                results, budget, trip_days, destination, origin, mode, state,
+            )
+
+        status = raw_result.get("status", "success")
 
         if status != "over_budget":
             return {"critic_action": "pass"}
@@ -61,14 +91,12 @@ class ItineraryCriticNode:
                 "Prefer free or low-cost options (parks, markets, free museums, walking tours). "
                 f"Keep estimated activity cost under ${max_act_per_day:.0f} per day."
             )
-            updated_plan = dict(plan_state)
-            updated_plan["replan_context"] = json.dumps({
+            updated_plan = _plan_for_replan(plan_state, json.dumps({
                 "error_code":    "over_budget",
                 "error_message": f"Budget exceeded by ${overage:.0f}.",
                 "failed_step":   "verify_budget",
                 "replan_hint":   replan_hint,
-            })
-            updated_plan["replan_count"] = 0
+            }))
             return {
                 "critic_attempts": critic_attempts + 1,
                 "critic_action":   "replan_cheaper",
@@ -78,8 +106,7 @@ class ItineraryCriticNode:
         # ── 3. Second failure: try silent switch_travel ───────────────────
         switch_result = self._try_switch_travel(state, overage, trip_days)
         if switch_result is not None:
-            updated_plan = dict(plan_state)
-            updated_plan["replan_context"] = json.dumps({
+            updated_plan = _plan_for_replan(plan_state, json.dumps({
                 "error_code":    "switch_travel",
                 "error_message": (
                     f"Switched to cheaper travel options "
@@ -90,8 +117,7 @@ class ItineraryCriticNode:
                     "Rebuild the itinerary with the updated (cheaper) flight and hotel. "
                     "The travel costs have been reduced; ensure activity costs stay modest."
                 ),
-            })
-            updated_plan["replan_count"] = 0
+            }))
             updates: dict = {
                 "critic_action": "switch_travel",
                 "itinerary_plan": updated_plan,
@@ -128,8 +154,7 @@ class ItineraryCriticNode:
 
         if choice == "reduce_day":
             new_days     = max(1, trip_days - 1)
-            updated_plan = dict(plan_state)
-            updated_plan["replan_count"] = 0
+            updated_plan = _plan_for_replan(plan_state, "")
             return {
                 "critic_action":  "reduce_day",
                 "critic_attempts": 0,
@@ -157,9 +182,7 @@ class ItineraryCriticNode:
                 "options": [],
             })
 
-            updated_plan = dict(plan_state)
-            updated_plan["replan_count"] = 0
-            updated_plan["replan_context"] = json.dumps({
+            updated_plan = _plan_for_replan(plan_state, json.dumps({
                 "error_code":    "user_adjustment",
                 "error_message": "User requested preference adjustment after budget exceeded.",
                 "failed_step":   "verify_budget",
@@ -168,7 +191,7 @@ class ItineraryCriticNode:
                     "Rebuild the itinerary incorporating these preferences. "
                     "Also keep activity costs modest to stay within budget."
                 ),
-            })
+            }))
             return {
                 "critic_action":             "adjust_prefs",
                 "critic_attempts":           0,

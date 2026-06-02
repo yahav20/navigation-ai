@@ -27,7 +27,6 @@ class PlanStep(BaseModel):
         "fetch_activities",
         "fetch_weather",
         "build_day_schedule",
-        "verify_budget",
     ] = Field(
         description="The exact type of step to execute."
     )
