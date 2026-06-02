@@ -115,8 +115,9 @@ def _commit(step, step_key, result, current_index,
     if result.get("replan_hint"):
         log_lines.append(f"💡 *Hint:* {result['replan_hint']}")
 
+    # over_budget is a soft completion (critic will handle it); only "failed" is a hard stop
     return _state_update(current_index, plan_state, results, history,
-                         log_lines, feasible=(status == "success"))
+                         log_lines, feasible=(status != "failed"))
 
 
 def _history_entry(step, result) -> dict:

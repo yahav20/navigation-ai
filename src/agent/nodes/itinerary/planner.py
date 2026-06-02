@@ -342,12 +342,9 @@ class ItineraryPlannerNode:
             plan = _default_plan(destination, origin, trip_days, replan_count, completed)
 
         # ── Validate & fix ─────────────────────────────────────────────────
-        effective_days = trip_days
-        if plan.suggested_adjustments and plan.suggested_adjustments.trip_days is not None:
-            effective_days = plan.suggested_adjustments.trip_days
-
+        # Always use trip_days from state — the critic owns any day/budget adjustments.
         comp_days = _completed_days(step_results)
-        plan = _validate_and_fix(plan, completed, effective_days, destination, comp_days)
+        plan = _validate_and_fix(plan, completed, trip_days, destination, comp_days)
 
         plan_md += "\n📝 **Execution Plan:**\n"
         for step in plan.steps:
@@ -363,14 +360,9 @@ class ItineraryPlannerNode:
                 + ", ".join(f"`{s}`" for s in completed) + "\n"
             )
 
+        # trip_days and total_budget adjustments are managed by ItineraryCriticNode;
+        # the planner never modifies these state fields directly.
         state_updates: dict = {}
-        if plan.suggested_adjustments:
-            adj = plan.suggested_adjustments
-            plan_md += f"\n⚠️ **Constraints relaxed:** {adj.model_dump(exclude_none=True)}\n"
-            if adj.trip_days is not None:
-                state_updates["trip_days"] = adj.trip_days
-            if adj.total_budget is not None:
-                state_updates["total_budget"] = adj.total_budget
 
         result = {
             "current_step_index": 0,

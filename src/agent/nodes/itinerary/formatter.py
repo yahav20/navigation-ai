@@ -41,16 +41,23 @@ class ItineraryFormatterNode:
         self.llm = llm
 
     def __call__(self, state: AgentState) -> dict:
-        plan_state = state.get("itinerary_plan", {})
-        feasible   = state.get("itinerary_feasible", True)
+        plan_state    = state.get("itinerary_plan", {})
+        feasible      = state.get("itinerary_feasible", True)
+        critic_action = state.get("critic_action", "pass")
 
         if not feasible:
             return self._format_error(state)
 
-        final_markdown = plan_state.get("final_markdown", "")
-        header = self._build_travel_header(state)
+        if critic_action == "abort":
+            return self._format_abort(state)
 
+        final_markdown = plan_state.get("final_markdown", "")
+        header  = self._build_travel_header(state)
         content = (header + "\n\n" + final_markdown).strip() if header else final_markdown
+
+        if critic_action == "ignore_budget":
+            content = self._prepend_over_budget_banner(state, content)
+
         return {"messages": [AIMessage(content=content)]}
 
     # ── Travel header (flights + accommodation) ────────────────────────────
@@ -138,6 +145,39 @@ class ItineraryFormatterNode:
             "> *Market averages for planning purposes only. Actual prices may vary.*",
         ]
         return "\n".join(lines)
+
+    # ── Critic-driven render paths ─────────────────────────────────────────
+
+    def _prepend_over_budget_banner(self, state: AgentState, content: str) -> str:
+        plan_state  = state.get("itinerary_plan") or {}
+        results     = plan_state.get("step_results", {})
+        budget      = float(state.get("total_budget") or 0)
+        grand_total = 0.0
+        budget_key  = next((k for k in results if k.startswith("verify_budget")), None)
+        if budget_key:
+            data        = results[budget_key].get("data") or {}
+            grand_total = float(data.get("grand_total", 0))
+        overage = grand_total - budget
+        banner = (
+            f"> ⚠️ **Over Budget Notice:** This itinerary costs approximately "
+            f"**${grand_total:.0f}**, which is **${overage:.0f} over** your "
+            f"**${budget:.0f}** budget.\n"
+        )
+        return banner + "\n" + content
+
+    def _format_abort(self, state: AgentState) -> dict:
+        destination = state.get("destination_city") or "your destination"
+        budget      = state.get("total_budget") or 0
+        message = (
+            f"### No problem!\n\n"
+            f"I've cancelled the itinerary planning for **{destination}**. "
+            f"Feel free to start again whenever you're ready — "
+            f"perhaps with a higher budget, fewer days, or a different destination. "
+            f"I'm here to help whenever you'd like! 😊"
+        )
+        if budget:
+            message += f"\n\n*(Current budget on file: **${float(budget):.0f}**)*"
+        return {"messages": [AIMessage(content=message)]}
 
     # ── Error path ─────────────────────────────────────────────────────────
 

@@ -42,10 +42,12 @@ from agent.nodes.itinerary.planner   import ItineraryPlannerNode
 from agent.nodes.itinerary.executor  import ItineraryExecutorNode
 from agent.nodes.itinerary.replanner import ItineraryReplannerNode
 from agent.nodes.itinerary.formatter import ItineraryFormatterNode
+from agent.nodes.itinerary.critic    import ItineraryCriticNode
 from agent.nodes.itinerary.itinerary_edges import (
     after_plan_check,
     after_itinerary_planner,
     after_itinerary_replanner,
+    after_itinerary_critic,
 )
 
 
@@ -74,11 +76,12 @@ def build_graph(
     router_node = RouterNode(extraction_model)
 
     #   -Itinerary
-    plan_check_node        = PlanCheckNode()
-    itinerary_planner_node = ItineraryPlannerNode(response_model)
-    itinerary_executor_node   = ItineraryExecutorNode(response_model)
-    itinerary_replanner_node  = ItineraryReplannerNode(response_model)
-    itinerary_formatter_node  = ItineraryFormatterNode(response_model)
+    plan_check_node          = PlanCheckNode()
+    itinerary_planner_node   = ItineraryPlannerNode(response_model)
+    itinerary_executor_node  = ItineraryExecutorNode(response_model)
+    itinerary_replanner_node = ItineraryReplannerNode(response_model)
+    itinerary_critic_node    = ItineraryCriticNode()
+    itinerary_formatter_node = ItineraryFormatterNode(response_model)
 
     # 2. Create nodes for the advisor path (uses its own model)
     _, advisor_extraction_model = get_models(provider, mode="advisor")
@@ -108,10 +111,11 @@ def build_graph(
     builder.add_node("summary", summary_node)
 
     #   -Itinerary
-    builder.add_node("plan_check",        plan_check_node)
-    builder.add_node("itinerary_planner", itinerary_planner_node)
+    builder.add_node("plan_check",           plan_check_node)
+    builder.add_node("itinerary_planner",    itinerary_planner_node)
     builder.add_node("itinerary_executor",   itinerary_executor_node)
     builder.add_node("itinerary_replanner",  itinerary_replanner_node)
+    builder.add_node("itinerary_critic",     itinerary_critic_node)
     builder.add_node("itinerary_formatter",  itinerary_formatter_node)
 
     # Advisor nodes
@@ -207,8 +211,17 @@ def build_graph(
         "itinerary_replanner",
         after_itinerary_replanner,
         {
-            "itinerary_executor":  "itinerary_executor",
-            "itinerary_planner":   "itinerary_planner",
+            "itinerary_executor": "itinerary_executor",
+            "itinerary_planner":  "itinerary_planner",
+            "itinerary_critic":   "itinerary_critic",
+        }
+    )
+
+    builder.add_conditional_edges(
+        "itinerary_critic",
+        after_itinerary_critic,
+        {
+            "itinerary_planner":  "itinerary_planner",
             "itinerary_formatter": "itinerary_formatter",
         }
     )

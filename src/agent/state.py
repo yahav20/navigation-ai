@@ -40,6 +40,9 @@ class AgentState(TypedDict):
     itinerary_selected_hotel: NotRequired[dict]        # Raw hotel dict (lat/lng/price) from DB
     itinerary_selected_outbound_flight: NotRequired[dict]  # Raw outbound flight dict (times/price)
     itinerary_selected_return_flight: NotRequired[dict]    # Raw return flight dict (times/price)
+    critic_attempts: NotRequired[int]           # Number of auto-replan attempts fired by critic
+    critic_action: NotRequired[str]             # Routing signal: "pass"|"replan_cheaper"|"switch_travel"|"reduce_day"|"adjust_prefs"|"ignore_budget"|"abort"
+    critic_adjustment_request: NotRequired[str] # Free-text adjustment captured via HITL "adjust_prefs" option
 
     # --- Advisor ---
     advisor_plan: list                 # list of {tool_name, args} dicts produced by advisor_planner
