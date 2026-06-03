@@ -28,7 +28,7 @@ _AUTOCOMPLETE = "https://autocomplete.travelpayouts.com/places2"
 _AIRLINES_FEED = "https://api.travelpayouts.com/data/en/airlines.json"
 
 _TIMEOUT = 15
-_DEFAULT_LIMIT = 10
+_DEFAULT_LIMIT = 5
 
 # Drop offers that take noticeably longer than a realistic connection should.
 # Direct flights are bounded so a single bad row doesn't slip through; multi-stop

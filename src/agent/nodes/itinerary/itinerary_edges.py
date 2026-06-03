@@ -2,10 +2,11 @@
 Routing edges for the Plan-and-Execute itinerary agent.
 =======================================================
 Flow:
-  plan_check        →(conditional)→ itinerary_planner | summary
-  itinerary_planner →(conditional)→ itinerary_executor | itinerary_formatter
-  itinerary_executor → itinerary_replanner
-  itinerary_replanner →(conditional)→ itinerary_executor | itinerary_planner | itinerary_formatter
+  plan_check          →(conditional)→ itinerary_planner | summary
+  itinerary_planner   →(conditional)→ itinerary_executor | itinerary_formatter
+  itinerary_executor  → itinerary_replanner
+  itinerary_replanner →(conditional)→ itinerary_executor | itinerary_planner | itinerary_critic
+  itinerary_critic    →(conditional)→ itinerary_planner | itinerary_formatter
 """
 from __future__ import annotations
 
@@ -44,12 +45,24 @@ def after_itinerary_replanner(state: AgentState) -> str:
     Route from Replanner based on the replanner_action it set:
       continue → executor  (last step succeeded, more steps remain)
       replan   → planner   (last step failed, retry with corrective context)
-      done     → formatter (all steps complete, or retries exhausted)
+      done     → critic    (all steps complete — critic validates budget before formatter)
     """
     action = state.get("replanner_action", "done")
 
     if action == "continue":
         return "itinerary_executor"
     if action == "replan":
+        return "itinerary_planner"
+    return "itinerary_critic"
+
+
+def after_itinerary_critic(state: AgentState) -> str:
+    """
+    Route from CriticNode based on critic_action:
+      replan_cheaper / reduce_day / switch_travel / adjust_prefs → planner (loop back)
+      pass / ignore_budget / abort                               → formatter
+    """
+    action = state.get("critic_action", "pass")
+    if action in ("replan_cheaper", "reduce_day", "switch_travel", "adjust_prefs"):
         return "itinerary_planner"
     return "itinerary_formatter"

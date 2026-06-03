@@ -11,14 +11,20 @@ from agent.state import AgentState
 def after_enrichment(state: AgentState) -> str:
     """Route after enrichment.
 
-    build_itinerary  → plan_check   (HITL checkpoint before itinerary)
-    everything else  → flight_search (standard travel-planning path)
-    Incomplete       → END          (enrichment asked a follow-up question)
+    build_itinerary          → plan_check   (HITL checkpoint before itinerary)
+    adjustment + standalone  → plan_check   (re-run HITL mode selection)
+    everything else          → flight_search (standard travel-planning path)
+    Incomplete               → END          (enrichment asked a follow-up question)
     """
     if not state.get("enrichment_complete", False):
         return END
 
     if state.get("intent") == "build_itinerary":
+        return "plan_check"
+
+    # When the user adjusts an active standalone itinerary, skip flight search
+    # and re-present the plan_check HITL (standalone vs. with_travel_data choice).
+    if state.get("is_adjustment") and state.get("itinerary_mode") == "standalone":
         return "plan_check"
 
     return "flight_search"

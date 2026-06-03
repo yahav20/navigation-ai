@@ -51,10 +51,9 @@ class RouterNode:
         2. 'new_travel_plan': User commits to a SPECIFIC destination and wants flights/hotels/costs.
            ("I want to fly to Rome — show me flights", "Let's book a trip to Madrid").
            ONLY use when the user is ready to START PLANNING a specific trip, not just exploring.
-        3. 'build_itinerary': ONLY when user EXPLICITLY asks for a day-by-day SCHEDULE.
+        3. 'build_itinerary': ONLY when user EXPLICITLY asks for a day-by-day schedule.
            ("Build a 3-day itinerary for Rome", "plan my days in Paris", "replan for $700").
-           "How should I split my time?", "what should I do in Paris for 3 days?",
-           "give me ideas for a trip", or "can you help me plan my trip?" → 'advisor', NOT here.
+           "How should I split my time?" or "how many days per city?" → 'advisor', NOT here.
         4. 'update_travel_plan': Changing an existing confirmed plan's parameters (budget, dates, destination).
         5. 'out_of_scope': ONLY for queries with zero travel relevance (coding, math, recipes, sports).
 

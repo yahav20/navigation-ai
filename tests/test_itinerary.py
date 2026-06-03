@@ -2,8 +2,8 @@
 """Automated test runner for the Full Itinerary Plan-and-Execute Agent.
 
 This test suite verifies the core capabilities of the planner, executor,
-observer, and fallback mechanisms, ensuring they adapt dynamically to
-user changes, strict constraints, and edge cases based on the travel_agency.db.
+and replanner, ensuring they adapt dynamically to user changes, strict
+constraints, and edge cases based on the travel_agency.db.
 
 ==========================================================================
 DB Cheat-Sheet (from init_db.py):
@@ -59,6 +59,7 @@ from config.setting import CHOSEN_PROVIDER
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.types import Command
+from langgraph.types import Command
 
 # ---------------------------------------------------------------------------
 # ANSI colours
@@ -104,8 +105,6 @@ class TurnSpec:
 
     # --- Structural checks ---
     expect_feasible: bool | None = None          # True / False / None=skip
-    expect_fallback_action: str | None = None    # e.g. "suggested_alternatives"
-    expect_observer_action: str | None = None    # e.g. "complete", "fallback"
 
     note: str = ""
 
@@ -189,7 +188,7 @@ TESTS: list[TestCase] = [
             note="Turn 1: Standard standalone generation for Paris.",
         ),
         TurnSpec(
-            "Actually, I just realized I need a Kosher hotel. "
+            "Actually, I just realized I need a Kosher diet. "
             "Can you rebuild the itinerary with that constraint?",
             response_must_contain=["kosher"],
             note=(
@@ -205,12 +204,14 @@ TESTS: list[TestCase] = [
         TurnSpec(
             "Plan a detailed daily schedule for 3 days in Paris from "
             "Tel Aviv. Budget $3000.",
+            must_plan_steps=["fetch_activities", "build_day_schedule", "verify_budget"],
             expected_destination="Paris",
-            note="Turn 1: Plan for Paris.",
+            note="Turn 1: Build 3-day Paris itinerary.",
         ),
         TurnSpec(
             "Wait, I changed my mind — let's go to Tokyo instead. "
             "Build me a day-by-day itinerary for Tokyo.",
+            must_plan_steps=["fetch_activities", "build_day_schedule"],
             must_plan_steps=["fetch_activities", "build_day_schedule"],
             expected_destination="Tokyo",
             response_must_contain=["Tokyo"],
@@ -227,7 +228,7 @@ TESTS: list[TestCase] = [
         TurnSpec(
             "Create a day-by-day itinerary for a 2-day trip from "
             "New York to London. Budget $2000.",
-            must_plan_steps=["build_day_schedule"],
+            must_plan_steps=["fetch_activities", "build_day_schedule", "verify_budget"],
             expected_destination="London",
             expected_days=2,
         ),
@@ -244,24 +245,25 @@ TESTS: list[TestCase] = [
         ),
     ]),
 
-    TestCase("B4", "B", "Budget increase after initial plan fails tight", [
+    TestCase("B4", "B", "Budget increase after verify_budget flags over-budget", [
         TurnSpec(
             "Build a day-by-day itinerary for 3 days in Tokyo from "
-            "Tel Aviv. My budget is $2000.",
+            "Tel Aviv. My budget is $200.",
+            must_plan_steps=["fetch_activities", "build_day_schedule", "verify_budget"],
             expected_destination="Tokyo",
             note=(
-                "Turn 1: TLV→TYO cheapest $820, Park Hyatt $700*3=$2100. "
-                "Flights alone + hotel = $2920+ which exceeds $2000. "
-                "Budget will fail."
+                "Turn 1: $200 budget is impossibly low for Tokyo. "
+                "verify_budget should flag the plan as over-budget."
             ),
         ),
         TurnSpec(
             "OK, I can increase my budget to $5000. "
             "Please rebuild the itinerary with this new budget.",
+            must_plan_steps=["verify_budget"],
             response_must_contain=["Tokyo"],
             note=(
-                "Turn 2: With $5000 budget, Tokyo becomes feasible. "
-                "Should reuse cached flight/hotel data but re-verify budget."
+                "Turn 2: With $5000 budget Tokyo is feasible. "
+                "Replanner re-verifies budget with the new ceiling."
             ),
         ),
     ]),
@@ -289,6 +291,7 @@ TESTS: list[TestCase] = [
         TurnSpec(
             "Build me a day-by-day itinerary for 3 days in Atlantis "
             "from Tel Aviv.",
+            must_plan_steps=["fetch_activities"],
             must_plan_steps=["fetch_activities"],
             expect_feasible=False,
             note=(
@@ -372,6 +375,7 @@ TESTS: list[TestCase] = [
             "Tel Aviv. Budget: $1200.",
             must_plan_steps=["fetch_activities"],
             expected_destination="Paris",
+            expected_days=4,
             note=(
                 "Budget $1200 for 4 days in Paris may be tight once activity "
                 "and meal costs are added. If budget fails, replanning should "
@@ -420,20 +424,19 @@ TESTS: list[TestCase] = [
         ),
     ]),
 
-    TestCase("E2", "E", "Multi-constraint: Kosher + budget + long trip", [
+    TestCase("E2", "E", "Multi-constraint: Kosher diet + long trip", [
         TurnSpec(
             "Build a day-by-day itinerary for 5 days in Paris from Tel Aviv. "
-            "I need kosher food options and a kosher hotel. Budget: $2500.",
+            "I need kosher food options. Budget: $2500.",
             expected_destination="Paris",
             expected_days=5,
-            must_plan_steps=["fetch_hotels", "fetch_activities", "verify_budget"],
+            must_plan_steps=["fetch_activities", "build_day_schedule", "verify_budget"],
             note=(
-                "Kosher hotel: Le Marais Boutique $220*5=$1100. "
-                "Cheapest flights: $180+$150=$330. Base: $1430. "
-                "Kosher food activities include L'As du Fallafel, "
-                "Café de Flore, Bouillon Chartier. "
-                "Remaining ~$1070 for 5 days of activities and meals. "
-                "Tests dietary preference filtering across the pipeline."
+                "5-day itinerary with kosher dietary preference. "
+                "Paris has kosher food activities: L'As du Fallafel, "
+                "Café de Flore, Bouillon Chartier. The itinerary agent "
+                "filters activities by dietary restriction; hotel selection "
+                "is the travel agent's responsibility."
             ),
         ),
     ]),
@@ -451,18 +454,18 @@ TESTS: list[TestCase] = [
         ),
     ]),
 
-    TestCase("E4", "E", "Connecting flights needed: NY → Berlin", [
+    TestCase("E4", "E", "Sparse activities: NY → Berlin (2 activities only)", [
         TurnSpec(
             "Plan a detailed 3-day daily itinerary from New York to Berlin. "
             "Budget: $2000.",
             expected_destination="Berlin",
             expected_days=3,
-            must_plan_steps=["fetch_flights"],
+            must_plan_steps=["fetch_activities", "build_day_schedule", "verify_budget"],
             note=(
-                "No direct NY→Berlin flight in DB. Connecting routes: "
-                "NY→London→Berlin ($550+$60=$610) or NY→Paris→Berlin "
-                "($480+$160=$640) or NY→AMS→Berlin ($500+$80=$580). "
-                "Tests the connecting flight discovery in itinerary_tools."
+                "Berlin has only 2 activities in the DB. Tests the scheduler "
+                "and replanner when building 3 days from a very thin activity pool. "
+                "Flight routing is the travel agent's concern — the itinerary "
+                "agent schedules days using the state it receives."
             ),
         ),
     ]),
@@ -652,8 +655,8 @@ def _format_state_snapshot(state: dict) -> str:
         f"days={state.get('trip_days', '—')} | "
         f"budget={state.get('total_budget', '—')} | "
         f"feasible={state.get('itinerary_feasible', '—')} | "
-        f"observer={state.get('observer_action', '—')} | "
-        f"fallback={state.get('itinerary_fallback_action', '—')}"
+        f"mode={state.get('itinerary_mode', '—')} | "
+        f"replanner={state.get('replanner_action', '—')}"
     )
 
 
