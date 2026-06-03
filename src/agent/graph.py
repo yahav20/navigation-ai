@@ -13,7 +13,7 @@ from agent.edge import (
     after_travel_agent,
     after_security_gate,
 )
-from agent.llm import get_models
+from agent.llm import get_generation_model, get_models
 from agent.nodes.adjustments import AdjustmentsNode
 from agent.nodes.enrichment import EnrichmentNode
 from agent.nodes.flight_search import FlightSearchNode
@@ -70,14 +70,17 @@ def build_graph(
     """
     # 1. Create nodes for the travel planning path
     response_model, extraction_model = get_models(provider)
+    # travel_agent + formatter are the user-facing generation nodes; on OpenAI
+    # they run on gpt-5.4-mini (~2x faster than gpt-4o-mini at equal quality).
+    generation_model = get_generation_model(provider)
 
     extract_metadata_node = MetadataNode(extraction_model)
     adjustments_node = AdjustmentsNode(extraction_model)
     enrichment_node = EnrichmentNode(extraction_model)
     flight_search_node = FlightSearchNode()
-    travel_agent_node = TravelAgentNode(response_model)
+    travel_agent_node = TravelAgentNode(generation_model)
     summary_node = SummaryNode(extraction_model)
-    formatter = FormatterNode(response_model)
+    formatter = FormatterNode(generation_model)
     alternative_destination_node = AlternativeDestinationNode(extraction_model)
     formatter_alternative = FormatterAlternativeNode(extraction_model)
     router_node = RouterNode(extraction_model)

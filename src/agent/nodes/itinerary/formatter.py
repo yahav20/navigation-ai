@@ -55,6 +55,15 @@ class ItineraryFormatterNode:
         header  = self._build_travel_header(state)
         content = (header + "\n\n" + final_markdown).strip() if header else final_markdown
 
+        # Always append the budget summary from the latest verify_budget_0 —
+        # this ensures it reflects min prices if the critic updated that result.
+        results   = plan_state.get("step_results", {})
+        budget    = float(state.get("total_budget") or 0)
+        mode      = state.get("itinerary_mode", "standalone")
+        budget_md = _budget_section_md(results, budget, mode)
+        if budget_md:
+            content = content + "\n" + budget_md
+
         if critic_action == "ignore_budget":
             content = self._prepend_over_budget_banner(state, content)
 
@@ -110,36 +119,78 @@ class ItineraryFormatterNode:
     def _header_standalone(
         self, state: AgentState, origin: str, destination: str, trip_days: int
     ) -> str:
-        plan_state = state.get("itinerary_plan", {})
-        results    = plan_state.get("step_results", {})
+        plan_state    = state.get("itinerary_plan", {})
+        results       = plan_state.get("step_results", {})
+        critic_action = state.get("critic_action", "pass")
 
-        # Read average prices from verify_budget_0 (injected by the Replanner)
-        avg_prices: dict = {}
+        # Read price data from verify_budget_0 — keys are always avg_* regardless of mode;
+        # the "note" field distinguishes average vs minimum prices.
+        stored_prices: dict = {}
         budget_key = next((k for k in results if k.startswith("verify_budget")), None)
         if budget_key:
             b = results[budget_key]
             inner = b.get("data", b) if isinstance(b, dict) else {}
             if isinstance(inner, dict):
-                avg_prices = inner.get("avg_prices") or {}
+                stored_prices = inner.get("avg_prices") or {}
 
-        if not avg_prices:
+        if not stored_prices:
             return ""
 
-        avg_out   = float(avg_prices.get("avg_flight_price", 0) or 0)
-        avg_ret   = float(avg_prices.get("avg_return_flight_price", 0) or 0)
-        avg_hotel = float(avg_prices.get("avg_hotel_per_night", 0) or 0)
-        total_flights = avg_out + avg_ret
-        hotel_total   = avg_hotel * trip_days if trip_days else avg_hotel
+        is_min  = "minimum" in str(stored_prices.get("note", "")).lower()
+        route   = f"{origin} ↔ {destination}" if origin and destination else destination
+        budget  = float(state.get("total_budget") or 0)
 
-        route = f"{origin} ↔ {destination}" if origin and destination else destination
+        price_out   = float(stored_prices.get("avg_flight_price", 0) or 0)
+        price_ret   = float(stored_prices.get("avg_return_flight_price", 0) or 0)
+        price_hotel = float(stored_prices.get("avg_hotel_per_night", 0) or 0)
+        hotel_total = price_hotel * trip_days if trip_days else price_hotel
 
+        if is_min and critic_action == "min_travel":
+            # Read the min grand_total from verify_budget_0 data
+            b_data    = _unwrap_result(results.get(budget_key, {}))
+            min_total = float(b_data.get("grand_total", 0)) if isinstance(b_data, dict) else 0.0
+
+            lines = [
+                "## 💡 Approximate Travel Cost *(no booking confirmed)*",
+                "",
+                f"✈️ **Flights** ({route}): cheapest available **~${price_out + price_ret:.0f}**",
+                "",
+                f"🏨 **Hotel** ({destination}): cheapest available **~${price_hotel:.0f}/night**",
+                "",
+                "> *Prices shown are the lowest currently available — actual rates may vary.*",
+                "",
+                (
+                    f"> ⚠️ **Budget Advisory:** Average market prices would exceed your "
+                    f"**${budget:.0f}** budget, but the cheapest available options bring the total "
+                    f"to ~**${min_total:.0f}**. "
+                    f"To stay on budget, look for flights totalling under **~${price_out + price_ret:.0f}** "
+                    f"and a hotel under **~${price_hotel:.0f}/night**."
+                ),
+            ]
+            return "\n".join(lines)
+
+        if is_min:
+            lines = [
+                "## 💡 Approximate Travel Cost *(minimum available — no booking confirmed)*",
+                "",
+                f"✈️ **Flights** ({route}): **~${price_out + price_ret:.0f}** *(minimum available)*",
+                "",
+                f"🏨 **Hotel** ({destination}): **~${price_hotel:.0f}/night**"
+                + (f" (~${hotel_total:.0f} for {trip_days} nights)" if trip_days else "")
+                + " *(minimum available)*",
+                "",
+                "> *Prices reflect the cheapest currently available options. Actual booking rates may vary.*",
+            ]
+            return "\n".join(lines)
+
+        # ── Default: show market averages ────────────────────────────────────
         lines = [
             "## 💡 Approximate Travel Cost *(no booking confirmed)*",
             "",
-            f"✈️ **Flights** ({route}): **~${total_flights:.0f}**"
-            + (f" *(~${avg_out:.0f} outbound + ~${avg_ret:.0f} return)*" if avg_out and avg_ret else ""),
+            f"✈️ **Flights** ({route}): **~${price_out + price_ret:.0f}**"
+            + (f" *(~${price_out:.0f} outbound + ~${price_ret:.0f} return)*" if price_out and price_ret else ""),
             "",
-            f"🏨 **Hotel** ({destination}): **~${avg_hotel:.0f}/night**"
+            f"🏨 **Hotel** ({destination}): **~${price_hotel:.0f}/night**"
             + (f" (~${hotel_total:.0f} for {trip_days} nights)" if trip_days else ""),
             "",
             "> *Market averages for planning purposes only. Actual prices may vary.*",
@@ -252,10 +303,6 @@ def _generate_fallback_markdown(results: dict, trip_days: int, budget: float, mo
             )
         lines.append(f"\n**Day total: ${day_data.get('day_cost', 0):.0f}**")
 
-    budget_md = _budget_section_md(results, budget, mode)
-    if budget_md:
-        lines.append(budget_md)
-
     return "\n".join(lines)
 
 
@@ -268,26 +315,33 @@ def _budget_section_md(results: dict, budget: float, mode: str) -> str:
     if not isinstance(b, dict) or b.get("grand_total") is None:
         return ""
 
+    # Determine if this is a min-price calculation or avg-price (for standalone labels)
+    avg_p  = b.get("avg_prices") or {}
+    is_min = "minimum" in str(avg_p.get("note", "")).lower()
+
     lines: list[str] = ["\n\n---------------------------------------------------------------------------------------\n"]
     lines.append("## 💰 Budget Summary\n")
     lines.append("| Category | Cost |")
     lines.append("|----------|------|")
-    hotel_label_prefix = "~ " if mode == "standalone" else ""
-    hotel_suffix       = " (estimated)" if mode == "standalone" else ""
 
     if mode == "with_travel_data":
-        ob_price  = float(b.get("outbound_flight",  0) or 0)
-        ret_price = float(b.get("return_flight",    0) or 0)
+        ob_price  = float(b.get("outbound_flight", 0) or 0)
+        ret_price = float(b.get("return_flight",   0) or 0)
         if ob_price:
             lines.append(f"| Outbound Flight | ${ob_price:.0f} |")
         if ret_price:
             lines.append(f"| Return Flight | ${ret_price:.0f} |")
-    elif mode == "standalone":
-        avg_p = b.get("avg_prices") or {}
+        hotel_label_prefix = ""
+        hotel_suffix       = ""
+    else:
+        # Standalone: show flight estimate row with appropriate label
         out = float(avg_p.get("avg_flight_price", 0) or 0)
         ret = float(avg_p.get("avg_return_flight_price", 0) or 0)
         if out or ret:
-            lines.append(f"| ~ Flights (estimated) | ${out + ret:.0f} |")
+            flight_label = "Flights (minimum available)" if is_min else "~ Flights (estimated)"
+            lines.append(f"| {flight_label} | ${out + ret:.0f} |")
+        hotel_label_prefix = "" if is_min else "~ "
+        hotel_suffix       = " (minimum available)" if is_min else " (estimated)"
 
     for cat, val in b.items():
         if cat in ("grand_total", "avg_prices", "outbound_flight", "return_flight"):

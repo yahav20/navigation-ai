@@ -26,6 +26,9 @@ class PlanStep(BaseModel):
     step_type: Literal[
         "fetch_activities",
         "fetch_weather",
+        "fetch_avg_prices",
+        "fetch_min_prices",
+        "switch_travel_options",
         "build_day_schedule",
         "verify_budget",
     ] = Field(

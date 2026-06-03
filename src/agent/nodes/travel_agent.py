@@ -1,7 +1,10 @@
 """Deterministic travel agent node: curates a structured plan for the formatter."""
 
 import json
+import os
+import time
 from datetime import date, datetime
+from pathlib import Path
 from typing import Any
 
 from langchain_core.messages import AIMessage
@@ -18,16 +21,18 @@ from security import SECURITY_RULES
 # cheaper to win. Keeps the agent honest about trip length without dropping the
 # only available options when the date grid is sparse.
 _DAY_GAP_PENALTY = 30.0
-_MAX_PAIRINGS = 12
+_MAX_PAIRINGS = 10
 
 
 SEASONS = ("Spring", "Summer", "Autumn", "Winter")
 
 _CURATION_PROMPT = """You are Atlas, a deterministic travel agent.
 
-You receive a JSON payload inside <travel_payload> containing flights (outbound),
-return_flights, a pre-computed `pairings` array, hotels, activities, restaurants,
-weather, best_time, costs, trip_days, trip_start, and an `is_adjustment` flag.
+You receive two blocks:
+- <trip_context>: the trip constraints — origin, destination, total_budget, budget_applied,
+  budget_optional, trip_days, trip_start, is_adjustment, and user_preferences. Honor these.
+- <travel_payload>: the options to curate from — a pre-computed `pairings` array, hotels,
+  activities, restaurants, weather, and best_time.
 Your job is to curate the trip and return a structured plan.
 
 Rules:
@@ -39,8 +44,8 @@ Rules:
    - `day_gap`: actual days between departure and return (may be null if dates were unparseable).
    The list is sorted by score = total_price + penalty for `day_gap` deviating from `trip_days`. Aim for VARIETY across the 3 picks (cheapest, fastest, different airlines/times) — do NOT just take the first three. Copy `outbound`, `return_flight`, and `total_price` straight through and write a fresh `description` line.
    When `day_gap` is set, prefer pairings whose gap is close to `trip_days`. If the closest available gap is far off, mention that briefly in the description ("note: return is 6 days out instead of 4 due to schedule").
-3. Pick **exactly 3 hotels** from the payload's **`hotels` array** (fewer only if that array has fewer than 3 entries). Do NOT pick from `activities` — those are sightseeing items, not accommodation. Aim for **price variety**: one budget-friendly, one mid-range, one premium — so the user has real choices. When costs.budget_applied=true, all 3 must fit within the budget (flight_outbound + cheapest_return + price_per_night × trip_days ≤ total_budget). Use the `price_per_night` value from the payload as-is — never write $0 for a hotel.
-4. Pick up to 5 activities. Activities with `source: "api"` or `source: "hybrid"` carry live ratings from Google Maps — **prefer these** over `source: "local"` fixtures. Local fixtures are fallback only when no API activity exists in the payload. Respect user_preferences (e.g. dietary_restrictions, preferred_location).
+3. Pick **exactly 3 hotels** from the payload's **`hotels` array** (fewer only if that array has fewer than 3 entries). Do NOT pick from `activities` — those are sightseeing items, not accommodation. Aim for **price variety**: one budget-friendly, one mid-range, one premium — so the user has real choices. When budget_applied=true (see <trip_context>), all 3 must fit within the budget (flight_outbound + cheapest_return + price_per_night × trip_days ≤ total_budget). Use the `price_per_night` value from the payload as-is — never write $0 for a hotel.
+4. Pick up to 5 activities from the payload's `activities` list (a list of activity names, already curated for this destination). Respect user_preferences (e.g. dietary_restrictions, preferred_location). Write a short description for each pick.
 5. Pick up to 3 restaurants from the payload's `restaurants` list. If the list is empty, output an empty `restaurants` array. For each pick fill: `name` (from payload), `price_tier` (from `price_level_text` or null), `rating` (from payload or null), and a short `description`.
 6. For each pick, write a short one-line description of why it fits.
 7. For every FlightPick inside a pairing (both `outbound` and `return_flight`):
@@ -76,6 +81,55 @@ _NO_HOTELS_ADJUSTMENT = (
 
 
 _LODGING_TYPES = {"lodging", "hotel"}
+
+# Fields the LLM actually consumes per section (output models: HotelPick,
+# RestaurantPick, FlightPick). Everything else in the source rows is input-only
+# noise — dropped before serialising the prompt. See _slim_for_llm below.
+_HOTEL_KEEP = {"name", "stars", "price_per_night"}
+_RESTAURANT_KEEP = {"name", "rating", "price_level_text", "price_level"}
+# FlightPick carries no city fields (origin/destination are implied by the trip);
+# availability/arrival_time are unused or always blank.
+_FLIGHT_DROP = {"availability", "origin_city", "destination_city", "origin_airport", "arrival_time"}
+
+
+def _strip_empty(item: dict) -> dict:
+    """Drop keys whose value is blank/null. Most hotel/restaurant/flight rows
+    have many empty columns ("", None, [], {}) that carry no signal. Keeps 0 and
+    False — a $0 price or a real boolean flag is meaningful."""
+    return {k: v for k, v in item.items() if v not in ("", None, [], {})}
+
+
+def _round_numbers(obj: Any, ndigits: int = 2) -> Any:
+    """Recursively round floats so the prompt carries clean values (e.g.
+    4.4399999999999995 -> 4.44) instead of float-repr noise. bool is a subclass
+    of int, so it's left untouched."""
+    if isinstance(obj, bool):
+        return obj
+    if isinstance(obj, float):
+        return round(obj, ndigits)
+    if isinstance(obj, dict):
+        return {k: _round_numbers(v, ndigits) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_round_numbers(v, ndigits) for v in obj]
+    return obj
+
+
+def _slim_flight(flight: dict) -> dict:
+    return _strip_empty({k: v for k, v in flight.items() if k not in _FLIGHT_DROP})
+
+
+def _slim_pairing(pairing: dict) -> dict:
+    slim = dict(pairing)
+    for side in ("outbound", "return_flight"):
+        if isinstance(slim.get(side), dict):
+            slim[side] = _slim_flight(slim[side])
+    return slim
+
+
+# Set ATLAS_DEBUG_TRAVEL_AGENT=1 to print a payload-build vs LLM-call timing split
+# and dump the exact curation messages to out/travel_agent_prompt.json for replay.
+_DEBUG = os.getenv("ATLAS_DEBUG_TRAVEL_AGENT") == "1"
+_PROMPT_DUMP_PATH = Path(__file__).resolve().parents[3] / "out" / "travel_agent_prompt.json"
 
 
 def _is_message(item: object) -> bool:
@@ -436,7 +490,9 @@ class TravelAgentNode:
         if not state.get("messages"):
             return {}
 
+        _t0 = time.perf_counter()
         payload = build_travel_prompt_payload(state)
+        _build_ms = (time.perf_counter() - _t0) * 1000
         origin = payload.get("origin") or "your origin"
         destination = payload.get("destination") or "your destination"
         is_adjustment = payload["is_adjustment"]
@@ -450,17 +506,89 @@ class TravelAgentNode:
             text = _NO_HOTELS_ADJUSTMENT if is_adjustment else _NO_HOTELS_NEW
             return {"messages": [AIMessage(content=text, name="travel_agent")]}
 
-        curation: TravelPlanCuration = self.curation_model.invoke([
+        # The trip constraints go in their own labelled block at the top so the
+        # model sees budget/dates/preferences clearly, separated from the options.
+        trip_context = {
+            "origin": payload.get("origin"),
+            "destination": payload.get("destination"),
+            "total_budget": payload.get("total_budget"),
+            "budget_optional": bool(payload.get("budget_optional", False)),
+            "budget_applied": payload["costs"].get("budget_applied"),
+            "trip_days": payload["trip_days"],
+            "trip_start": payload.get("trip_start"),
+            "is_adjustment": is_adjustment,
+            "user_preferences": payload.get("user_preferences") or {},
+        }
+
+        # The data block — just the options to curate from. Reductions, none of
+        # which remove anything the model may use (see output models in models.py):
+        #   - flights/return_flights: fully embedded inside each `pairings` entry.
+        #   - activities: the model returns only name + its own description, so
+        #     the other ~20 fields per activity are dead weight — names only.
+        #   - hotels/restaurants/flights: keep only consumed fields, strip blanks.
+        #   - pairings: capped at _MAX_PAIRINGS upstream.
+        data_payload = {
+            "pairings": [
+                _slim_pairing(pairing)
+                for pairing in payload["pairings"]
+                if isinstance(pairing, dict)
+            ],
+            "hotels": [
+                _strip_empty({k: v for k, v in hotel.items() if k in _HOTEL_KEEP})
+                for hotel in payload["hotels"]
+                if isinstance(hotel, dict)
+            ],
+            "activities": [
+                activity["name"]
+                for activity in payload["activities"]
+                if isinstance(activity, dict) and activity.get("name")
+            ],
+            "restaurants": [
+                _strip_empty({k: v for k, v in rest.items() if k in _RESTAURANT_KEEP})
+                for rest in payload["restaurants"]
+                if isinstance(rest, dict)
+            ],
+            "weather": payload["weather"],
+            "best_time": payload["best_time"],
+        }
+
+        # Round all floats so prices/ratings read cleanly in the prompt
+        # (e.g. 4.4399999999999995 -> 4.44) and flow through to the rendered plan.
+        trip_context = _round_numbers(trip_context)
+        data_payload = _round_numbers(data_payload)
+
+        messages = [
             {"role": "system", "content": _CURATION_PROMPT},
             {
                 "role": "user",
                 "content": (
+                    "<trip_context>\n"
+                    f"{json.dumps(trip_context, indent=2, sort_keys=True)}\n"
+                    "</trip_context>\n\n"
                     "<travel_payload>\n"
-                    f"{json.dumps(payload, indent=2, sort_keys=True)}\n"
+                    f"{json.dumps(data_payload, indent=2, sort_keys=True)}\n"
                     "</travel_payload>"
                 ),
             },
-        ])
+        ]
+
+        if _DEBUG:
+            _PROMPT_DUMP_PATH.parent.mkdir(parents=True, exist_ok=True)
+            _PROMPT_DUMP_PATH.write_text(json.dumps(messages, indent=2), encoding="utf-8")
+
+        _t1 = time.perf_counter()
+        curation: TravelPlanCuration = self.curation_model.invoke(messages)
+        _llm_ms = (time.perf_counter() - _t1) * 1000
+
+        if _DEBUG:
+            _payload_chars = len(messages[1]["content"])
+            print(
+                f"[travel_agent] payload_build={_build_ms:,.0f}ms  "
+                f"llm_invoke={_llm_ms:,.0f}ms  "
+                f"payload_chars={_payload_chars:,}  "
+                f"prompt -> {_PROMPT_DUMP_PATH}",
+                flush=True,
+            )
 
         budget = payload.get("total_budget")
         plan = TravelPlan(

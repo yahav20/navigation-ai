@@ -41,3 +41,18 @@ def get_models(provider: str = "google", mode: str = "travel") -> tuple[Runnable
         return base.bind_tools(advisor_tools), base
 
     return base, base
+
+
+def get_generation_model(provider: str = "google") -> BaseChatModel:
+    """Return the chat model for the user-facing generation nodes (travel_agent,
+    formatter).
+
+    On OpenAI these two nodes use gpt-5.4-mini, which benchmarked ~2x faster than
+    gpt-4o-mini at equal output quality for the curation/formatting prompts
+    (~12s -> ~6.5s median on the slim travel payload). Other providers reuse
+    their default response model.
+    """
+    if provider.lower() == "openai":
+        return ChatOpenAI(model="gpt-5.4-mini", temperature=0)
+    response_model, _ = get_models(provider)
+    return response_model
