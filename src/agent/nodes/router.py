@@ -41,11 +41,13 @@ class RouterNode:
         - Budget: {state.get("total_budget", "None")}
         - Days: {state.get("trip_days", "None")}
 
-        INTENT DEFINITIONS & DIFFERENCES (when in doubt, pick 'advisor'):
-        1. 'advisor': The DEFAULT for all travel questions. Use this for: "where should I go?",
-           destination ideas, activities in a city, weather, city overviews, trip duration,
-           budget exploration, travel recommendations — anything that is asking for travel INFO.
-           Even questions like "I'm going to Tokyo, what should I do?" belong here.
+        INTENT DEFINITIONS & DIFFERENCES (when in doubt, use 'advisor'):
+        1. 'advisor': The DEFAULT for all travel-related queries. Use for: destination ideas,
+           comparing destinations, activities in a city, city overviews, budget exploration,
+           travel recommendations, currency exchange ("how much is $500 in euros?"),
+           visa requirements ("do I need a visa for Japan?"), travel safety ("is Rio safe?"),
+           packing questions ("what should I pack for Tokyo?"), local customs and etiquette,
+           greetings ("hello", "hi", "thanks"), and capability questions ("what can you do?").
         2. 'new_travel_plan': User commits to a SPECIFIC destination and wants flights/hotels/costs.
            ("I want to fly to Rome — show me flights", "Let's book a trip to Madrid").
            ONLY use when the user is ready to START PLANNING a specific trip, not just exploring.
@@ -53,8 +55,7 @@ class RouterNode:
            ("Build a 3-day itinerary for Rome", "plan my days in Paris", "replan for $700").
            "How should I split my time?" or "how many days per city?" → 'advisor', NOT here.
         4. 'update_travel_plan': Changing an existing confirmed plan's parameters (budget, dates, destination).
-        5. 'general_chat': ONLY pure non-travel conversation — "Hello", "Thanks", "What can you do?".
-           NEVER use for any travel question, even casual ones.
+        5. 'out_of_scope': ONLY for queries with zero travel relevance (coding, math, recipes, sports).
 
         TRANSITION RULE (critical): If the system is in ACTIVE ADVISOR FLOW and the user
         says something like "plan this trip", "let's go", "book this", "sounds good let's do it",
@@ -100,5 +101,9 @@ class RouterNode:
             trigger_words = ["replan", "full plan", "schedule", "schedule", "plan", "  itinerary", "day-by-day", "day by day", "build my trip", "build this trip", "plan this trip", "sounds good let's do it", "let's go", "I want to go there"]
             if any(word in content_lower for word in trigger_words):
                 final_intent = "build_itinerary"
+
+        # Guardrail 5: out_of_scope cannot be overridden by trip context
+        if final_intent == "out_of_scope":
+            return {"intent": "out_of_scope"}
 
         return {"intent": final_intent}

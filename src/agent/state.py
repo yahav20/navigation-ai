@@ -49,3 +49,4 @@ class AgentState(TypedDict):
     advisor_last_tool_results: list    # [{tool_name, args, result}] accumulated within the current turn
     advisor_shown_cities: list         # accumulates every city name presented to the user across advisor turns
     advisor_replan_count: int          # number of replan cycles completed in the current turn
+    advisor_out_of_scope: NotRequired[bool]  # True when planner detects a non-travel question

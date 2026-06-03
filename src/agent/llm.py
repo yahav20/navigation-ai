@@ -20,8 +20,8 @@ def get_models(provider: str = "google", mode: str = "travel") -> tuple[Runnable
     """Return (response_or_agent_model, extraction_model) for provider/mode.
 
     mode="travel"   — returns an unbound response model, no tool binding
-    mode="advisor"  — binds advisor discovery tools; used by general chat node and
-                      for tool schema reference (advisor path itself uses Plan-and-Execute)
+    mode="advisor"  — binds advisor discovery tools for tool schema reference
+                      (the advisor path itself uses Plan-and-Execute, not tool binding)
     """
     provider = provider.lower()
     if mode not in _TOOL_SETS:

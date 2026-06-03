@@ -4,13 +4,12 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
-from langgraph.prebuilt import ToolNode
 
 from agent.edge import (
     after_flight_search,
     after_enrichment,
     after_router,
-    chat_should_continue,
+    after_advisor_planner,
     after_travel_agent,
     after_security_gate,
 )
@@ -24,7 +23,6 @@ from agent.nodes.node_alternative import (
     AlternativeDestinationNode,
     FormatterAlternativeNode,
 )
-from agent.nodes.general_chat import GeneralChatNode
 from agent.nodes.router import RouterNode
 from agent.nodes.advisor_planner import AdvisorPlannerNode
 from agent.nodes.advisor_executor import AdvisorExecutorNode
@@ -49,6 +47,15 @@ from agent.nodes.itinerary.itinerary_edges import (
     after_itinerary_replanner,
     after_itinerary_critic,
 )
+
+
+def _out_of_scope_node(state: AgentState) -> dict:
+    from langchain_core.messages import AIMessage
+    return {"messages": [AIMessage(
+        content="I'm a travel assistant — I can only help with trips, destinations, and travel questions. "
+                "Is there somewhere you'd like to explore? ✈️",
+        name="out_of_scope",
+    )]}
 
 
 def build_graph(
@@ -90,11 +97,7 @@ def build_graph(
     advisor_replanner_node = AdvisorReplannerNode(advisor_extraction_model)
     advisor_formatter_node = AdvisorFormatterNode(advisor_extraction_model)
 
-    # 3. Create nodes for the general chat path (reuses advisor tools)
-    chat_model_with_tools, _ = get_models(provider, mode="advisor")
-    general_chat_node = GeneralChatNode(chat_model_with_tools, extraction_model)
-
-    # 4. Build the graph
+    # 3. Build the graph
     builder = StateGraph(AgentState)
 
     # Travel planning nodes
@@ -124,9 +127,9 @@ def build_graph(
     builder.add_node("advisor_replanner", advisor_replanner_node)
     builder.add_node("advisor_formatter", advisor_formatter_node)
 
-    # General chat nodes
-    builder.add_node("general_chat", general_chat_node)
-    builder.add_node("chat_tools", ToolNode(advisor_tools))
+    # Out-of-scope rejection node (no LLM call — static message, goes straight to END)
+    builder.add_node("out_of_scope", _out_of_scope_node)
+    builder.add_edge("out_of_scope", END)
 
     # 5. Define edges — travel planning path
     builder.add_edge(START, "security_gate")
@@ -145,9 +148,9 @@ def build_graph(
         after_router,
         {
             "extract_metadata": "extract_metadata",
-            "adjustments":      "adjustments",
-            "advisor_planner":  "advisor_planner",
-            "general_chat":     "general_chat",
+            "adjustments": "adjustments",
+            "advisor_planner": "advisor_planner",
+            "out_of_scope": "out_of_scope",
             END: END,
         },
     )
@@ -235,18 +238,10 @@ def build_graph(
     def _after_advisor_replan(state: AgentState) -> str:
         return "advisor_formatter" if not state.get("advisor_plan") else "advisor_executor"
 
-    builder.add_edge("advisor_planner", "advisor_executor")
+    builder.add_conditional_edges("advisor_planner", after_advisor_planner)
     builder.add_edge("advisor_executor", "advisor_replanner")
     builder.add_conditional_edges("advisor_replanner", _after_advisor_replan)
     builder.add_edge("advisor_formatter", "summary")
-
-    # 7. Define edges — general chat path
-    builder.add_conditional_edges(
-        "general_chat",
-        chat_should_continue,
-        {"chat_tools": "chat_tools", "summary": "summary"},
-    )
-    builder.add_edge("chat_tools", "general_chat")
 
     if checkpointer is None:
         checkpointer = MemorySaver(serde=JsonPlusSerializer())

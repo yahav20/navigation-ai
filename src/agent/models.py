@@ -199,23 +199,29 @@ class IntentClassification(BaseModel):
         "update_travel_plan",
         "advisor",
         "build_itinerary",
-        "general_chat",
+        "out_of_scope",
     ] = Field(
         description=(
             "Classify the user's intent. When in doubt, choose 'advisor'.\n"
-            "- 'advisor': The DEFAULT for ALL travel-related queries. Use this for: destination ideas "
-            "('where should I go?'), activities in a city, weather, city profiles, best time to visit, "
-            "trip duration advice, budget exploration, travel recommendations, ANY travel information query. "
-            "Also covers refining search parameters within an ACTIVE ADVISOR FLOW.\n"
+            "- 'advisor': The DEFAULT for ALL travel-related queries AND conversational openers. "
+            "Use this for: destination ideas ('where should I go?'), activities in a city, weather, "
+            "city profiles, best time to visit, trip duration advice, budget exploration, "
+            "travel recommendations, currency exchange ('how much is $500 in euros?'), "
+            "visa requirements ('do I need a visa for Japan?'), travel safety ('is Bangkok safe?'), "
+            "packing questions ('what should I pack for Tokyo?'), local customs and etiquette, "
+            "greetings ('hello', 'hi', 'thanks'), and capability questions ('what can you do?'). "
+            "When in doubt, use 'advisor'.\n"
             "- 'new_travel_plan': ONLY when the user commits to a SPECIFIC destination and wants to CHECK "
             "or BOOK flights, hotels, or costs. (e.g. 'I want to fly to Rome', 'show me hotels in Madrid', "
             "'let\\'s plan a trip to Tokyo'). Do NOT use just because a city is mentioned.\n"
             "- 'update_travel_plan': Changing parameters (budget, days, destination) of an ALREADY-PLANNED trip.\n"
-            "- 'build_itinerary': ONLY when user EXPLICITLY requests a day-by-day schedule or itinerary. "
-            "Trigger phrases: 'build an itinerary', 'plan my days', 'day-by-day schedule'. "
-            "Questions like 'how should I split my time' or 'how many days per city' are 'advisor', NOT 'build_itinerary'.\n"
-            "- 'general_chat': ONLY for pure non-travel conversation — greetings ('hello', 'hi', 'thanks'), "
-            "'what can you do?', completely off-topic chat. NEVER use for ANY travel-related question.\n"
+            "- 'build_itinerary': ONLY when user EXPLICITLY requests a day-by-day SCHEDULE. "
+            "Trigger phrases: 'build an itinerary', 'plan my days', 'day-by-day schedule', 'replan'. "
+            "Questions like 'how should I split my time', 'what should I do in Paris for 3 days', "
+            "'give me ideas for a 5-day trip', or 'can you help me plan my trip' are 'advisor', NOT 'build_itinerary'.\n"
+            "- 'out_of_scope': ONLY for queries with ZERO travel relevance — food recipes, math, "
+            "coding, programming, general trivia, sports scores, anything a travel assistant should not touch. "
+            "When in doubt, prefer 'advisor' over 'out_of_scope'.\n"
         )
     )
     has_explicit_destination: bool = Field(
