@@ -32,7 +32,7 @@ from typing import Optional
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-from agent.nodes.itinerary.formatter import _budget_section_md, _generate_fallback_markdown
+from agent.nodes.itinerary.formatter import _generate_fallback_markdown
 from agent.nodes.itinerary.step_handlers import _drop_stale_budget, handle_verify_budget
 from agent.state import AgentState
 
@@ -473,8 +473,7 @@ class ItineraryReplannerNode:
             content = content.split("```")[1].lstrip("markdown").strip().rstrip("```").strip()
 
         if content:
-            budget_md = _budget_section_md(results_with_budget, budget, mode)
-            markdown  = content + ("\n" + budget_md if budget_md else "")
+            markdown = content
         else:
             markdown = _generate_fallback_markdown(results_with_budget, trip_days, budget, mode)
 

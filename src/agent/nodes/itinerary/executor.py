@@ -23,7 +23,10 @@ from langchain_core.messages import AIMessage
 from agent.nodes.itinerary.schemas import ExecutionPlan
 from agent.nodes.itinerary.step_handlers import (
     handle_fetch_activities,
+    handle_fetch_avg_prices,
+    handle_fetch_min_prices,
     handle_fetch_weather,
+    handle_switch_travel_options,
     handle_build_day,
     _wrap_result,
     _minimal_trace,
@@ -58,7 +61,7 @@ class ItineraryExecutorNode:
         step     = plan.steps[current_index]
         step_key = f"{step.step_type}_{step.step_id}"
         log_lines = [
-            f"⚙️ **Step {current_index + 1}/{len(plan.steps)}:** `{step.step_type}`"
+            f"**Step {current_index + 1}/{len(plan.steps)}:** `{step.step_type}`"
             + (f" (Day {step.day})" if step.day else "")
         ]
 
@@ -73,6 +76,15 @@ class ItineraryExecutorNode:
 
         elif step.step_type == "fetch_activities":
             result = handle_fetch_activities(step, results, history, ctx, trip_days, self.llm)
+
+        elif step.step_type == "fetch_avg_prices":
+            result = handle_fetch_avg_prices(step, results, history, ctx)
+
+        elif step.step_type == "fetch_min_prices":
+            result = handle_fetch_min_prices(step, results, history, ctx)
+
+        elif step.step_type == "switch_travel_options":
+            result = handle_switch_travel_options(step, results, history, ctx, state)
 
         elif step.step_type == "build_day_schedule":
             result = handle_build_day(
@@ -111,8 +123,14 @@ def _commit(step, step_key, result, current_index,
         log_lines.append(f"💡 *Hint:* {result['replan_hint']}")
 
     # over_budget is a soft completion (critic will handle it); only "failed" is a hard stop
-    return _state_update(current_index, plan_state, results, history,
-                         log_lines, feasible=(status != "failed"))
+    update = _state_update(current_index, plan_state, results, history,
+                           log_lines, feasible=(status != "failed"))
+
+    # Propagate any extra state fields returned by the step handler
+    # (e.g. switch_travel_options writes new flight/hotel back to state)
+    state_updates = result.get("state_updates") or {}
+    update.update(state_updates)
+    return update
 
 
 def _history_entry(step, result) -> dict:

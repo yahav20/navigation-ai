@@ -63,6 +63,6 @@ def after_itinerary_critic(state: AgentState) -> str:
       pass / ignore_budget / abort                               → formatter
     """
     action = state.get("critic_action", "pass")
-    if action in ("replan_cheaper", "reduce_day", "switch_travel", "adjust_prefs"):
+    if action in ("replan_cheaper", "reduce_day", "switch_travel", "adjust_prefs", "fetch_min_prices"):
         return "itinerary_planner"
     return "itinerary_formatter"
