@@ -7,7 +7,6 @@ from agent.nodes.itinerary.planner import _completed_step_types, _validate_and_f
 from agent.nodes.itinerary.schemas import ExecutionPlan, PlanStep
 from security import validate_city, validate_input, validate_positive_number
 
-
 # ---------------------------------------------------------------------------
 # Schema tests
 # ---------------------------------------------------------------------------
