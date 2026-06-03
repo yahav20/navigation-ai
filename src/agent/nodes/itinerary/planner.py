@@ -256,6 +256,18 @@ def _validate_and_fix(
     for i, s in enumerate(final_steps, start=1):
         s.step_id = i
 
+    # Override LLM-generated descriptions with canonical ones so the log is accurate
+    _CANONICAL_DESC: dict[str, str] = {
+        "fetch_activities":     f"Fetch and select activities in {destination}",
+        "fetch_weather":        f"Seasonal weather conditions for {destination}",
+        "fetch_avg_prices":     f"Fetch average flight + hotel prices for {destination}",
+        "fetch_min_prices":     f"Fetch minimum available flight + hotel prices for {destination}",
+        "switch_travel_options": "Switch to cheapest available flight and hotel options",
+    }
+    for s in final_steps:
+        if s.step_type in _CANONICAL_DESC:
+            s.description = _CANONICAL_DESC[s.step_type]
+
     plan.steps = final_steps
     return plan
 
