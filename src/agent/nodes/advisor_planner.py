@@ -46,6 +46,48 @@ def _is_followup(extraction_model: BaseChatModel, summary: str, new_question: st
 
 
 # ---------------------------------------------------------------------------
+# Travel relevance check — gates non-travel questions before planning
+# ---------------------------------------------------------------------------
+
+class _TravelRelevance(BaseModel):
+    is_travel_related: bool
+
+
+_TRAVEL_RELEVANCE_PROMPT = """You are a classifier for a travel assistant.
+Determine whether the user's question is related to travel or this assistant's capabilities.
+
+Return is_travel_related=True for ANY of these:
+- Destinations, cities, countries, regions
+- Flights, hotels, accommodations, transport
+- Travel safety, visa/passport requirements
+- Currency exchange (for travel context)
+- Packing for trips
+- Local customs, etiquette, tipping
+- Trip planning, itineraries, activities
+- Tourist attractions, landmarks, museums
+- Weather for travel purposes
+- Greetings to the assistant ("hello", "hi", "thanks")
+- Questions about what the assistant can do ("what can you help me with?")
+
+Return is_travel_related=False ONLY when the question has zero travel connection:
+- Coding / programming questions
+- Math or science homework
+- Food recipes unrelated to travel
+- Sports scores or results
+- Medical / legal advice
+- Other topics a travel assistant should not touch"""
+
+
+def _is_travel_related(extraction_model: BaseChatModel, question: str) -> bool:
+    """Return False only when the question is clearly unrelated to travel."""
+    result: _TravelRelevance = extraction_model.with_structured_output(_TravelRelevance).invoke([
+        {"role": "system", "content": _TRAVEL_RELEVANCE_PROMPT},
+        {"role": "user", "content": question},
+    ])
+    return result.is_travel_related
+
+
+# ---------------------------------------------------------------------------
 # Plan models — explicit fields so the LLM schema is unambiguous
 # ---------------------------------------------------------------------------
 
@@ -60,6 +102,12 @@ ToolName = Literal[
     "fetch_activities",
     "get_best_time_to_visit",
     "get_average_weather",
+    "get_currency_exchange",
+    "get_visa_requirements",
+    "get_travel_safety_info",
+    "get_packing_list",
+    "get_local_customs",
+    "get_wikipedia_summary",
 ]
 
 
@@ -71,7 +119,8 @@ class PlannedToolCall(BaseModel):
         "about multiple cities at once (e.g. ['Rome', 'Amsterdam']) — this fetches all "
         "durations in one query instead of separate calls. "
         "Required for: get_city_overview, get_trip_duration_advisor, "
-        "fetch_activities, get_best_time_to_visit, get_average_weather."
+        "fetch_activities, get_best_time_to_visit, get_average_weather, "
+        "get_travel_safety_info, get_visa_requirements, get_local_customs, get_packing_list."
     ))
     tag: str | None = Field(default=None, description=(
         "City tag — required for find_destinations_by_tag. "
@@ -90,14 +139,39 @@ class PlannedToolCall(BaseModel):
         "and find_destinations_within_budget_auto"
     ))
     trip_days: int | None = Field(default=None, description=(
-        "Explicit trip duration in days — required for find_destinations_within_budget only"
+        "Explicit trip duration in days — required for find_destinations_within_budget "
+        "and get_packing_list"
     ))
     max_flight_hours: float | None = Field(default=None, description=(
         "Max flight hours for get_reachable_destinations. "
         "Omit when no flight-length constraint. short=2.5, medium=5, long=9"
     ))
     season: str | None = Field(default=None, description=(
-        "Season for get_average_weather. Must be exactly: Spring, Summer, Autumn, or Winter"
+        "Season for get_average_weather and get_packing_list. "
+        "Must be exactly: Spring, Summer, Autumn, or Winter"
+    ))
+    passport_nationality: str | None = Field(default=None, description=(
+        "User's passport nationality — required for get_visa_requirements. "
+        "E.g. 'Israeli', 'American', 'British'. Use 'Unknown' if not mentioned."
+    ))
+    from_currency: str | None = Field(default=None, description=(
+        "Source currency code or name — required for get_currency_exchange. "
+        "E.g. 'USD', 'dollar', 'EUR', 'euro'"
+    ))
+    to_currency: str | None = Field(default=None, description=(
+        "Target currency code or name — required for get_currency_exchange. "
+        "E.g. 'ILS', 'shekel', 'GBP', 'pound'"
+    ))
+    amount: float | None = Field(default=None, description=(
+        "Amount to convert — optional for get_currency_exchange. Defaults to 1.0 if omitted."
+    ))
+    trip_type: str | None = Field(default=None, description=(
+        "Trip type for get_packing_list. "
+        "One of: city, beach, nature, cultural, business. Default: city"
+    ))
+    topic: str | None = Field(default=None, description=(
+        "Topic name for get_wikipedia_summary — a city, attraction, landmark, or place. "
+        "Use the most specific name (e.g. 'Colosseum', 'Eiffel Tower', 'Kyoto')."
     ))
 
 
@@ -109,12 +183,26 @@ class AdvisorPlan(BaseModel):
 # Convert a PlannedToolCall to the args dict the executor expects
 # ---------------------------------------------------------------------------
 
-_ARG_FIELDS = ("city", "tag", "category", "origin", "total_budget", "trip_days",
-               "max_flight_hours", "season")
+_ARG_FIELDS = (
+    "city", "tag", "category", "origin", "total_budget", "trip_days",
+    "max_flight_hours", "season", "passport_nationality", "from_currency",
+    "to_currency", "amount", "trip_type", "topic",
+)
+
+# These tools use 'destination' as their parameter name instead of 'city'
+_CITY_AS_DESTINATION_TOOLS = frozenset({
+    "get_travel_safety_info",
+    "get_visa_requirements",
+    "get_local_customs",
+    "get_packing_list",
+})
 
 
 def _step_to_args(step: PlannedToolCall) -> dict:
-    return {f: getattr(step, f) for f in _ARG_FIELDS if getattr(step, f) is not None}
+    args = {f: getattr(step, f) for f in _ARG_FIELDS if getattr(step, f) is not None}
+    if step.tool_name in _CITY_AS_DESTINATION_TOOLS and "city" in args:
+        args["destination"] = args.pop("city")
+    return args
 
 
 _BUDGET_TOOLS = frozenset({"find_destinations_within_budget", "find_destinations_within_budget_auto"})
@@ -207,6 +295,13 @@ _PLANNER_SYSTEM_PROMPT = """You are a travel advisor planning assistant.
 Your ONLY job is to decide which tools to call — and in what order — to answer the user's travel question.
 You do NOT answer the question yourself. An executor will run the tools and a formatter will write the response.
 
+SPECIAL CASES — handle BEFORE planning any tools:
+
+GREETINGS & META QUESTIONS:
+If the user is greeting you ("hello", "hi", "hey", "thanks") or asking what you can do
+("what can you do?", "how do you work?", "what are you?"): return an EMPTY steps list.
+The formatter will generate a warm welcome response. Do NOT plan any tool calls.
+
 KNOWN USER CONTEXT (treat as confirmed facts — use directly in tool fields):
 {state_context}
 
@@ -228,7 +323,7 @@ AVAILABLE CITY TAGS (valid values for the `tag` field):
 VIBE -> TOOL MAPPING:
 {vibe_mapping}
 
-TOOL REFERENCE — WHEN TO USE EACH AND WHICH FIELDS TO SET:
+DESTINATION DISCOVERY TOOLS:
 
 - find_destinations_by_vibe
     Set: category = one of the AVAILABLE ACTIVITY CATEGORIES
@@ -276,6 +371,38 @@ TOOL REFERENCE — WHEN TO USE EACH AND WHICH FIELDS TO SET:
 - get_average_weather
     Set: city = <city>, season = <Spring|Summer|Autumn|Winter>
     -> When the user asks about weather in a specific season for a specific city
+
+PRACTICAL TRAVEL TOOLS (informational — each needs exactly ONE call, no combinations needed):
+
+- get_currency_exchange
+    Set: from_currency = <currency code or name>, to_currency = <currency code or name>, amount = <number or omit for rate only>
+    -> For exchange rate / currency conversion questions ("how much is $500 in euros?")
+    -> Always one tool call; never combine with other tools
+
+- get_visa_requirements
+    Set: city = <destination country or city>, passport_nationality = <user's nationality>
+    -> For visa requirement questions ("do I need a visa for Japan?")
+    -> If passport nationality is unknown, use "Unknown"
+
+- get_travel_safety_info
+    Set: city = <destination>
+    -> For safety / travel advisory questions ("is Bangkok safe?", "travel warnings for Mexico?")
+
+- get_packing_list
+    Set: city = <destination>, season = <Spring|Summer|Autumn|Winter>, trip_days = <int>, trip_type = <city|beach|nature|cultural|business>
+    -> For packing questions ("what should I pack for Tokyo in summer?")
+    -> Infer trip_type from context; default to "city" if unclear
+    -> If trip_days unknown, use 7 as a reasonable default
+
+- get_local_customs
+    Set: city = <destination or country>
+    -> For etiquette, tipping, customs, or useful-phrases questions
+
+- get_wikipedia_summary
+    Set: topic = <specific place, attraction, or landmark name>
+    -> For "tell me about X", "what is X?", "history of X" questions about a place or landmark
+    -> Use the most specific name (e.g. "Colosseum", not "that famous place in Rome")
+    -> One call only
 
 COMBINING TOOLS — WHICH TOOLS GO TOGETHER:
 
@@ -336,6 +463,11 @@ RULE 0 — BUDGET WITHOUT ORIGIN (check this FIRST before any other rule):
 11. User asks about family trip:
     -> Plan: find_destinations_by_vibe (category="Family") — exactly 1 tool is usually enough
 
+12. Practical travel questions (currency, visa, safety, packing, customs, Wikipedia):
+    -> Plan EXACTLY ONE tool from the PRACTICAL TRAVEL TOOLS section above
+    -> Never combine practical tools with destination discovery tools in the same plan
+    -> Never combine two practical tools unless the user explicitly asked two separate questions
+
 COUNTRY -> CITY RESOLUTION:
 Apply this mapping to both KNOWN USER CONTEXT and the user's message:
   "Israel" -> "Tel Aviv"
@@ -347,12 +479,11 @@ Apply this mapping to both KNOWN USER CONTEXT and the user's message:
 
 PLANNING DISCIPLINE — CRITICAL:
 - Maximum 3 tool calls. Usually 1-2 is enough.
-- A simple question (weather, duration, single-city overview) needs exactly 1 tool call.
+- A simple question (weather, duration, single-city overview, currency, visa, safety) needs exactly 1 tool call.
 - Do NOT plan fetch_activities for destination advisor questions.
 - Do NOT plan get_reachable_destinations if you have no origin city to use.
 - Do NOT plan tools whose required fields (origin, city) are completely unknown — except when a
   sensible default exists (e.g. find_destinations_by_tag with tag="city-break" needs no origin).
-- You MUST always plan at least one tool call.
 - Never plan to ask the user a question — just choose the best tool(s) with the available context.
 """
 
@@ -379,12 +510,24 @@ class AdvisorPlannerNode:
         if not last_human:
             return {"advisor_plan": []}
 
+        # Gate: reject non-travel questions before planning
+        if not _is_travel_related(self.extraction_model, last_human.content):
+            render_node_status("[Planner] Non-travel question detected — flagging as out-of-scope.")
+            return {
+                "advisor_plan": [],
+                "advisor_out_of_scope": True,
+                "advisor_last_tool_results": [],
+                "advisor_replan_count": 0,
+            }
+
         # Fresh questions should not bleed context from previous tool turns
         is_fresh = not _is_followup(self.extraction_model, summary, last_human.content)
 
         ctx_parts = []
         if state.get("current_city"):
             ctx_parts.append(f"Origin: {state['current_city']}")
+        if state.get("destination_city"):
+            ctx_parts.append(f"Destination: {state['destination_city']}")
         if state.get("total_budget") is not None:
             ctx_parts.append(f"Budget: ${state['total_budget']:.0f}")
         if state.get("trip_days") is not None:
@@ -422,4 +565,5 @@ class AdvisorPlannerNode:
             "advisor_plan": plan_steps,
             "advisor_last_tool_results": [],   # reset accumulated results for new turn
             "advisor_replan_count": 0,          # reset replan counter for new turn
+            "advisor_out_of_scope": False,
         }
