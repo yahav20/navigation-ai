@@ -1,5 +1,4 @@
 """Build the LangGraph state graph for the travel agent."""
-from langchain_core.messages import AIMessage
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
@@ -36,9 +35,6 @@ from agent.nodes.travel_agent import TravelAgentNode
 from agent.nodes.security_gate import security_gate_node
 from agent.state import AgentState
 from tools.advisor_tools import advisor_tools
-from tools.general_chat_tools import general_chat_tools
-
-_all_chat_tools = advisor_tools + general_chat_tools
 
 #      -Itinerary Agent :
 from agent.nodes.itinerary.plan_check import PlanCheckNode
@@ -46,19 +42,13 @@ from agent.nodes.itinerary.planner   import ItineraryPlannerNode
 from agent.nodes.itinerary.executor  import ItineraryExecutorNode
 from agent.nodes.itinerary.replanner import ItineraryReplannerNode
 from agent.nodes.itinerary.formatter import ItineraryFormatterNode
+from agent.nodes.itinerary.critic    import ItineraryCriticNode
 from agent.nodes.itinerary.itinerary_edges import (
     after_plan_check,
     after_itinerary_planner,
     after_itinerary_replanner,
+    after_itinerary_critic,
 )
-
-
-def _out_of_scope_node(state: AgentState) -> dict:
-    return {"messages": [AIMessage(
-        content="I'm a travel assistant — I can only help with trips, destinations, and travel questions. "
-                "Is there somewhere you'd like to explore? ✈️",
-        name="out_of_scope",
-    )]}
 
 
 def build_graph(
@@ -86,11 +76,12 @@ def build_graph(
     router_node = RouterNode(extraction_model)
 
     #   -Itinerary
-    plan_check_node        = PlanCheckNode()
-    itinerary_planner_node = ItineraryPlannerNode(response_model)
-    itinerary_executor_node   = ItineraryExecutorNode(response_model)
-    itinerary_replanner_node  = ItineraryReplannerNode(response_model)
-    itinerary_formatter_node  = ItineraryFormatterNode(response_model)
+    plan_check_node          = PlanCheckNode()
+    itinerary_planner_node   = ItineraryPlannerNode(response_model)
+    itinerary_executor_node  = ItineraryExecutorNode(response_model)
+    itinerary_replanner_node = ItineraryReplannerNode(response_model)
+    itinerary_critic_node    = ItineraryCriticNode()
+    itinerary_formatter_node = ItineraryFormatterNode(response_model)
 
     # 2. Create nodes for the advisor path (uses its own model)
     _, advisor_extraction_model = get_models(provider, mode="advisor")
@@ -99,8 +90,8 @@ def build_graph(
     advisor_replanner_node = AdvisorReplannerNode(advisor_extraction_model)
     advisor_formatter_node = AdvisorFormatterNode(advisor_extraction_model)
 
-    # 3. Create nodes for the general chat path (advisor tools + dedicated chat tools)
-    chat_model_with_tools, _ = get_models(provider, mode="chat")
+    # 3. Create nodes for the general chat path (reuses advisor tools)
+    chat_model_with_tools, _ = get_models(provider, mode="advisor")
     general_chat_node = GeneralChatNode(chat_model_with_tools, extraction_model)
 
     # 4. Build the graph
@@ -120,10 +111,11 @@ def build_graph(
     builder.add_node("summary", summary_node)
 
     #   -Itinerary
-    builder.add_node("plan_check",        plan_check_node)
-    builder.add_node("itinerary_planner", itinerary_planner_node)
+    builder.add_node("plan_check",           plan_check_node)
+    builder.add_node("itinerary_planner",    itinerary_planner_node)
     builder.add_node("itinerary_executor",   itinerary_executor_node)
     builder.add_node("itinerary_replanner",  itinerary_replanner_node)
+    builder.add_node("itinerary_critic",     itinerary_critic_node)
     builder.add_node("itinerary_formatter",  itinerary_formatter_node)
 
     # Advisor nodes
@@ -134,10 +126,7 @@ def build_graph(
 
     # General chat nodes
     builder.add_node("general_chat", general_chat_node)
-    builder.add_node("chat_tools", ToolNode(_all_chat_tools))
-
-    # Out-of-scope rejection node (no LLM call — static message, goes straight to END)
-    builder.add_node("out_of_scope", _out_of_scope_node)
+    builder.add_node("chat_tools", ToolNode(advisor_tools))
 
     # 5. Define edges — travel planning path
     builder.add_edge(START, "security_gate")
@@ -156,14 +145,12 @@ def build_graph(
         after_router,
         {
             "extract_metadata": "extract_metadata",
-            "adjustments": "adjustments",
-            "advisor_planner": "advisor_planner",
-            "general_chat": "general_chat",
-            "out_of_scope": "out_of_scope",
+            "adjustments":      "adjustments",
+            "advisor_planner":  "advisor_planner",
+            "general_chat":     "general_chat",
             END: END,
         },
     )
-    builder.add_edge("out_of_scope", END)
 
     builder.add_edge("extract_metadata", "enrichment")
     builder.add_edge("adjustments", "enrichment")
@@ -224,8 +211,17 @@ def build_graph(
         "itinerary_replanner",
         after_itinerary_replanner,
         {
-            "itinerary_executor":  "itinerary_executor",
-            "itinerary_planner":   "itinerary_planner",
+            "itinerary_executor": "itinerary_executor",
+            "itinerary_planner":  "itinerary_planner",
+            "itinerary_critic":   "itinerary_critic",
+        }
+    )
+
+    builder.add_conditional_edges(
+        "itinerary_critic",
+        after_itinerary_critic,
+        {
+            "itinerary_planner":  "itinerary_planner",
             "itinerary_formatter": "itinerary_formatter",
         }
     )

@@ -12,7 +12,8 @@ Flow per invocation:
   5. Advance current_step_index; set itinerary_feasible based on status
 
 See step_handlers.py for all step logic (fetch_activities, fetch_weather,
-build_day_schedule, verify_budget).
+build_day_schedule). Budget verification is handled by the Critic node, not
+as a plan step.
 """
 from __future__ import annotations
 
@@ -24,7 +25,6 @@ from agent.nodes.itinerary.step_handlers import (
     handle_fetch_activities,
     handle_fetch_weather,
     handle_build_day,
-    handle_verify_budget,
     _wrap_result,
     _minimal_trace,
 )
@@ -79,11 +79,6 @@ class ItineraryExecutorNode:
                 step, results, destination, trip_days, current_plan_keys, mode, state,
             )
 
-        elif step.step_type == "verify_budget":
-            result = handle_verify_budget(
-                results, budget, trip_days, destination, origin, mode, state,
-            )
-
         else:
             result = _wrap_result(
                 status="failed",
@@ -107,7 +102,7 @@ def _commit(step, step_key, result, current_index,
     history.append(_history_entry(step, result))
 
     status = result.get("status", "unknown")
-    icon   = {"success": "✅", "failed": "❌", "fallback_used": "🚫"}.get(status, "•")
+    icon   = {"success": "✅", "failed": "❌", "fallback_used": "🚫", "over_budget": "⚠️"}.get(status, "•")
     log_lines.append(
         f"{icon} **{status}**"
         + (f" — {result['error']}" if result.get("error") else "")
@@ -115,8 +110,9 @@ def _commit(step, step_key, result, current_index,
     if result.get("replan_hint"):
         log_lines.append(f"💡 *Hint:* {result['replan_hint']}")
 
+    # over_budget is a soft completion (critic will handle it); only "failed" is a hard stop
     return _state_update(current_index, plan_state, results, history,
-                         log_lines, feasible=(status == "success"))
+                         log_lines, feasible=(status != "failed"))
 
 
 def _history_entry(step, result) -> dict:

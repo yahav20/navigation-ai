@@ -32,6 +32,8 @@ from typing import Optional
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
+from agent.nodes.itinerary.formatter import _budget_section_md, _generate_fallback_markdown
+from agent.nodes.itinerary.step_handlers import _drop_stale_budget, handle_verify_budget
 from agent.state import AgentState
 
 MAX_REPLANS = 3   # must match planner.py
@@ -68,24 +70,6 @@ MARKDOWN FORMAT (output this if the plan is acceptable):
 **Day total: $[actual day_cost from data]**
 
 [Repeat ## 📅 Day N section for every day in the trip]
-
----
-## 💰 Trip Budget Summary
-| Category | Cost |
-|----------|------|
-| [hotel label] ([N] nights) | $[hotel_total from verify_budget] |
-| Activities | $[activities_total from verify_budget] |
-| Meals | $[meals_total from verify_budget] |
-| **Grand Total** | **$[grand_total from verify_budget]** |
-
-Label rules (read Mode from the TRIP header line):
-  - mode=with_travel_data → hotel label = "Hotel", no flights row (already booked)
-  - mode=standalone       → hotel label = "~ Hotel (estimated)"
-                            AND add a "~ Flights (estimated)" row using approx_flights_estimated from BUDGET TOTALS
-                            Place the flights row ABOVE the hotel row.
-
-[✅ Within budget / ⚠️ Over budget — based on grand_total vs budget]
-If mode=standalone, add this footnote after the budget status: "*Grand total covers activities, meals & estimated hotel. Flights are shown separately as an estimate.*"
 
 ---
 💡 **[Destination] tips:** [Write 1-2 genuine, specific tips for this destination — never leave this as a placeholder]
@@ -204,23 +188,6 @@ def _build_summary(
             lines.append(f"  {t}-{et} ({dur}min) [{stype}] {name} ${cost:.0f}")
         lines.append("")
 
-    # ── Budget totals ────────────────────────────────────────────────────────
-    budget_key = next((k for k in results if k.startswith("verify_budget")), None)
-    if budget_key:
-        b = _unwrap(results.get(budget_key, {}))
-        if isinstance(b, dict):
-            totals = {k: v for k, v in b.items()
-                      if k not in ("avg_prices",) and isinstance(v, (int, float))}
-            # Standalone: surface estimated flight costs so the LLM can render them
-            avg_p = b.get("avg_prices") or {}
-            if mode == "standalone" and avg_p:
-                out = float(avg_p.get("avg_flight_price", 0) or 0)
-                ret = float(avg_p.get("avg_return_flight_price", 0) or 0)
-                if out or ret:
-                    totals["approx_flights_estimated"] = round(out + ret, 2)
-            lines.append(f"BUDGET TOTALS: {json.dumps(totals)}")
-            lines.append("")
-
     # ── Weather (brief) ──────────────────────────────────────────────────────
     weather_key = next((k for k in results if k.startswith("fetch_weather")), None)
     if weather_key:
@@ -230,80 +197,6 @@ def _build_summary(
             season = w.get("season", "")
             if temp:
                 lines.append(f"WEATHER: {season} {temp}")
-
-    return "\n".join(lines)
-
-
-def _generate_fallback_markdown(results: dict, trip_days: int, budget: float, mode: str = "standalone") -> str:
-    """Plain-text itinerary renderer — used when the LLM quality review fails."""
-    lines = ["# ✈️ Your Trip Itinerary\n"]
-
-    # Hotel: only show in with_travel_data mode (standalone has no real hotel name).
-    hotel_name = None
-    for key, val in results.items():
-        if key.startswith("build_day_schedule"):
-            inner = _unwrap(val)
-            hotel = inner.get("hotel") if isinstance(inner, dict) else None
-            if hotel and hotel.strip():  # skip empty placeholder
-                hotel_name = hotel
-                break
-    if hotel_name:
-        lines.append(f"## 🏨 Accommodation\n\n**{hotel_name}**\n")
-
-    for d in range(1, trip_days + 1):
-        key = next(
-            (k for k in results
-             if k.startswith("build_day_schedule")
-             and isinstance(_unwrap(results[k]), dict)
-             and _unwrap(results[k]).get("day") == d),
-            None,
-        )
-        if not key:
-            continue
-        day_data = _unwrap(results[key])
-        lines.append(f"\n## 📅 Day {d} — {day_data.get('theme', '')}")
-        lines.append("\n| Time | Activity | Duration | Est. Cost |")
-        lines.append("|------|----------|----------|-----------|")
-        for slot in day_data.get("slots", []):
-            icon = {"activity": "🎯", "meal": "🍽️", "transport": "🚕",
-                    "rest": "😴", "checkin": "🏨"}.get(slot.get("slot_type", ""), "•")
-            lines.append(
-                f"| {slot.get('time', '')} | {icon} {slot.get('name', '')} | "
-                f"{slot.get('duration_minutes', '')} min | ${slot.get('estimated_cost', 0):.0f} |"
-            )
-        lines.append(f"\n**Day total: ${day_data.get('day_cost', 0):.0f}**")
-
-    budget_key = next((k for k in results if k.startswith("verify_budget")), None)
-    if budget_key:
-        b = _unwrap(results[budget_key])
-        if isinstance(b, dict) and b.get("grand_total") is not None:
-            lines.append("\n---\n## 💰 Budget Summary\n")
-            lines.append("| Category | Cost |")
-            lines.append("|----------|------|")
-            hotel_label_prefix = "~ " if mode == "standalone" else ""
-            hotel_suffix = " (estimated)" if mode == "standalone" else ""
-            # Standalone: prepend estimated flights row
-            if mode == "standalone":
-                avg_p = b.get("avg_prices") or {}
-                out = float(avg_p.get("avg_flight_price", 0) or 0)
-                ret = float(avg_p.get("avg_return_flight_price", 0) or 0)
-                if out or ret:
-                    lines.append(f"| ~ Flights (estimated) | ${out + ret:.0f} |")
-            for cat, val in b.items():
-                if cat in ("grand_total", "avg_prices"):
-                    continue
-                if not isinstance(val, (int, float)):
-                    continue
-                label = cat.replace("_", " ").title()
-                if "hotel" in cat.lower():
-                    label = f"{hotel_label_prefix}{label}{hotel_suffix}"
-                lines.append(f"| {label} | ${float(val):.0f} |")
-            grand = float(b.get("grand_total", 0))
-            lines.append(f"\n**Grand Total: ${grand:.0f}**")
-            if budget:
-                remaining = budget - grand
-                emoji = "✅" if remaining >= 0 else "⚠️"
-                lines.append(f"\n{emoji} Budget remaining: ${remaining:.0f}")
 
     return "\n".join(lines)
 
@@ -414,6 +307,7 @@ class ItineraryReplannerNode:
                 "replanner_action":   "replan",
                 "itinerary_plan": {
                     **plan_state,
+                    "step_results":  _drop_stale_budget(results),
                     "replan_context": replan_ctx,
                     "replan_count":   replan_count,  # Planner increments on its side
                 },
@@ -468,6 +362,7 @@ class ItineraryReplannerNode:
                     "replanner_action":   "replan",
                     "itinerary_plan": {
                         **plan_state,
+                        "step_results":  _drop_stale_budget(results),
                         "replan_context": replan_ctx,
                         "replan_count":   replan_count,
                     },
@@ -494,12 +389,24 @@ class ItineraryReplannerNode:
         mode        = state.get("itinerary_mode", "standalone")
         travel_plan = state.get("travel_plan")
         origin      = state.get("current_city", "")
+        destination = state.get("destination_city", "")
+
+        # Pre-compute budget so the Critic can read it without recomputing, and so the
+        # markdown includes a deterministic budget table. Stored under "verify_budget_0".
+        results_with_budget = dict(results)
+        try:
+            budget_result = handle_verify_budget(
+                results, budget, trip_days, destination, origin, mode, state,
+            )
+            results_with_budget["verify_budget_0"] = budget_result
+        except Exception:
+            pass
 
         try:
             summary = _build_summary(
                 results, budget, trip_days,
                 mode=mode, travel_plan=travel_plan,
-                origin=origin, destination=state.get("destination_city", ""),
+                origin=origin, destination=destination,
             )
             output  = self.llm.invoke([
                 SystemMessage(content=REVIEW_SYSTEM),
@@ -520,8 +427,9 @@ class ItineraryReplannerNode:
                         # Remove build_day_schedule from completed_steps so the
                         # Planner re-emits those steps with the corrective hint.
                         results_for_replan = {
-                            k: v for k, v in results.items()
+                            k: v for k, v in results_with_budget.items()
                             if not k.startswith("build_day_schedule")
+                            and not k.startswith("verify_budget")
                         }
                         replan_ctx = _build_replan_context(
                             error_code="LLM_REJECT",
@@ -564,10 +472,19 @@ class ItineraryReplannerNode:
         if content.startswith("```"):
             content = content.split("```")[1].lstrip("markdown").strip().rstrip("```").strip()
 
-        markdown = content if content else _generate_fallback_markdown(results, trip_days, budget, mode)
+        if content:
+            budget_md = _budget_section_md(results_with_budget, budget, mode)
+            markdown  = content + ("\n" + budget_md if budget_md else "")
+        else:
+            markdown = _generate_fallback_markdown(results_with_budget, trip_days, budget, mode)
 
         return {
-            "itinerary_plan": {**plan_state, "final_markdown": markdown},
+            "itinerary_plan": {
+                **plan_state,
+                "final_markdown": markdown,
+                # Persist the budget result so the Critic can read it without recomputing.
+                "step_results": results_with_budget,
+            },
             "itinerary_feasible": True,
             "replanner_action":   "done",
             "messages": [AIMessage(content="✅ **Itinerary complete.**", name="replanner_log")],

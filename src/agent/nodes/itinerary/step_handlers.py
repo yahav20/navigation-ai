@@ -6,8 +6,8 @@ Each handler receives the arguments it needs and returns a wrapped result dict
 contains step logic itself.
 
 Handlers:
-  handle_fetch_weather     — simple tool call
-  handle_fetch_activities  — tool call + ActivitySelector (LLM)
+  handle_fetch_weather     — simple tool call with cache
+  handle_fetch_activities  — Google Maps fetch + dietary filter + ActivitySelector
   handle_build_day         — pure-Python ScheduleEngine, mode-aware DayConfig
   handle_verify_budget     — mode-aware cost rollup + budget gate
 
@@ -24,14 +24,15 @@ from agent.nodes.itinerary.itinerary_tools import (
     calculate_trip_cost,
     get_average_location_cost,
     get_weather,
-    search_activities,
 )
 from agent.nodes.itinerary.schedule_engine import DayConfig, DayScheduleBuilder
 from agent.nodes.itinerary.activity_selector import select_activities_per_day, resolve_candidates
 from agent.nodes.itinerary.schemas import PlanStep
+from tools.google_maps_attractions import fetch_attractions, fetch_restaurants
+from tools.weather_and_time import get_average_weather
 
 # ---------------------------------------------------------------------------
-# Tool registry — used by handle_fetch_weather (and future simple fetch steps)
+# Tool registry — used by handle_fetch_weather
 # ---------------------------------------------------------------------------
 
 def _args_fetch_weather(destination: str, **_) -> dict:
@@ -93,71 +94,107 @@ def handle_fetch_activities(
     trip_days: int,
     llm: BaseChatModel,
 ) -> dict:
-    """Fetch activities for the destination then run ActivitySelector to assign days."""
+    """Fetch attractions + restaurants from Google Maps, then run ActivitySelector."""
     destination = ctx["destination"]
-    prefs       = ctx["prefs"]
-    dietary     = str(prefs.get("dietary_restrictions", "")).lower()
+    prefs       = ctx["prefs"] or {}
+    dietary     = str(prefs.get("dietary_restrictions") or "").lower().strip()
+    pref_loc    = str(prefs.get("preferred_location") or "").strip()
 
-    args = _canonical_args({
-        "city":                destination,
-        "kosher_only":         "kosher" in dietary,
-        "vegetarian_friendly": "vegetarian" in dietary,
-        "vegan_friendly":      "vegan" in dietary,
-    })
-
-    cached = _find_cached_result(results, history, "fetch_activities", args)
+    cache_args = _canonical_args({"city": destination})
+    cached = _find_cached_result(results, history, "fetch_activities", cache_args)
     if cached is not None:
         return _wrap_result(
             status="success", data=cached, error=None, replan_hint="",
-            trace=_minimal_trace("fetch_activities", args,
-                                 "Cache hit.", "Using cached activities."),
+            trace=_minimal_trace("fetch_activities", cache_args,
+                                 "Cache hit.", "Using cached data."),
         )
 
+    # ── 1. Fetch attractions ──────────────────────────────────────────────
+    attraction_query = (
+        f"attractions near {pref_loc} in {destination}"
+        if pref_loc else
+        f"tourist attractions in {destination}"
+    )
+    raw_attractions: list[dict] = []
     try:
-        raw: list[dict] = search_activities.invoke(args)
-        observation = f"Fetched {len(raw) if isinstance(raw, list) else 0} activities."
+        raw_attractions = fetch_attractions.invoke({
+            "city":  destination,
+            "query": attraction_query,
+        }) or []
     except Exception as exc:
-        raw = None
-        observation = f"search_activities exception: {exc}"
+        pass
 
-    if _is_empty(raw):
+    if _is_empty(raw_attractions):
         return _wrap_result(
             status="failed",
             data=None,
-            error=observation,
+            error=f"fetch_attractions returned nothing for '{destination}'.",
             replan_hint=(
-                f"No activities found for '{destination}'. "
-                "Verify city name or check that the DB has activities for this city."
+                f"Google Maps returned no attractions for '{destination}'. "
+                "Check the city name and GOOGLE_MAPS_API_KEY."
             ),
-            trace=_minimal_trace("fetch_activities", args, observation,
-                                 "Empty activity list — cannot build schedule."),
+            trace=_minimal_trace("fetch_activities", cache_args,
+                                 "Empty attractions list.",
+                                 "Cannot build schedule without activities."),
         )
+
+    # ── 2. Fetch restaurants ──────────────────────────────────────────────
+    rest_invoke_args: dict = {"city": destination}
+    if dietary in ("kosher", "vegetarian", "vegan"):
+        rest_invoke_args["cuisine"] = dietary
+
+    raw_restaurants: list[dict] = []
+    try:
+        raw_restaurants = fetch_restaurants.invoke(rest_invoke_args) or []
+    except Exception:
+        pass
+
+    if raw_restaurants and dietary:
+        filtered = _filter_restaurants_by_dietary(raw_restaurants, dietary)
+        if filtered:
+            raw_restaurants = filtered
+
+    # ── 3. Activity selection for all days ────────────────────────────────
+    weather_cond   = _resolve_weather(results, destination)
+    planner_prefs  = _extract_planner_prefs(prefs)
+    blocked_times  = list(planner_prefs.get("blocked_times") or [])
 
     try:
         selection = select_activities_per_day(
             llm=llm,
-            activities=raw,
+            activities=raw_attractions,
             trip_days=trip_days,
-            prefs=prefs,
+            prefs=planner_prefs,
             destination=destination,
+            restaurants=raw_restaurants,
+            weather=weather_cond or None,
+            blocked_times=blocked_times or None,
         )
-        selector_obs = f"ActivitySelector assigned activities to {len(selection)} days."
-    except Exception as exc:
-        sorted_acts = sorted(raw, key=lambda a: -a.get("rating", 0))
+    except Exception:
+        sorted_acts = sorted(raw_attractions, key=lambda a: -a.get("rating", 0))
         selection = {
-            f"day_{d}": [a["name"] for a in sorted_acts[(d - 1) * 5 : d * 5]]
+            f"day_{d}": {
+                "theme": f"Day {d} — Explore {destination}", "area": "",
+                "activities": [a["name"] for a in sorted_acts[(d - 1) * 5: d * 5]],
+                "lunch_restaurant": None, "breakfast_place": None, "dinner_restaurant": None,
+                "recommended_rest_blocks": [],
+            }
             for d in range(1, trip_days + 1)
         }
-        selector_obs = f"ActivitySelector failed ({exc}); used rating-sorted fallback."
 
+    data = {
+        "activities":  raw_attractions,
+        "restaurants": raw_restaurants,
+        "selection":   selection,
+    }
+    observation = (
+        f"Fetched {len(raw_attractions)} attractions + {len(raw_restaurants)} restaurants. "
+        f"Weather: {weather_cond or 'unknown'}. Selection built for {len(selection)} days."
+    )
     return _wrap_result(
-        status="success",
-        data={"activities": raw, "selection": selection},
-        error=None,
-        replan_hint="",
-        trace=_minimal_trace("fetch_activities", args,
-                             observation + " | " + selector_obs,
-                             "Activities fetched and assigned to days."),
+        status="success", data=data, error=None, replan_hint="",
+        trace=_minimal_trace("fetch_activities", cache_args,
+                             observation, "Activities fetched and assigned to days."),
     )
 
 
@@ -189,16 +226,35 @@ def handle_build_day(
         )
 
     acts_data = _unwrap_data(results, "fetch_activities")
-    all_activities: list[dict] = []
-    selection: dict[str, list[str]] = {}
+    all_activities:  list[dict] = []
+    all_restaurants: list[dict] = []
+    selection:       dict       = {}
     if isinstance(acts_data, dict):
-        all_activities = acts_data.get("activities", [])
-        selection      = acts_data.get("selection", {})
+        all_activities  = acts_data.get("activities",  [])
+        all_restaurants = acts_data.get("restaurants", [])
+        selection       = acts_data.get("selection",   {})
 
-    day_names  = selection.get(f"day_{day_num}", [])
-    used       = _used_activities(results, current_plan_keys)
-    day_names  = [n for n in day_names if n not in used]
-    candidates = resolve_candidates(all_activities, day_names)
+    # Retrieve pre-selected day plan from ActivitySelector output
+    day_plan = selection.get(f"day_{day_num}", {})
+    if not isinstance(day_plan, dict):
+        day_plan = {"activities": list(day_plan) if isinstance(day_plan, list) else []}
+
+    # Deduplicate: exclude activities already scheduled on previous days
+    used              = _used_activities(results, current_plan_keys)
+    available_acts    = [a for a in all_activities  if a.get("name") not in used]
+    available_rests   = [r for r in all_restaurants if r.get("name") not in used]
+    day_act_names     = [n for n in day_plan.get("activities", []) if n not in used]
+    day_plan_filtered = {**day_plan, "activities": day_act_names}
+
+    candidates = resolve_candidates(available_acts, day_plan_filtered, available_rests)
+
+    if not candidates:
+        # ActivitySelector returned empty/unrecognised names — fall back to top-rated available acts
+        sorted_avail = sorted(available_acts, key=lambda a: -(a.get("rating") or 0))
+        fallback_plan = {**day_plan, "activities": [a["name"] for a in sorted_avail[:5]]}
+        candidates = resolve_candidates(available_acts, fallback_plan, available_rests)
+        if candidates:
+            day_plan_filtered = fallback_plan
 
     if not candidates:
         return _wrap_result(
@@ -213,14 +269,24 @@ def handle_build_day(
                                  "resolve_candidates returned [].", ""),
         )
 
+    # Build DayConfig with weather + blocked times
+    weather_cond  = _resolve_weather(results, destination)
+    prefs         = state.get("user_preferences") or {}
+    blocked_times = list(prefs.get("blocked_times") or [])
+    day_blocked   = [b for b in blocked_times
+                     if isinstance(b, dict) and b.get("day") == day_num]
+    rest_blocks   = day_plan.get("recommended_rest_blocks", [])
+
     cfg = (
-        _build_config_from_travel_plan(state, day_num, trip_days, candidates)
+        _build_config_from_travel_plan(state, day_num, trip_days, candidates,
+                                       weather_cond, day_blocked, rest_blocks)
         if mode == "with_travel_data"
-        else _build_config_standalone(state, day_num, trip_days, candidates)
+        else _build_config_standalone(state, day_num, trip_days, candidates,
+                                      weather_cond, day_blocked, rest_blocks)
     )
 
     try:
-        slots = DayScheduleBuilder(cfg).build(candidates)
+        slots = DayScheduleBuilder(cfg).build(candidates, day_plan=day_plan_filtered)
     except Exception as exc:
         return _wrap_result(
             status="failed",
@@ -251,12 +317,16 @@ def handle_build_day(
         1:         f"Arrival & first impressions of {destination}",
         trip_days: f"Final day & farewell to {destination}",
     }
+    theme = day_plan.get("theme") or day_themes.get(day_num) or f"Day {day_num} — Explore {destination}"
+    area  = day_plan.get("area", "")
+
     return _wrap_result(
         status="success",
         data={
-            "day":   day_num,
-            "theme": day_themes.get(day_num, f"Day {day_num} — Explore {destination}"),
-            "slots": slots,
+            "day":      day_num,
+            "theme":    theme,
+            "area":     area,
+            "slots":    slots,
             "day_cost": day_cost,
             "hotel":    cfg.hotel_name,
             "hotel_price_per_night": 0.0 if mode == "standalone" else _hotel_price(state),
@@ -299,6 +369,8 @@ def handle_verify_budget(
         day_data = _inner_data(wrapped)
         if not isinstance(day_data, dict) or not day_data.get("slots"):
             continue
+        if day_data.get("day", 0) > trip_days:
+            continue
         days_built += 1
         for slot in day_data["slots"]:
             cost = float(slot.get("estimated_cost", 0))
@@ -331,17 +403,19 @@ def handle_verify_budget(
                 "trip_days":   trip_days,
             })
             hotel_per_night = float(avg.get("avg_hotel_per_night", 120))
+            flight_price    = float(avg.get("avg_flight_price", 400))
+            ret_price       = float(avg.get("avg_return_flight_price", 400))
             avg_prices = avg
         except Exception:
             hotel_per_night = 120.0
+            flight_price    = 400.0
+            ret_price       = 400.0
             avg_prices = {
                 "avg_flight_price":        400.0,
                 "avg_return_flight_price": 400.0,
                 "avg_hotel_per_night":     hotel_per_night,
                 "note": "estimated fallback",
             }
-        flight_price = 0.0
-        ret_price    = 0.0
 
     try:
         data = calculate_trip_cost.invoke({
@@ -367,13 +441,6 @@ def handle_verify_budget(
         f"Grand total: ${grand_total:.0f} | Budget: ${budget or 'flexible'} | "
         + ("⚠️ OVER BUDGET" if over_budget else "✅ Within budget")
     )
-    replan_hint = ""
-    if over_budget:
-        overage = grand_total - budget
-        replan_hint = (
-            f"Budget exceeded by ${overage:.0f}. "
-            "Options: cheaper activities, reduce trip_days by 1-2."
-        )
 
     if mode == "standalone":
         data.pop("outbound_flight", None)
@@ -381,23 +448,46 @@ def handle_verify_budget(
     if avg_prices is not None:
         data["avg_prices"] = avg_prices
 
+    if over_budget:
+        overage = grand_total - budget
+        replan_hint = (
+            f"Budget exceeded by ${overage:.0f}. "
+            "Options: cheaper activities, reduce trip_days by 1-2."
+        )
+        return _wrap_result(
+            status="over_budget",
+            data=data,
+            error=f"Budget exceeded by ${overage:.0f}.",
+            replan_hint=replan_hint,
+            trace=_minimal_trace("verify_budget",
+                                 {"trip_days": trip_days, "budget": budget},
+                                 observation, "Over budget."),
+        )
+
     return _wrap_result(
         status="success",
         data=data,
         error=None,
-        replan_hint=replan_hint,
+        replan_hint="",
         trace=_minimal_trace("verify_budget",
                              {"trip_days": trip_days, "budget": budget},
-                             observation,
-                             "Over budget." if over_budget else "Within budget."),
+                             observation, "Within budget."),
     )
 
 
 # ---------------------------------------------------------------------------
-# DayConfig builders (used only by handle_build_day)
+# DayConfig builders
 # ---------------------------------------------------------------------------
 
-def _build_config_from_travel_plan(state: dict, day_num: int, trip_days: int, candidates) -> DayConfig:
+def _build_config_from_travel_plan(
+    state: dict,
+    day_num: int,
+    trip_days: int,
+    candidates,
+    weather_cond: str = "",
+    blocked_times: list | None = None,
+    rest_blocks: list | None = None,
+) -> DayConfig:
     hotel      = state.get("itinerary_selected_hotel") or {}
     flight_out = state.get("itinerary_selected_outbound_flight") or {}
     flight_ret = state.get("itinerary_selected_return_flight") or {}
@@ -412,17 +502,27 @@ def _build_config_from_travel_plan(state: dict, day_num: int, trip_days: int, ca
         hotel_name=hotel.get("name", "Hotel"),
         hotel_lat=float(hotel.get("latitude") or hotel.get("lat") or 48.85),
         hotel_lng=float(hotel.get("longitude") or hotel.get("lng") or 2.35),
-        hotel_has_breakfast=bool(hotel.get("breakfast_included") or hotel.get("breakfast_available", False)),
         is_first_day=(day_num == 1),
         arrival_time=_normalize_time(str(arrival_raw)) if arrival_raw else None,
         is_last_day=(day_num == trip_days),
         departure_time=_normalize_time(str(departure_raw)) if departure_raw else None,
         day_start_time=prefs.get("day_start_time", "09:00"),
         day_end_time=prefs.get("day_end_time",   "21:00"),
+        weather_condition=weather_cond,
+        blocked_times=blocked_times or [],
+        suggested_rest_blocks=rest_blocks or [],
     )
 
 
-def _build_config_standalone(state: dict, day_num: int, trip_days: int, candidates) -> DayConfig:
+def _build_config_standalone(
+    state: dict,
+    day_num: int,
+    trip_days: int,
+    candidates,
+    weather_cond: str = "",
+    blocked_times: list | None = None,
+    rest_blocks: list | None = None,
+) -> DayConfig:
     lats = [c.lat for c in candidates if c.lat]
     lngs = [c.lng for c in candidates if c.lng]
     prefs = state.get("user_preferences") or {}
@@ -432,13 +532,15 @@ def _build_config_standalone(state: dict, day_num: int, trip_days: int, candidat
         hotel_name="",
         hotel_lat=sum(lats) / len(lats) if lats else 0.0,
         hotel_lng=sum(lngs) / len(lngs) if lngs else 0.0,
-        hotel_has_breakfast=False,
         is_first_day=(day_num == 1),
         arrival_time=None,
         is_last_day=(day_num == trip_days),
         departure_time=None,
         day_start_time=prefs.get("day_start_time", "09:00"),
         day_end_time=prefs.get("day_end_time",   "21:00"),
+        weather_condition=weather_cond,
+        blocked_times=blocked_times or [],
+        suggested_rest_blocks=rest_blocks or [],
     )
 
 
@@ -446,6 +548,86 @@ def _hotel_price(state: dict) -> float:
     tp = state.get("travel_plan") or {}
     hotels = tp.get("hotels", [])
     return float(hotels[0].get("price_per_night", 0)) if hotels else 0.0
+
+
+# ---------------------------------------------------------------------------
+# fetch_activities helpers
+# ---------------------------------------------------------------------------
+
+_DIETARY_KEYWORDS: dict[str, list[str]] = {
+    "kosher":      ["kosher"],
+    "vegetarian":  ["vegetarian", "veggie", "plant"],
+    "vegan":       ["vegan", "plant-based", "plant based"],
+    "halal":       ["halal"],
+    "gluten_free": ["gluten-free", "gluten free"],
+}
+
+
+def _filter_restaurants_by_dietary(
+    restaurants: list[dict],
+    dietary: str,
+) -> list[dict]:
+    """Soft filter: keep restaurants matching the dietary restriction.
+    Returns empty list if nothing matches (caller decides whether to fall back)."""
+    dietary_lower = dietary.lower()
+    keywords = next(
+        (kws for key, kws in _DIETARY_KEYWORDS.items() if key in dietary_lower),
+        [dietary_lower],
+    )
+    matched = []
+    for r in restaurants:
+        text = " ".join([
+            str(r.get("name") or ""),
+            str(r.get("categories") or ""),
+            " ".join(r.get("types") or []),
+        ]).lower()
+        if any(kw in text for kw in keywords):
+            matched.append(r)
+    return matched
+
+
+def _extract_planner_prefs(prefs: dict) -> dict:
+    """Return only the fields ActivitySelector uses; strip hotel/flight/price fields."""
+    return {
+        k: v for k, v in {
+            "dietary_restrictions": prefs.get("dietary_restrictions"),
+            "preferred_location":   prefs.get("preferred_location"),
+            "blocked_times":        prefs.get("blocked_times"),
+        }.items()
+        if v is not None
+    }
+
+
+def _resolve_weather(results: dict, destination: str) -> str:
+    """Return weather condition string for the day planner.
+    Priority: fetch_weather result → seasonal average → empty string."""
+    weather_data = _unwrap_data(results, "fetch_weather")
+    if isinstance(weather_data, dict):
+        cond = str(
+            weather_data.get("condition") or
+            weather_data.get("summary") or
+            weather_data.get("description") or ""
+        ).strip()
+        if cond:
+            return cond
+
+    try:
+        import datetime as _dt
+        season_map = {
+            12: "Winter", 1: "Winter",  2: "Winter",
+             3: "Spring", 4: "Spring",  5: "Spring",
+             6: "Summer", 7: "Summer",  8: "Summer",
+             9: "Autumn", 10: "Autumn", 11: "Autumn",
+        }
+        season = season_map[_dt.date.today().month]
+        avg_w  = get_average_weather.invoke({"city": destination, "season": season})
+        cond   = str(avg_w.get("condition") or avg_w.get("summary") or "").strip()
+        if cond:
+            return cond
+    except Exception:
+        pass
+
+    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -469,7 +651,7 @@ def _canonical_args(args: dict) -> dict:
 
 
 def _find_cached_result(results: dict, history: list, step_type: str, args: dict) -> Optional[dict]:
-    never_cache = {"build_day_schedule", "verify_budget"}
+    never_cache = {"build_day_schedule"}
     if step_type in never_cache:
         return None
     for h in history:
@@ -540,6 +722,11 @@ def _normalize_time(raw: str) -> str:
 def _minimal_trace(action, args, observation, reflection) -> dict:
     return {"thought": "", "action": action, "args": args,
             "observation": observation, "reflection": reflection}
+
+
+def _drop_stale_budget(results: dict) -> dict:
+    """Remove any verify_budget entries so the next run gets a fresh calculation."""
+    return {k: v for k, v in results.items() if not k.startswith("verify_budget")}
 
 
 def _wrap_result(status, data, error, replan_hint, trace) -> dict:
