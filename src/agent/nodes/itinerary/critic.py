@@ -60,6 +60,33 @@ def _plan_for_replan(plan_state: dict, replan_context_json: str) -> dict:
     return updated
 
 
+def _plan_for_switch_travel(plan_state: dict) -> dict:
+    """Cleaned plan_state for a switch_travel_options-only replan.
+
+    Keeps all existing day schedules intact — only strips verify_budget so the
+    replanner recomputes it with the newly-selected (cheaper) flight + hotel.
+    Because build_day_schedule results are preserved, the planner will see all
+    days as completed and emit only switch_travel_options.
+    """
+    clean_results = {
+        k: v for k, v in plan_state.get("step_results", {}).items()
+        if not k.startswith("verify_budget")
+    }
+    updated = dict(plan_state)
+    updated["step_results"]   = clean_results
+    updated["replan_count"]   = 0
+    updated["replan_context"] = json.dumps({
+        "error_code":    "need_switch_travel",
+        "error_message": "Cheaper activities didn't resolve budget — switching to cheapest travel options.",
+        "failed_step":   "verify_budget",
+        "replan_hint":   (
+            "Add switch_travel_options step. "
+            "DO NOT rebuild day schedules — keep the existing schedule unchanged."
+        ),
+    })
+    return updated
+
+
 def _plan_for_fetch_min(plan_state: dict) -> dict:
     """Cleaned plan_state for a fetch_min_prices-only replan.
 
@@ -209,36 +236,32 @@ class ItineraryCriticNode:
         overage: float,
         grand_total: float,
     ) -> dict:
-        switch_result = self._try_switch_travel(state, overage, trip_days)
-        if switch_result is not None:
-            updated_plan = _plan_for_replan(plan_state, json.dumps({
-                "error_code":    "switch_travel",
-                "error_message": f"Switched to cheaper travel options (saving ~${switch_result['savings']:.0f}).",
-                "failed_step":   "verify_budget",
-                "replan_hint":   (
-                    "Rebuild the itinerary with the updated (cheaper) flight and hotel. "
-                    "The travel costs have been reduced; ensure activity costs stay modest."
-                ),
-            }))
-            updates: dict = {
-                "critic_action":  "switch_travel",
-                "itinerary_plan": updated_plan,
-                "messages": [AIMessage(
-                    content=(
-                        f"🔄 **CRITIC → SWITCH TRAVEL** Overage (${overage:.0f}) exceeds activity "
-                        f"costs — switching to cheaper flights/hotel "
-                        f"(saving ~${switch_result['savings']:.0f}) to cover the gap."
-                    ),
-                    name="critic_log",
-                )],
-            }
-            if switch_result.get("outbound_flight"):
-                updates["itinerary_selected_outbound_flight"] = switch_result["outbound_flight"]
-            if switch_result.get("hotel"):
-                updates["itinerary_selected_hotel"] = switch_result["hotel"]
-            return updates
+        results = plan_state.get("step_results", {})
 
-        return self._hitl(state, budget, grand_total, overage, trip_days, plan_state)
+        # If switch_travel_options already ran but budget is still over → HITL
+        already_switched = any(k.startswith("switch_travel_options") for k in results)
+        if already_switched:
+            return self._hitl(state, budget, grand_total, overage, trip_days, plan_state)
+
+        # Trigger switch_travel_options through the plan → execute → replan pipeline.
+        # _plan_for_switch_travel keeps existing day schedules intact (only strips
+        # verify_budget), so the planner emits ONLY switch_travel_options. The
+        # replanner then recomputes the budget with the new (cheaper) travel costs
+        # against the already-built day costs — no schedule rebuild needed.
+        updated_plan = _plan_for_switch_travel(plan_state)
+        return {
+            "critic_action":         "switch_travel",
+            "switch_travel_triggered": True,
+            "itinerary_plan":        updated_plan,
+            "messages": [AIMessage(
+                content=(
+                    f"🔄 **CRITIC → SWITCH TRAVEL** Overage (${overage:.0f}) exceeds "
+                    "activity costs — dispatching switch_travel_options step to select "
+                    "the cheapest available flight + hotel, then rebuilding the schedule."
+                ),
+                name="critic_log",
+            )],
+        }
 
     # ── HITL ──────────────────────────────────────────────────────────────
 
@@ -329,55 +352,3 @@ class ItineraryCriticNode:
 
         return {"critic_action": "abort"}
 
-    # ── Switch travel (with_travel_data only) ─────────────────────────────
-
-    def _try_switch_travel(
-        self, state: AgentState, overage: float, trip_days: int
-    ) -> Optional[dict]:
-        if state.get("itinerary_mode") != "with_travel_data":
-            return None
-
-        current_outbound  = state.get("itinerary_selected_outbound_flight") or {}
-        current_hotel     = state.get("itinerary_selected_hotel") or {}
-        travel_plan       = state.get("travel_plan") or {}
-
-        current_flight_price = float(current_outbound.get("price", 0) or 0)
-        current_hotel_ppn    = float(current_hotel.get("price_per_night", 0) or 0)
-
-        all_flights = [
-            f for f in (state.get("flight_options") or [])
-            if isinstance(f, dict) and not f.get("message")
-        ]
-        current_fn  = current_outbound.get("flight_number", "")
-        alt_flights = [f for f in all_flights if f.get("flight_number") != current_fn]
-        cheapest_flight = (
-            min(alt_flights, key=lambda f: float(f.get("price", 9999)))
-            if alt_flights else None
-        )
-
-        all_hotels  = [h for h in travel_plan.get("hotels", []) if isinstance(h, dict)]
-        current_hn  = current_hotel.get("name", "")
-        alt_hotels  = [h for h in all_hotels if h.get("name", "") != current_hn]
-        cheapest_hotel = (
-            min(alt_hotels, key=lambda h: float(h.get("price_per_night", 9999)))
-            if alt_hotels else None
-        )
-
-        flight_savings = (
-            current_flight_price - float(cheapest_flight.get("price", current_flight_price))
-            if cheapest_flight else 0.0
-        )
-        hotel_savings = (
-            (current_hotel_ppn - float(cheapest_hotel.get("price_per_night", current_hotel_ppn)))
-            * trip_days
-            if cheapest_hotel else 0.0
-        )
-        total_savings = flight_savings + hotel_savings
-
-        if total_savings >= overage:
-            return {
-                "savings":         total_savings,
-                "outbound_flight": cheapest_flight,
-                "hotel":           cheapest_hotel,
-            }
-        return None

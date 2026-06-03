@@ -43,6 +43,7 @@ VALID_STEP_TYPES = {
     "fetch_weather",
     "fetch_avg_prices",
     "fetch_min_prices",
+    "switch_travel_options",
     "build_day_schedule",
     "verify_budget",
 }
@@ -62,6 +63,7 @@ STEP TYPES (use exact names):
 RULES:
 - fetch_activities MUST come before all build_day_schedule steps.
 - In standalone mode ONLY: include fetch_avg_prices before the build_day_schedule steps.
+- Do NOT include switch_travel_options — it is injected automatically when needed.
 - Do NOT include verify_budget — budget verification is handled automatically after scheduling.
 - NEVER re-emit steps listed in "completed_steps".
 - On replan: emit only remaining steps, skip completed ones.
@@ -167,6 +169,7 @@ def _validate_and_fix(
     completed_days: set[int],
     mode: str = "standalone",
     need_min_prices: bool = False,
+    need_switch_travel: bool = False,
 ) -> ExecutionPlan:
     """Enforce hard ordering constraints and fill missing day steps."""
     steps = plan.steps
@@ -177,6 +180,11 @@ def _validate_and_fix(
     # Strip price-fetch steps if not standalone (they're standalone-only)
     if mode != "standalone":
         steps = [s for s in steps if s.step_type not in ("fetch_avg_prices", "fetch_min_prices")]
+
+    # Strip switch_travel_options unless explicitly requested — prevents the LLM from
+    # adding it prematurely before cheaper-activity replans have been attempted.
+    if not need_switch_travel:
+        steps = [s for s in steps if s.step_type != "switch_travel_options"]
 
     # Drop already-completed non-build steps and deduplicate
     seen_types: set[str] = set()
@@ -218,6 +226,14 @@ def _validate_and_fix(
                 description=f"Fetch minimum available flight + hotel prices for {destination}",
             ))
 
+    if mode == "with_travel_data":
+        if need_switch_travel and "switch_travel_options" not in other_types and "switch_travel_options" not in completed:
+            other_steps.append(PlanStep(
+                step_id=0,
+                step_type="switch_travel_options",
+                description="Switch to cheapest available flight and hotel options",
+            ))
+
     # Drop build steps for already-completed or out-of-range days
     build_steps = [
         s for s in build_steps
@@ -252,6 +268,7 @@ def _default_plan(
     completed: list[str],
     mode: str = "standalone",
     need_min_prices: bool = False,
+    need_switch_travel: bool = False,
 ) -> ExecutionPlan:
     """Minimal viable plan — only includes steps not already completed."""
     steps: list[PlanStep] = []
@@ -270,6 +287,8 @@ def _default_plan(
         add("fetch_avg_prices", f"Fetch average flight + hotel prices for {destination}")
         if need_min_prices:
             add("fetch_min_prices", f"Fetch minimum available flight + hotel prices for {destination}")
+    if mode == "with_travel_data" and need_switch_travel:
+        add("switch_travel_options", "Switch to cheapest available flight and hotel options")
     for d in range(1, trip_days + 1):
         add("build_day_schedule", f"Day {d}: build schedule", day=d)
 
@@ -302,7 +321,8 @@ class ItineraryPlannerNode:
         replan_count    = prev_plan.get("replan_count", 0)
         step_results    = prev_plan.get("step_results", {})
         replan_raw      = prev_plan.get("replan_context", "")
-        need_min_prices = bool(state.get("use_min_prices_for_budget"))
+        need_min_prices    = bool(state.get("use_min_prices_for_budget"))
+        need_switch_travel = bool(state.get("switch_travel_triggered")) and mode == "with_travel_data"
 
         is_replan = bool(replan_raw)
 
@@ -366,12 +386,12 @@ class ItineraryPlannerNode:
             ])
         except Exception as e:
             plan_md += f"\n⚠️ LLM failed (`{e}`) — using default plan\n"
-            plan = _default_plan(destination, origin, trip_days, replan_count, completed, mode, need_min_prices)
+            plan = _default_plan(destination, origin, trip_days, replan_count, completed, mode, need_min_prices, need_switch_travel)
 
         # ── Validate & fix ─────────────────────────────────────────────────
         # Always use trip_days from state — the critic owns any day/budget adjustments.
         comp_days = _completed_days(step_results)
-        plan = _validate_and_fix(plan, completed, trip_days, destination, comp_days, mode, need_min_prices)
+        plan = _validate_and_fix(plan, completed, trip_days, destination, comp_days, mode, need_min_prices, need_switch_travel)
 
         plan_md += "\n**Execution Plan:**\n"
         for step in plan.steps:

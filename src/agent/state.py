@@ -45,6 +45,7 @@ class AgentState(TypedDict):
     critic_adjustment_request: NotRequired[str] # Free-text adjustment captured via HITL "adjust_prefs" option
     critic_min_prices: NotRequired[dict]        # Minimum available flight/hotel prices (standalone only, set on "min_travel" action)
     use_min_prices_for_budget: NotRequired[bool]  # When True, verify_budget uses fetch_min_prices data instead of fetch_avg_prices
+    switch_travel_triggered: NotRequired[bool]    # Set by critic; tells planner to inject switch_travel_options step
 
     # --- Advisor ---
     advisor_plan: list                 # list of {tool_name, args} dicts produced by advisor_planner

@@ -112,6 +112,72 @@ def _extract_activity_costs(results: dict, trip_days: int) -> tuple[float, float
     return activities_cost, meals_cost, days_built
 
 
+def handle_switch_travel_options(step: PlanStep, results: dict, history: list, ctx: dict, state: dict) -> dict:
+    """Select the cheapest available flight + hotel alternative from state.
+
+    Updates itinerary_selected_outbound_flight and itinerary_selected_hotel via
+    state_updates so that subsequent build_day_schedule steps use the new values.
+    """
+    current_outbound = (state or {}).get("itinerary_selected_outbound_flight") or {}
+    current_hotel    = (state or {}).get("itinerary_selected_hotel") or {}
+    travel_plan      = (state or {}).get("travel_plan") or {}
+
+    # Cheapest alternative outbound flight (different flight number)
+    all_flights = [
+        f for f in ((state or {}).get("flight_options") or [])
+        if isinstance(f, dict) and not f.get("message")
+    ]
+    current_fn  = current_outbound.get("flight_number", "")
+    alt_flights = sorted(
+        [f for f in all_flights if f.get("flight_number") != current_fn],
+        key=lambda f: float(f.get("price", 9999)),
+    )
+    new_flight = alt_flights[0] if alt_flights else None
+
+    # Cheapest alternative hotel (different name)
+    all_hotels = [h for h in travel_plan.get("hotels", []) if isinstance(h, dict)]
+    current_hn = current_hotel.get("name", "")
+    alt_hotels = sorted(
+        [h for h in all_hotels if h.get("name", "") != current_hn],
+        key=lambda h: float(h.get("price_per_night", 9999)),
+    )
+    new_hotel = alt_hotels[0] if alt_hotels else None
+
+    switched_flight = new_flight is not None
+    switched_hotel  = new_hotel  is not None
+
+    observation = (
+        f"Switched flight: {switched_flight} "
+        f"({'$' + str(new_flight.get('price', '?')) if switched_flight else 'no change'}), "
+        f"hotel: {switched_hotel} "
+        f"({'$' + str(new_hotel.get('price_per_night', '?')) + '/night' if switched_hotel else 'no change'})"
+    )
+
+    result = _wrap_result(
+        status="success",
+        data={
+            "switched_flight": switched_flight,
+            "switched_hotel":  switched_hotel,
+            "new_flight":      new_flight,
+            "new_hotel":       new_hotel,
+        },
+        error=None,
+        replan_hint="",
+        trace=_minimal_trace("switch_travel_options", {}, observation, ""),
+    )
+
+    # Propagate new selections to state so build_day_schedule uses them
+    state_updates: dict = {}
+    if switched_flight:
+        state_updates["itinerary_selected_outbound_flight"] = new_flight
+    if switched_hotel:
+        state_updates["itinerary_selected_hotel"] = new_hotel
+    if state_updates:
+        result["state_updates"] = state_updates
+
+    return result
+
+
 def handle_fetch_avg_prices(step: PlanStep, results: dict, history: list, ctx: dict) -> dict:
     """Fetch and cache average flight + hotel prices for standalone budget estimation."""
     destination = ctx["destination"]

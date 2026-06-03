@@ -26,6 +26,7 @@ from agent.nodes.itinerary.step_handlers import (
     handle_fetch_avg_prices,
     handle_fetch_min_prices,
     handle_fetch_weather,
+    handle_switch_travel_options,
     handle_build_day,
     _wrap_result,
     _minimal_trace,
@@ -82,6 +83,9 @@ class ItineraryExecutorNode:
         elif step.step_type == "fetch_min_prices":
             result = handle_fetch_min_prices(step, results, history, ctx)
 
+        elif step.step_type == "switch_travel_options":
+            result = handle_switch_travel_options(step, results, history, ctx, state)
+
         elif step.step_type == "build_day_schedule":
             result = handle_build_day(
                 step, results, destination, trip_days, current_plan_keys, mode, state,
@@ -119,8 +123,14 @@ def _commit(step, step_key, result, current_index,
         log_lines.append(f"💡 *Hint:* {result['replan_hint']}")
 
     # over_budget is a soft completion (critic will handle it); only "failed" is a hard stop
-    return _state_update(current_index, plan_state, results, history,
-                         log_lines, feasible=(status != "failed"))
+    update = _state_update(current_index, plan_state, results, history,
+                           log_lines, feasible=(status != "failed"))
+
+    # Propagate any extra state fields returned by the step handler
+    # (e.g. switch_travel_options writes new flight/hotel back to state)
+    state_updates = result.get("state_updates") or {}
+    update.update(state_updates)
+    return update
 
 
 def _history_entry(step, result) -> dict:
