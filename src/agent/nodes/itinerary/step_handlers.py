@@ -121,9 +121,8 @@ def handle_fetch_activities(
             "city":  destination,
             "query": attraction_query,
         }) or []
-        print(f"[DEBUG] fetch_attractions '{attraction_query}' → {len(raw_attractions)} results")
     except Exception as exc:
-        print(f"[DEBUG] fetch_attractions FAILED: {exc}")
+        pass
 
     if _is_empty(raw_attractions):
         return _wrap_result(
@@ -147,17 +146,13 @@ def handle_fetch_activities(
     raw_restaurants: list[dict] = []
     try:
         raw_restaurants = fetch_restaurants.invoke(rest_invoke_args) or []
-        print(f"[DEBUG] fetch_restaurants {rest_invoke_args} → {len(raw_restaurants)} results")
-    except Exception as exc:
-        print(f"[DEBUG] fetch_restaurants FAILED: {exc}")
+    except Exception:
+        pass
 
     if raw_restaurants and dietary:
         filtered = _filter_restaurants_by_dietary(raw_restaurants, dietary)
         if filtered:
             raw_restaurants = filtered
-            print(f"[DEBUG] dietary filter '{dietary}' → {len(raw_restaurants)} restaurants kept")
-
-    print(f"[DEBUG] final pool: {len(raw_attractions)} attractions, {len(raw_restaurants)} restaurants")
 
     # ── 3. Activity selection for all days ────────────────────────────────
     weather_cond   = _resolve_weather(results, destination)
@@ -175,9 +170,7 @@ def handle_fetch_activities(
             weather=weather_cond or None,
             blocked_times=blocked_times or None,
         )
-        print(f"[DEBUG] ActivitySelector generated plans for {len(selection)} days.")
-    except Exception as exc:
-        print(f"[DEBUG] ActivitySelector FAILED: {exc} — using rating-sorted fallback")
+    except Exception:
         sorted_acts = sorted(raw_attractions, key=lambda a: -a.get("rating", 0))
         selection = {
             f"day_{d}": {
@@ -217,7 +210,6 @@ def handle_build_day(
     """Build a deterministic hour-by-hour schedule for one day via ScheduleEngine."""
     day_num = step.day or 1
     action  = f"build_day_schedule (Day {day_num})"
-    print(f"[DEBUG] ── build_day_schedule Day {day_num} (mode={mode}) ──")
 
     missing = _missing_prerequisites(results)
     if missing:
@@ -254,10 +246,6 @@ def handle_build_day(
     day_act_names     = [n for n in day_plan.get("activities", []) if n not in used]
     day_plan_filtered = {**day_plan, "activities": day_act_names}
 
-    print(f"[DEBUG] Day {day_num}: pool = {len(available_acts)} acts, "
-          f"{len(available_rests)} restaurants remaining "
-          f"({len(used)} names already used)")
-
     candidates = resolve_candidates(available_acts, day_plan_filtered, available_rests)
 
     if not candidates:
@@ -267,7 +255,6 @@ def handle_build_day(
         candidates = resolve_candidates(available_acts, fallback_plan, available_rests)
         if candidates:
             day_plan_filtered = fallback_plan
-            print(f"[DEBUG] Day {day_num}: used rating-sorted fallback ({len(candidates)} candidates)")
 
     if not candidates:
         return _wrap_result(
@@ -298,14 +285,9 @@ def handle_build_day(
                                       weather_cond, day_blocked, rest_blocks)
     )
 
-    print(f"[DEBUG] Day {day_num} DayConfig: hotel={cfg.hotel_name!r} "
-          f"weather={cfg.weather_condition!r} blocked={cfg.blocked_times}")
-
     try:
         slots = DayScheduleBuilder(cfg).build(candidates, day_plan=day_plan_filtered)
-        print(f"[DEBUG] Day {day_num}: ScheduleEngine built {len(slots)} slots")
     except Exception as exc:
-        print(f"[DEBUG] Day {day_num}: ScheduleEngine EXCEPTION: {exc}")
         return _wrap_result(
             status="failed",
             data=None,
@@ -641,10 +623,9 @@ def _resolve_weather(results: dict, destination: str) -> str:
         avg_w  = get_average_weather.invoke({"city": destination, "season": season})
         cond   = str(avg_w.get("condition") or avg_w.get("summary") or "").strip()
         if cond:
-            print(f"[DEBUG] _resolve_weather: seasonal fallback ({season}) → {cond!r}")
             return cond
-    except Exception as exc:
-        print(f"[DEBUG] _resolve_weather seasonal fallback failed: {exc}")
+    except Exception:
+        pass
 
     return ""
 
@@ -741,6 +722,11 @@ def _normalize_time(raw: str) -> str:
 def _minimal_trace(action, args, observation, reflection) -> dict:
     return {"thought": "", "action": action, "args": args,
             "observation": observation, "reflection": reflection}
+
+
+def _drop_stale_budget(results: dict) -> dict:
+    """Remove any verify_budget entries so the next run gets a fresh calculation."""
+    return {k: v for k, v in results.items() if not k.startswith("verify_budget")}
 
 
 def _wrap_result(status, data, error, replan_hint, trace) -> dict:

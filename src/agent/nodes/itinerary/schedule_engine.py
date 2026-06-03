@@ -320,20 +320,10 @@ class DayScheduleBuilder:
             else day_end
         )
 
-        print(f"[DEBUG] ScheduleEngine Day {cfg.day_number}: "
-              f"weather={cfg.weather_condition!r} "
-              f"start={cfg.day_start_time} end={cfg.day_end_time} "
-              f"candidates={len(candidates)}")
-
         # ── Weather flags ────────────────────────────────────────────────────
         cond     = cfg.weather_condition.lower()
         is_rainy = any(w in cond for w in ("rain", "storm", "thunder", "shower"))
         is_v_hot = "extreme_heat" in cond or "extreme heat" in cond
-
-        if is_rainy:
-            print(f"[DEBUG] Day {cfg.day_number}: RAINY — outdoor activities will be skipped")
-        if is_v_hot:
-            print(f"[DEBUG] Day {cfg.day_number}: EXTREME HEAT — adding 14-16 rest block")
 
         # ── Blocked windows ──────────────────────────────────────────────────
         blocked: list[tuple[datetime, datetime]] = []
@@ -393,14 +383,7 @@ class DayScheduleBuilder:
 
         # Rainy day: remove outdoor sightseeing candidates
         if is_rainy:
-            before = len(sights)
             sights = [c for c in sights if not c.is_outdoor]
-            print(f"[DEBUG] Day {cfg.day_number}: rain filter removed "
-                  f"{before - len(sights)} outdoor activities, {len(sights)} remain")
-
-        print(f"[DEBUG] Day {cfg.day_number}: {len(sights)} sightseeing, "
-              f"{len(meal_cands)} meal candidates  "
-              f"(lunch={pinned_lunch}, coffee={pinned_coffee}, dinner={pinned_dinner})")
 
         # ── Main sightseeing loop ────────────────────────────────────────────
         for act in sights:
@@ -501,8 +484,6 @@ class DayScheduleBuilder:
 
             cursor   = act_end
             location = act_pt
-            print(f"[DEBUG] Day {cfg.day_number}: added [{act.name}] "
-                  f"{act_start.strftime('%H:%M')}–{act_end.strftime('%H:%M')}")
 
         # ── End-of-day sequence ──────────────────────────────────────────────
 
@@ -526,8 +507,6 @@ class DayScheduleBuilder:
                     description="Browse local shops, relax at a café, or head back to the hotel",
                     estimated_cost=0.0,
                 ))
-                print(f"[DEBUG] Day {cfg.day_number}: free time "
-                      f"{cursor.strftime('%H:%M')}–{dinner_earliest.strftime('%H:%M')}")
                 cursor = dinner_earliest
 
             if cursor < departure_anchor and cursor.hour >= 17:
@@ -547,9 +526,6 @@ class DayScheduleBuilder:
                 estimated_cost=t_cost,
                 transport_mode="taxi",
             ))
-            print(f"[DEBUG] Day {cfg.day_number}: departure transfer at {ts.strftime('%H:%M')}")
-
-        print(f"[DEBUG] Day {cfg.day_number}: built {len(self._slots)} slots total")
         return [s.to_dict() for s in self._slots]
 
     # ── Day 1 arrival ────────────────────────────────────────────────────────
@@ -657,9 +633,6 @@ class DayScheduleBuilder:
             description=venue.categories,
             estimated_cost=venue.price or MEAL_COSTS.get(meal_type, 15.0),
         ))
-        print(f"[DEBUG]   pinned {meal_type}: {venue_name} "
-              f"{start.strftime('%H:%M')}–{end.strftime('%H:%M')}")
-
         self._last_food_time = end
         getattr(self, f"_set_{meal_type}", lambda: None)()
         meal_idx.pop(venue_name, None)
@@ -725,9 +698,6 @@ class DayScheduleBuilder:
                 name=meal.name, description=meal.categories,
                 estimated_cost=meal.price,
             ))
-            label = "dinner" if is_dinner else "lunch"
-            print(f"[DEBUG]   generic {label}: {meal.name} "
-                  f"{start.strftime('%H:%M')}–{end.strftime('%H:%M')}")
             if is_dinner: self._had_dinner = True
             else:         self._had_lunch  = True
             self._last_food_time = end
@@ -786,8 +756,6 @@ class DayScheduleBuilder:
                 name=meal.name, description=meal.categories,
                 estimated_cost=meal.price,
             ))
-            print(f"[DEBUG]   end-of-day dinner: {meal.name} "
-                  f"{start.strftime('%H:%M')}–{end.strftime('%H:%M')}")
             self._had_dinner     = True
             self._last_food_time = end
             return end, mpt
@@ -814,8 +782,6 @@ class DayScheduleBuilder:
             description="Local restaurant near hotel",
             estimated_cost=MEAL_COSTS["dinner"],
         ))
-        print(f"[DEBUG]   near-hotel dinner fallback "
-              f"{ds.strftime('%H:%M')}–{de.strftime('%H:%M')}")
         self._had_dinner     = True
         self._last_food_time = de
         return de, hpt
@@ -830,7 +796,6 @@ class DayScheduleBuilder:
             description=reason, estimated_cost=0.0,
         ))
         self._had_rest = True
-        print(f"[DEBUG]   rest: {cursor.strftime('%H:%M')}–{end.strftime('%H:%M')} ({reason})")
         return end
 
     def _flush_rests(
@@ -851,9 +816,6 @@ class DayScheduleBuilder:
                         slot_type="rest", name="Rest break",
                         description=reason, estimated_cost=0.0,
                     ))
-                    print(f"[DEBUG]   LLM rest block: "
-                          f"{actual_s.strftime('%H:%M')}–{actual_e.strftime('%H:%M')} "
-                          f"({reason})")
                     cursor         = actual_e
                     self._had_rest = True
                 to_remove.append(i)

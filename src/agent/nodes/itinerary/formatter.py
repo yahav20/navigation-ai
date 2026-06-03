@@ -214,6 +214,110 @@ class ItineraryFormatterNode:
         return gist
 
 
+def _generate_fallback_markdown(results: dict, trip_days: int, budget: float, mode: str = "standalone") -> str:
+    """Plain-text itinerary renderer — used when the LLM quality review fails."""
+    lines = ["# ✈️ Your Trip Itinerary\n"]
+
+    hotel_name = None
+    for key, val in results.items():
+        if key.startswith("build_day_schedule"):
+            inner = _unwrap_result(val)
+            hotel = inner.get("hotel") if isinstance(inner, dict) else None
+            if hotel and hotel.strip():
+                hotel_name = hotel
+                break
+    if hotel_name:
+        lines.append(f"## 🏨 Accommodation\n\n**{hotel_name}**\n")
+
+    for d in range(1, trip_days + 1):
+        key = next(
+            (k for k in results
+             if k.startswith("build_day_schedule")
+             and isinstance(_unwrap_result(results[k]), dict)
+             and _unwrap_result(results[k]).get("day") == d),
+            None,
+        )
+        if not key:
+            continue
+        day_data = _unwrap_result(results[key])
+        lines.append(f"\n## 📅 Day {d} — {day_data.get('theme', '')}")
+        lines.append("\n| Time | Activity | Duration | Est. Cost |")
+        lines.append("|------|----------|----------|-----------|")
+        for slot in day_data.get("slots", []):
+            icon = {"activity": "🎯", "meal": "🍽️", "transport": "🚕",
+                    "rest": "😴", "checkin": "🏨"}.get(slot.get("slot_type", ""), "•")
+            lines.append(
+                f"| {slot.get('time', '')} | {icon} {slot.get('name', '')} | "
+                f"{slot.get('duration_minutes', '')} min | ${slot.get('estimated_cost', 0):.0f} |"
+            )
+        lines.append(f"\n**Day total: ${day_data.get('day_cost', 0):.0f}**")
+
+    budget_md = _budget_section_md(results, budget, mode)
+    if budget_md:
+        lines.append(budget_md)
+
+    return "\n".join(lines)
+
+
+def _budget_section_md(results: dict, budget: float, mode: str) -> str:
+    """Deterministic budget summary section — appended after the LLM day-schedule markdown."""
+    budget_key = next((k for k in results if k.startswith("verify_budget")), None)
+    if not budget_key:
+        return ""
+    b = _unwrap_result(results[budget_key])
+    if not isinstance(b, dict) or b.get("grand_total") is None:
+        return ""
+
+    lines: list[str] = ["\n\n---------------------------------------------------------------------------------------\n"]
+    lines.append("## 💰 Budget Summary\n")
+    lines.append("| Category | Cost |")
+    lines.append("|----------|------|")
+    hotel_label_prefix = "~ " if mode == "standalone" else ""
+    hotel_suffix       = " (estimated)" if mode == "standalone" else ""
+
+    if mode == "with_travel_data":
+        ob_price  = float(b.get("outbound_flight",  0) or 0)
+        ret_price = float(b.get("return_flight",    0) or 0)
+        if ob_price:
+            lines.append(f"| Outbound Flight | ${ob_price:.0f} |")
+        if ret_price:
+            lines.append(f"| Return Flight | ${ret_price:.0f} |")
+    elif mode == "standalone":
+        avg_p = b.get("avg_prices") or {}
+        out = float(avg_p.get("avg_flight_price", 0) or 0)
+        ret = float(avg_p.get("avg_return_flight_price", 0) or 0)
+        if out or ret:
+            lines.append(f"| ~ Flights (estimated) | ${out + ret:.0f} |")
+
+    for cat, val in b.items():
+        if cat in ("grand_total", "avg_prices", "outbound_flight", "return_flight"):
+            continue
+        if not isinstance(val, (int, float)):
+            continue
+        label = cat.replace("_", " ").title()
+        if "hotel" in cat.lower():
+            label = f"{hotel_label_prefix}{label}{hotel_suffix}"
+        lines.append(f"| {label} | ${float(val):.0f} |")
+
+    grand = float(b.get("grand_total", 0))
+    lines.append(f"\n**Grand Total: ${grand:.0f}**")
+    if budget:
+        remaining = budget - grand
+        emoji = "✅" if remaining >= 0 else "⚠️"
+        lines.append(f"\n{emoji} Budget remaining: ${remaining:.0f}")
+
+    return "\n".join(lines)
+
+
+def _unwrap_result(val: dict) -> dict:
+    """Unwrap a step result dict to its inner data."""
+    if not isinstance(val, dict):
+        return {}
+    if "data" in val and isinstance(val["data"], dict):
+        return val["data"]
+    return val
+
+
 def _fmt_time(iso: str) -> str:
     """Convert an ISO datetime string to a compact display like '07 Jun, 19:40'."""
     if not iso:

@@ -309,8 +309,6 @@ def select_activities_per_day(
             HumanMessage(content=user_msg),
         ]).content.strip()
 
-        print(f"[DEBUG] ActivitySelector raw response ({len(raw)} chars): {raw[:200]!r}")
-
         raw    = _repair_json(raw)
         result = json.loads(raw)
 
@@ -326,11 +324,10 @@ def select_activities_per_day(
                     normalised[key] = _list_to_day_plan(val if isinstance(val, list) else [])
             return normalised
 
-    except Exception as exc:
-        print(f"[DEBUG] ActivitySelector LLM failed: {exc}")
+    except Exception:
+        pass
 
     # ── Fallback: rating-sorted round-robin ──────────────────────────────────
-    print("[DEBUG] ActivitySelector using rating-sorted fallback")
     names = [a["name"] for a in sorted_acts]
     return {
         f"day_{d}": _list_to_day_plan(names[(d - 1) * 5: d * 5])
@@ -406,8 +403,7 @@ def resolve_candidates(
                 requires_booking = bool(raw.get("requires_booking")),
                 operating_days   = str(raw.get("operating_days") or "Daily"),
             )
-        except (TypeError, ValueError) as exc:
-            print(f"[DEBUG] resolve_candidates: skipping {name!r}: {exc}")
+        except (TypeError, ValueError):
             return None
 
     candidates: list[ActivityCandidate] = []

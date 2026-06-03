@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 from typing import Optional
 
+from langchain_core.messages import AIMessage
 from langgraph.types import interrupt
 
 from agent.nodes.itinerary.step_handlers import handle_verify_budget
@@ -101,6 +102,14 @@ class ItineraryCriticNode:
                 "critic_attempts": critic_attempts + 1,
                 "critic_action":   "replan_cheaper",
                 "itinerary_plan":  updated_plan,
+                "messages": [AIMessage(
+                    content=(
+                        f"🔍 **CRITIC → REPLAN** Budget exceeded by **${overage:.0f}** "
+                        f"(total: ${grand_total:.0f}, budget: ${budget:.0f}). "
+                        "Auto-replanning with cheaper activities."
+                    ),
+                    name="critic_log",
+                )],
             }
 
         # ── 3. Second failure: try silent switch_travel ───────────────────
@@ -121,6 +130,13 @@ class ItineraryCriticNode:
             updates: dict = {
                 "critic_action": "switch_travel",
                 "itinerary_plan": updated_plan,
+                "messages": [AIMessage(
+                    content=(
+                        f"🔄 **CRITIC → SWITCH TRAVEL** Switching to cheaper flights/hotel "
+                        f"(saving ~${switch_result['savings']:.0f}) to cover the ${overage:.0f} overage."
+                    ),
+                    name="critic_log",
+                )],
             }
             if switch_result.get("outbound_flight"):
                 updates["itinerary_selected_outbound_flight"] = switch_result["outbound_flight"]
@@ -160,6 +176,10 @@ class ItineraryCriticNode:
                 "critic_attempts": 0,
                 "trip_days":      new_days,
                 "itinerary_plan": updated_plan,
+                "messages": [AIMessage(
+                    content=f"📅 **CRITIC → REDUCE DAY** Rebuilding as a {new_days}-day itinerary.",
+                    name="critic_log",
+                )],
             }
 
         if choice == "adjust_prefs":
@@ -197,6 +217,10 @@ class ItineraryCriticNode:
                 "critic_attempts":           0,
                 "critic_adjustment_request": adjustment_text,
                 "itinerary_plan":            updated_plan,
+                "messages": [AIMessage(
+                    content=f"⚙️ **CRITIC → ADJUST PREFS** Rebuilding with user preferences: '{adjustment_text}'.",
+                    name="critic_log",
+                )],
             }
 
         # default / "abort"
