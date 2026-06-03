@@ -1,5 +1,6 @@
 """CLI entry point for the navigation AI agent."""
 import argparse
+import os
 import sqlite3
 import time
 import warnings
@@ -20,6 +21,10 @@ from config.setting import CHOSEN_PROVIDER  # noqa: E402
 from security import MAX_TURNS_PER_SESSION, generate_session_id, log_turn, scan_output, validate_input  # noqa: E402
 
 CHECKPOINT_DB = Path(__file__).resolve().parent.parent / "data" / "checkpoints.db"
+
+# Per-node timing is opt-in: set ATLAS_NODE_TIMING=1 to show the "<node> NNNN ms"
+# label. Off by default — node names still render, just without the elapsed time.
+_SHOW_NODE_TIMING = os.getenv("ATLAS_NODE_TIMING") == "1"
 
 
 def _parse_args() -> argparse.Namespace:
@@ -137,7 +142,7 @@ def _run_turn(
                         continue
 
                     if node_name not in _SELF_REPORTING_NODES:
-                        ui.render_node(node_name, elapsed_ms=elapsed_ms)
+                        ui.render_node(node_name, elapsed_ms=elapsed_ms if _SHOW_NODE_TIMING else None)
                     continue
 
                 messages = data.get("messages", [])
