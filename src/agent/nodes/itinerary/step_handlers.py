@@ -23,6 +23,7 @@ from langchain_core.language_models import BaseChatModel
 from agent.nodes.itinerary.itinerary_tools import (
     calculate_trip_cost,
     get_average_location_cost,
+    get_min_location_cost,
     get_weather,
 )
 from agent.nodes.itinerary.schedule_engine import DayConfig, DayScheduleBuilder
@@ -83,6 +84,109 @@ def handle_fetch_weather(step: PlanStep, results: dict, history: list, ctx: dict
     return _wrap_result(
         status="success", data=raw, error=None, replan_hint="",
         trace=_minimal_trace(step.step_type, args, observation, ""),
+    )
+
+
+def _extract_activity_costs(results: dict, trip_days: int) -> tuple[float, float, int]:
+    """Return (activities_cost, meals_cost, days_built) from built day schedules.
+    Used by the Critic to compare overage against what cheaper activities could save.
+    """
+    activities_cost = 0.0
+    meals_cost      = 0.0
+    days_built      = 0
+    for key, wrapped in results.items():
+        if not key.startswith("build_day_schedule"):
+            continue
+        day_data = wrapped.get("data") if isinstance(wrapped, dict) else None
+        if not isinstance(day_data, dict) or not day_data.get("slots"):
+            continue
+        if day_data.get("day", 0) > trip_days:
+            continue
+        days_built += 1
+        for slot in day_data["slots"]:
+            cost = float(slot.get("estimated_cost", 0))
+            if slot.get("slot_type") == "meal":
+                meals_cost += cost
+            else:
+                activities_cost += cost
+    return activities_cost, meals_cost, days_built
+
+
+def handle_fetch_avg_prices(step: PlanStep, results: dict, history: list, ctx: dict) -> dict:
+    """Fetch and cache average flight + hotel prices for standalone budget estimation."""
+    destination = ctx["destination"]
+    origin      = ctx["origin"]
+    trip_days   = ctx["trip_days"]
+
+    args   = _canonical_args({"city": destination, "origin": origin})
+    cached = _find_cached_result(results, history, "fetch_avg_prices", args)
+    if cached is not None:
+        return _wrap_result(
+            status="success", data=cached, error=None, replan_hint="",
+            trace=_minimal_trace("fetch_avg_prices", args, "Cache hit.", ""),
+        )
+
+    try:
+        raw = get_average_location_cost.invoke({
+            "destination": destination,
+            "origin":      origin,
+            "trip_days":   trip_days,
+        })
+    except Exception as exc:
+        raw = None
+
+    if _is_empty(raw):
+        raw = {
+            "avg_flight_price":        400.0,
+            "avg_return_flight_price": 400.0,
+            "avg_hotel_per_night":     120.0,
+            "note": "estimated fallback",
+        }
+
+    return _wrap_result(
+        status="success", data=raw, error=None, replan_hint="",
+        trace=_minimal_trace("fetch_avg_prices", args,
+                             f"avg_flight={raw.get('avg_flight_price')}, "
+                             f"avg_hotel={raw.get('avg_hotel_per_night')}", ""),
+    )
+
+
+def handle_fetch_min_prices(step: PlanStep, results: dict, history: list, ctx: dict) -> dict:
+    """Fetch and cache minimum available flight + hotel prices for standalone budget check."""
+    destination = ctx["destination"]
+    origin      = ctx["origin"]
+    trip_days   = ctx["trip_days"]
+
+    args   = _canonical_args({"city": destination, "origin": origin})
+    cached = _find_cached_result(results, history, "fetch_min_prices", args)
+    if cached is not None:
+        return _wrap_result(
+            status="success", data=cached, error=None, replan_hint="",
+            trace=_minimal_trace("fetch_min_prices", args, "Cache hit.", ""),
+        )
+
+    try:
+        raw = get_min_location_cost.invoke({
+            "destination": destination,
+            "origin":      origin,
+            "trip_days":   trip_days,
+        })
+    except Exception as exc:
+        raw = None
+
+    if _is_empty(raw):
+        raw = {
+            "min_flight_price":        400.0,
+            "min_return_flight_price": 400.0,
+            "min_hotel_per_night":     120.0,
+            "note": "estimated fallback",
+        }
+
+    return _wrap_result(
+        status="success", data=raw, error=None, replan_hint="",
+        trace=_minimal_trace("fetch_min_prices", args,
+                             f"min_flight={raw.get('min_flight_price')}, "
+                             f"min_hotel={raw.get('min_hotel_per_night')}", ""),
     )
 
 
@@ -396,26 +500,60 @@ def handle_verify_budget(
                     hotel_per_night = float(dd["hotel_price_per_night"])
                     break
     else:
-        try:
-            avg = get_average_location_cost.invoke({
-                "destination": destination,
-                "origin":      origin,
-                "trip_days":   trip_days,
-            })
-            hotel_per_night = float(avg.get("avg_hotel_per_night", 120))
-            flight_price    = float(avg.get("avg_flight_price", 400))
-            ret_price       = float(avg.get("avg_return_flight_price", 400))
-            avg_prices = avg
-        except Exception:
-            hotel_per_night = 120.0
-            flight_price    = 400.0
-            ret_price       = 400.0
+        use_min  = bool((state or {}).get("use_min_prices_for_budget"))
+        prefix   = "fetch_min_prices" if use_min else "fetch_avg_prices"
+        prices   = _unwrap_data(results, prefix)
+
+        if prices is not None:
+            if use_min:
+                hotel_per_night = float(prices.get("min_hotel_per_night", 120))
+                flight_price    = float(prices.get("min_flight_price", 400))
+                ret_price       = float(prices.get("min_return_flight_price", 400))
+            else:
+                hotel_per_night = float(prices.get("avg_hotel_per_night", 120))
+                flight_price    = float(prices.get("avg_flight_price", 400))
+                ret_price       = float(prices.get("avg_return_flight_price", 400))
+            # Always store under avg_* keys so formatter reads consistently;
+            # the note field distinguishes average vs minimum.
             avg_prices = {
-                "avg_flight_price":        400.0,
-                "avg_return_flight_price": 400.0,
+                "avg_flight_price":        flight_price,
+                "avg_return_flight_price": ret_price,
                 "avg_hotel_per_night":     hotel_per_night,
-                "note": "estimated fallback",
+                "note": "minimum available prices" if use_min else "estimated averages — no booking confirmed",
             }
+        else:
+            # Fallback: call the tool inline (handles runs without the new plan steps)
+            try:
+                tool_fn = get_min_location_cost if use_min else get_average_location_cost
+                prices_live = tool_fn.invoke({
+                    "destination": destination,
+                    "origin":      origin,
+                    "trip_days":   trip_days,
+                })
+                if use_min:
+                    hotel_per_night = float(prices_live.get("min_hotel_per_night", 120))
+                    flight_price    = float(prices_live.get("min_flight_price", 400))
+                    ret_price       = float(prices_live.get("min_return_flight_price", 400))
+                else:
+                    hotel_per_night = float(prices_live.get("avg_hotel_per_night", 120))
+                    flight_price    = float(prices_live.get("avg_flight_price", 400))
+                    ret_price       = float(prices_live.get("avg_return_flight_price", 400))
+                avg_prices = {
+                    "avg_flight_price":        flight_price,
+                    "avg_return_flight_price": ret_price,
+                    "avg_hotel_per_night":     hotel_per_night,
+                    "note": "minimum available prices" if use_min else "estimated averages — no booking confirmed",
+                }
+            except Exception:
+                hotel_per_night = 120.0
+                flight_price    = 400.0
+                ret_price       = 400.0
+                avg_prices = {
+                    "avg_flight_price":        400.0,
+                    "avg_return_flight_price": 400.0,
+                    "avg_hotel_per_night":     120.0,
+                    "note": "estimated fallback",
+                }
 
     try:
         data = calculate_trip_cost.invoke({

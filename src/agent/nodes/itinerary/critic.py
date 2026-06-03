@@ -1,20 +1,32 @@
 """
 ItineraryCriticNode — Budget Reflection gate between Replanner and Formatter.
 
-Strategy (applied in order):
-  1. Pass:             budget within limits → route to formatter unchanged.
-  2. Replan cheaper:   first over-budget hit → inject budget constraint, loop to planner.
-  3. Switch travel:    second hit, with_travel_data mode → silently swap to cheapest
-                       available flight/hotel if combined savings cover the gap.
-  4. HITL:             still over budget → interrupt() with 4 user options:
-                         ignore_budget  → formatter (with over-budget banner)
-                         reduce_day     → decrement trip_days, loop to planner
-                         adjust_prefs   → second interrupt for free-text, loop to planner
-                         abort          → formatter (sorry message)
+Decision logic when over-budget:
 
-Budget is no longer a plan step. The Replanner computes it after all day schedules
-are built and stores the result under "verify_budget_0" in step_results. The Critic
-reads it from there (falling back to computing it directly if absent).
+  Step 1 — Can cheaper activities cover the overage?
+    Condition: critic_attempts == 0  AND  NOT use_min_prices_for_budget
+               AND  overage ≤ (activities_cost + meals_cost)
+    Action:    one replan with cheaper-activity hint (critic_attempts → 1)
+
+  Step 2 — Overage exceeds what activities can cover, OR step-1 replan failed:
+    Standalone mode:
+      If use_min_prices_for_budget is False → trigger fetch_min_prices as a proper
+      plan step (planner → executor → replanner → critic again with min prices).
+      If use_min_prices_for_budget is True  → min prices already verified by
+      replanner but still over budget → HITL.
+    With-travel-data mode:
+      Try swapping to the cheapest available flight/hotel in state.
+      If swap covers the gap → switch_travel (replan).
+      Otherwise → HITL.
+
+  Pass after min-prices fetch:
+    When use_min_prices_for_budget is True and verify_budget_0 is NOT over_budget,
+    the critic returns critic_action="min_travel" so the formatter knows to show
+    the min-prices header and booking advisory.
+
+Budget is pre-computed by the Replanner after all day schedules are built and
+stored under "verify_budget_0" in step_results. The Critic reads it from there
+(or recomputes it if absent).
 """
 from __future__ import annotations
 
@@ -24,17 +36,17 @@ from typing import Optional
 from langchain_core.messages import AIMessage
 from langgraph.types import interrupt
 
-from agent.nodes.itinerary.step_handlers import handle_verify_budget
+from agent.nodes.itinerary.step_handlers import handle_verify_budget, _extract_activity_costs
 from agent.state import AgentState
 
-MAX_CRITIC_ATTEMPTS = 1  # auto-replan attempts before escalating to HITL
+MAX_CRITIC_ATTEMPTS = 3  # safety ceiling (step 1 is still limited to one attempt)
 
 
 def _plan_for_replan(plan_state: dict, replan_context_json: str) -> dict:
-    """Return a cleaned plan_state ready for the Planner to rebuild day schedules.
+    """Cleaned plan_state for a full schedule rebuild.
 
-    Strips stale build_day_schedule and verify_budget results so _completed_step_types
-    in the Planner won't consider them done and will re-emit those steps.
+    Strips stale build_day_schedule and verify_budget results.
+    Preserves fetch_avg_prices and fetch_min_prices (they are cached).
     """
     clean_results = {
         k: v for k, v in plan_state.get("step_results", {}).items()
@@ -48,41 +60,71 @@ def _plan_for_replan(plan_state: dict, replan_context_json: str) -> dict:
     return updated
 
 
+def _plan_for_fetch_min(plan_state: dict) -> dict:
+    """Cleaned plan_state for a fetch_min_prices-only replan.
+
+    Keeps all existing day schedules intact — only strips verify_budget so
+    the replanner recomputes it using the newly-fetched minimum prices.
+    """
+    clean_results = {
+        k: v for k, v in plan_state.get("step_results", {}).items()
+        if not k.startswith("verify_budget")
+    }
+    updated = dict(plan_state)
+    updated["step_results"]   = clean_results
+    updated["replan_count"]   = 0
+    updated["replan_context"] = json.dumps({
+        "error_code":    "need_min_prices",
+        "error_message": "Overage exceeds activity costs — fetching minimum available prices to re-verify budget.",
+        "failed_step":   "verify_budget",
+        "replan_hint":   (
+            "Add fetch_min_prices step. "
+            "DO NOT rebuild day schedules — keep existing schedule unchanged."
+        ),
+    })
+    return updated
+
+
 class ItineraryCriticNode:
-    """Reflection/Critic gate: validates budget and applies a layered correction strategy."""
+    """Reflection/Critic gate: validates budget and applies a two-step correction strategy."""
 
     def __call__(self, state: AgentState) -> dict:
         plan_state = state.get("itinerary_plan") or {}
         results    = plan_state.get("step_results", {})
         budget     = float(state.get("total_budget") or 0)
         trip_days  = int(state.get("trip_days") or 1)
+        mode       = state.get("itinerary_mode", "standalone")
+        use_min    = bool(state.get("use_min_prices_for_budget"))
 
         if not budget:
             return {"critic_action": "pass"}
 
-        # ── 1. Obtain budget result (from replanner injection or fresh compute) ──
+        # ── Obtain budget result ───────────────────────────────────────────
         raw_result = results.get("verify_budget_0")
         if raw_result is None:
-            mode        = state.get("itinerary_mode", "standalone")
-            origin      = state.get("current_city", "")
-            destination = state.get("destination_city", "")
-            raw_result  = handle_verify_budget(
-                results, budget, trip_days, destination, origin, mode, state,
+            raw_result = handle_verify_budget(
+                results, budget, trip_days,
+                state.get("destination_city", ""),
+                state.get("current_city", ""),
+                mode, state,
             )
 
-        status = raw_result.get("status", "success")
-
-        if status != "over_budget":
+        # If budget is satisfied and we used min prices → signal min_travel to formatter
+        if raw_result.get("status") != "over_budget":
+            if use_min:
+                return {"critic_action": "min_travel"}
             return {"critic_action": "pass"}
 
         data        = raw_result.get("data") or {}
         grand_total = float(data.get("grand_total", 0))
         overage     = grand_total - budget
-
         critic_attempts = int(state.get("critic_attempts") or 0)
 
-        # ── 2. First failure: auto replan with cheaper activities ─────────
-        if critic_attempts < MAX_CRITIC_ATTEMPTS:
+        # ── Step 1: Replan with cheaper activities (once, if overage is coverable) ──
+        activities_cost, meals_cost, _ = _extract_activity_costs(results, trip_days)
+        total_activity_cost = activities_cost + meals_cost
+
+        if critic_attempts == 0 and not use_min and overage <= total_activity_cost:
             max_act_per_day = max(10.0, round((budget * 0.25) / trip_days, 0))
             replan_hint = (
                 f"Budget exceeded by ${overage:.0f} "
@@ -99,28 +141,79 @@ class ItineraryCriticNode:
                 "replan_hint":   replan_hint,
             }))
             return {
-                "critic_attempts": critic_attempts + 1,
+                "critic_attempts": 1,
                 "critic_action":   "replan_cheaper",
                 "itinerary_plan":  updated_plan,
                 "messages": [AIMessage(
                     content=(
                         f"🔍 **CRITIC → REPLAN** Budget exceeded by **${overage:.0f}** "
                         f"(total: ${grand_total:.0f}, budget: ${budget:.0f}). "
-                        "Auto-replanning with cheaper activities."
+                        f"Overage (${overage:.0f}) ≤ activity costs (${total_activity_cost:.0f}) "
+                        "— rebuilding with cheaper activities."
                     ),
                     name="critic_log",
                 )],
             }
 
-        # ── 3. Second failure: try silent switch_travel ───────────────────
+        # ── Step 2: Overage too large for activities (or step-1 replan failed) ──
+
+        if mode == "standalone":
+            return self._standalone_step2(
+                state, plan_state, budget, trip_days, overage, grand_total, use_min
+            )
+        else:
+            return self._with_travel_step2(
+                state, plan_state, budget, trip_days, overage, grand_total
+            )
+
+    # ── Step 2 — Standalone ───────────────────────────────────────────────
+
+    def _standalone_step2(
+        self,
+        state: AgentState,
+        plan_state: dict,
+        budget: float,
+        trip_days: int,
+        overage: float,
+        grand_total: float,
+        use_min: bool,
+    ) -> dict:
+        if not use_min:
+            # Trigger fetch_min_prices as a proper plan step
+            updated_plan = _plan_for_fetch_min(plan_state)
+            return {
+                "critic_action":             "fetch_min_prices",
+                "use_min_prices_for_budget": True,
+                "itinerary_plan":            updated_plan,
+                "messages": [AIMessage(
+                    content=(
+                        f"💡 **CRITIC → FETCH MIN PRICES** Overage (${overage:.0f}) exceeds "
+                        f"activity costs — dispatching fetch_min_prices step to re-verify budget "
+                        "against cheapest available options."
+                    ),
+                    name="critic_log",
+                )],
+            }
+
+        # Already used min prices but still over budget → HITL
+        return self._hitl(state, budget, grand_total, overage, trip_days, plan_state)
+
+    # ── Step 2 — With-travel-data ─────────────────────────────────────────
+
+    def _with_travel_step2(
+        self,
+        state: AgentState,
+        plan_state: dict,
+        budget: float,
+        trip_days: int,
+        overage: float,
+        grand_total: float,
+    ) -> dict:
         switch_result = self._try_switch_travel(state, overage, trip_days)
         if switch_result is not None:
             updated_plan = _plan_for_replan(plan_state, json.dumps({
                 "error_code":    "switch_travel",
-                "error_message": (
-                    f"Switched to cheaper travel options "
-                    f"(saving ~${switch_result['savings']:.0f})."
-                ),
+                "error_message": f"Switched to cheaper travel options (saving ~${switch_result['savings']:.0f}).",
                 "failed_step":   "verify_budget",
                 "replan_hint":   (
                     "Rebuild the itinerary with the updated (cheaper) flight and hotel. "
@@ -128,12 +221,13 @@ class ItineraryCriticNode:
                 ),
             }))
             updates: dict = {
-                "critic_action": "switch_travel",
+                "critic_action":  "switch_travel",
                 "itinerary_plan": updated_plan,
                 "messages": [AIMessage(
                     content=(
-                        f"🔄 **CRITIC → SWITCH TRAVEL** Switching to cheaper flights/hotel "
-                        f"(saving ~${switch_result['savings']:.0f}) to cover the ${overage:.0f} overage."
+                        f"🔄 **CRITIC → SWITCH TRAVEL** Overage (${overage:.0f}) exceeds activity "
+                        f"costs — switching to cheaper flights/hotel "
+                        f"(saving ~${switch_result['savings']:.0f}) to cover the gap."
                     ),
                     name="critic_log",
                 )],
@@ -144,7 +238,19 @@ class ItineraryCriticNode:
                 updates["itinerary_selected_hotel"] = switch_result["hotel"]
             return updates
 
-        # ── 4. HITL: present options to user ─────────────────────────────
+        return self._hitl(state, budget, grand_total, overage, trip_days, plan_state)
+
+    # ── HITL ──────────────────────────────────────────────────────────────
+
+    def _hitl(
+        self,
+        state: AgentState,
+        budget: float,
+        grand_total: float,
+        overage: float,
+        trip_days: int,
+        plan_state: dict,
+    ) -> dict:
         dest_label = state.get("destination_city") or "your destination"
 
         user_choice: str = interrupt({
@@ -172,10 +278,10 @@ class ItineraryCriticNode:
             new_days     = max(1, trip_days - 1)
             updated_plan = _plan_for_replan(plan_state, "")
             return {
-                "critic_action":  "reduce_day",
+                "critic_action":   "reduce_day",
                 "critic_attempts": 0,
-                "trip_days":      new_days,
-                "itinerary_plan": updated_plan,
+                "trip_days":       new_days,
+                "itinerary_plan":  updated_plan,
                 "messages": [AIMessage(
                     content=f"📅 **CRITIC → REDUCE DAY** Rebuilding as a {new_days}-day itinerary.",
                     name="critic_log",
@@ -190,7 +296,6 @@ class ItineraryCriticNode:
                 if mode == "with_travel_data"
                 else "I'll rebuild the day-by-day schedule with your new preferences."
             )
-
             adjustment_text: str = interrupt({
                 "question": (
                     f"{mode_hint}\n\n"
@@ -201,7 +306,6 @@ class ItineraryCriticNode:
                 ),
                 "options": [],
             })
-
             updated_plan = _plan_for_replan(plan_state, json.dumps({
                 "error_code":    "user_adjustment",
                 "error_message": "User requested preference adjustment after budget exceeded.",
@@ -223,18 +327,13 @@ class ItineraryCriticNode:
                 )],
             }
 
-        # default / "abort"
         return {"critic_action": "abort"}
 
-    # ── Silent switch_travel helper ────────────────────────────────────────
+    # ── Switch travel (with_travel_data only) ─────────────────────────────
 
     def _try_switch_travel(
         self, state: AgentState, overage: float, trip_days: int
     ) -> Optional[dict]:
-        """
-        Returns {savings, outbound_flight, hotel} if switching to cheaper
-        available alternatives covers the budget gap. Only for with_travel_data mode.
-        """
         if state.get("itinerary_mode") != "with_travel_data":
             return None
 
@@ -245,23 +344,21 @@ class ItineraryCriticNode:
         current_flight_price = float(current_outbound.get("price", 0) or 0)
         current_hotel_ppn    = float(current_hotel.get("price_per_night", 0) or 0)
 
-        # Cheapest alternative outbound flight (different flight number)
-        all_flights     = [
+        all_flights = [
             f for f in (state.get("flight_options") or [])
             if isinstance(f, dict) and not f.get("message")
         ]
-        current_fn      = current_outbound.get("flight_number", "")
-        alt_flights     = [f for f in all_flights if f.get("flight_number") != current_fn]
+        current_fn  = current_outbound.get("flight_number", "")
+        alt_flights = [f for f in all_flights if f.get("flight_number") != current_fn]
         cheapest_flight = (
             min(alt_flights, key=lambda f: float(f.get("price", 9999)))
             if alt_flights else None
         )
 
-        # Cheapest alternative hotel (different name) from travel_plan suggestions
-        all_hotels      = [h for h in travel_plan.get("hotels", []) if isinstance(h, dict)]
-        current_hn      = current_hotel.get("name", "")
-        alt_hotels      = [h for h in all_hotels if h.get("name", "") != current_hn]
-        cheapest_hotel  = (
+        all_hotels  = [h for h in travel_plan.get("hotels", []) if isinstance(h, dict)]
+        current_hn  = current_hotel.get("name", "")
+        alt_hotels  = [h for h in all_hotels if h.get("name", "") != current_hn]
+        cheapest_hotel = (
             min(alt_hotels, key=lambda h: float(h.get("price_per_night", 9999)))
             if alt_hotels else None
         )
@@ -279,7 +376,7 @@ class ItineraryCriticNode:
 
         if total_savings >= overage:
             return {
-                "savings":        total_savings,
+                "savings":         total_savings,
                 "outbound_flight": cheapest_flight,
                 "hotel":           cheapest_hotel,
             }

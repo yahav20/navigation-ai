@@ -183,6 +183,50 @@ def get_average_location_cost(destination: str, origin: str, trip_days: int) -> 
         raise ToolException(f"get_average_location_cost failed: {e}")
 
 
+@tool
+def get_min_location_cost(destination: str, origin: str, trip_days: int) -> dict:
+    """
+    Find the minimum available flight and hotel prices for a destination.
+    Used in standalone mode when average prices push the trip over budget,
+    to check whether the cheapest bookable options would still fit the user's budget.
+    Returns min_flight_price, min_return_flight_price, min_hotel_per_night.
+    """
+    try:
+        destination = validate_city(destination)
+        origin      = validate_city(origin)
+
+        flights_out    = search_flights_with_fallback(origin, destination) or []
+        flights_return = search_flights_with_fallback(destination, origin) or []
+
+        def _min_price(items: list, key: str, fallback: float) -> float:
+            prices = [
+                float(f.get(key) or f.get("total_price") or 0)
+                for f in items
+                if isinstance(f, dict) and (f.get(key) or f.get("total_price"))
+            ]
+            return round(min(prices), 2) if prices else fallback
+
+        min_flight        = _min_price(flights_out,    "price", 400.0)
+        min_return_flight = _min_price(flights_return, "price", 400.0)
+
+        location_key  = TRIPADVISOR_LOCATION_KEYS.get(destination.lower())
+        xotelo_hotels = xotelo_list_hotels(location_key) if location_key else []
+        if xotelo_hotels:
+            min_hotel = _min_price(xotelo_hotels, "price_per_night", 120.0)
+        else:
+            db_hotels = data_provider.fetch_hotels(destination) or []
+            min_hotel = _min_price(db_hotels, "price_per_night", 120.0)
+
+        return {
+            "min_flight_price":        min_flight,
+            "min_return_flight_price": min_return_flight,
+            "min_hotel_per_night":     min_hotel,
+            "note": "minimum available prices — actual booking required",
+        }
+    except Exception as e:
+        raise ToolException(f"get_min_location_cost failed: {e}")
+
+
 # ---------------------------------------------------------------------------
 # Tool registry — imported by executor.py
 # ---------------------------------------------------------------------------
@@ -192,4 +236,5 @@ ITINERARY_TOOLS = [
     get_weather,
     calculate_trip_cost,
     get_average_location_cost,
+    get_min_location_cost,
 ]

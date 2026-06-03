@@ -23,6 +23,8 @@ from langchain_core.messages import AIMessage
 from agent.nodes.itinerary.schemas import ExecutionPlan
 from agent.nodes.itinerary.step_handlers import (
     handle_fetch_activities,
+    handle_fetch_avg_prices,
+    handle_fetch_min_prices,
     handle_fetch_weather,
     handle_build_day,
     _wrap_result,
@@ -58,7 +60,7 @@ class ItineraryExecutorNode:
         step     = plan.steps[current_index]
         step_key = f"{step.step_type}_{step.step_id}"
         log_lines = [
-            f"⚙️ **Step {current_index + 1}/{len(plan.steps)}:** `{step.step_type}`"
+            f"**Step {current_index + 1}/{len(plan.steps)}:** `{step.step_type}`"
             + (f" (Day {step.day})" if step.day else "")
         ]
 
@@ -73,6 +75,12 @@ class ItineraryExecutorNode:
 
         elif step.step_type == "fetch_activities":
             result = handle_fetch_activities(step, results, history, ctx, trip_days, self.llm)
+
+        elif step.step_type == "fetch_avg_prices":
+            result = handle_fetch_avg_prices(step, results, history, ctx)
+
+        elif step.step_type == "fetch_min_prices":
+            result = handle_fetch_min_prices(step, results, history, ctx)
 
         elif step.step_type == "build_day_schedule":
             result = handle_build_day(
