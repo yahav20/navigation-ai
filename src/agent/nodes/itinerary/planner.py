@@ -54,12 +54,11 @@ You are a travel schedule planner. Output a minimal ordered list of execution st
 
 STEP TYPES (use exact names):
   fetch_activities, fetch_weather,
-  build_day_schedule (needs day=N),
-  verify_budget (always LAST, after all build_day_schedule steps)
+  build_day_schedule (needs day=N)
 
 RULES:
 - fetch_activities MUST come before all build_day_schedule steps.
-- verify_budget MUST be the final step — always include it once after all days are scheduled.
+- Do NOT include verify_budget — budget verification is handled automatically after scheduling.
 - NEVER re-emit steps listed in "completed_steps".
 - On replan: emit only remaining steps, skip completed ones.
 - Each build_day_schedule needs its own entry with the correct day number.
@@ -166,22 +165,24 @@ def _validate_and_fix(
     """Enforce hard ordering constraints and fill missing day steps."""
     steps = plan.steps
 
+    # Strip any verify_budget steps the LLM may have emitted — budget is handled by the Critic.
+    steps = [s for s in steps if s.step_type != "verify_budget"]
+
     # Drop already-completed non-build steps and deduplicate
     seen_types: set[str] = set()
     deduped: list[PlanStep] = []
     for s in steps:
-        if s.step_type in completed and s.step_type not in ("build_day_schedule", "verify_budget"):
+        if s.step_type in completed and s.step_type != "build_day_schedule":
             continue
-        if s.step_type not in ("build_day_schedule", "verify_budget"):
+        if s.step_type != "build_day_schedule":
             if s.step_type in seen_types:
                 continue
             seen_types.add(s.step_type)
         deduped.append(s)
     steps = deduped
 
-    build_steps  = [s for s in steps if s.step_type == "build_day_schedule"]
-    budget_steps = [s for s in steps if s.step_type == "verify_budget"]
-    other_steps  = [s for s in steps if s.step_type not in ("build_day_schedule", "verify_budget")]
+    build_steps = [s for s in steps if s.step_type == "build_day_schedule"]
+    other_steps = [s for s in steps if s.step_type != "build_day_schedule"]
 
     # Ensure fetch_activities is present before build steps
     other_types = {s.step_type for s in other_steps}
@@ -210,15 +211,7 @@ def _validate_and_fix(
         ))
     build_steps.sort(key=lambda s: s.day or 999)
 
-    # Ensure exactly one verify_budget step at the end (skip if already completed)
-    if not budget_steps and "verify_budget" not in completed:
-        budget_steps = [PlanStep(
-            step_id=0,
-            step_type="verify_budget",
-            description="Verify total trip cost against the budget.",
-        )]
-
-    final_steps = other_steps + build_steps + budget_steps
+    final_steps = other_steps + build_steps
     for i, s in enumerate(final_steps, start=1):
         s.step_id = i
 
@@ -248,7 +241,6 @@ def _default_plan(
     add("fetch_weather",    f"Seasonal weather in {destination}")
     for d in range(1, trip_days + 1):
         add("build_day_schedule", f"Day {d}: build schedule", day=d)
-    add("verify_budget", "Verify total trip cost against the budget.")
 
     return ExecutionPlan(
         destination=destination,

@@ -33,7 +33,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from agent.nodes.itinerary.formatter import _budget_section_md, _generate_fallback_markdown
-from agent.nodes.itinerary.step_handlers import _drop_stale_budget
+from agent.nodes.itinerary.step_handlers import _drop_stale_budget, handle_verify_budget
 from agent.state import AgentState
 
 MAX_REPLANS = 3   # must match planner.py
@@ -391,6 +391,17 @@ class ItineraryReplannerNode:
         origin      = state.get("current_city", "")
         destination = state.get("destination_city", "")
 
+        # Pre-compute budget so the Critic can read it without recomputing, and so the
+        # markdown includes a deterministic budget table. Stored under "verify_budget_0".
+        results_with_budget = dict(results)
+        try:
+            budget_result = handle_verify_budget(
+                results, budget, trip_days, destination, origin, mode, state,
+            )
+            results_with_budget["verify_budget_0"] = budget_result
+        except Exception:
+            pass
+
         try:
             summary = _build_summary(
                 results, budget, trip_days,
@@ -416,7 +427,7 @@ class ItineraryReplannerNode:
                         # Remove build_day_schedule from completed_steps so the
                         # Planner re-emits those steps with the corrective hint.
                         results_for_replan = {
-                            k: v for k, v in results.items()
+                            k: v for k, v in results_with_budget.items()
                             if not k.startswith("build_day_schedule")
                             and not k.startswith("verify_budget")
                         }
@@ -462,15 +473,17 @@ class ItineraryReplannerNode:
             content = content.split("```")[1].lstrip("markdown").strip().rstrip("```").strip()
 
         if content:
-            budget_md = _budget_section_md(results, budget, mode)
+            budget_md = _budget_section_md(results_with_budget, budget, mode)
             markdown  = content + ("\n" + budget_md if budget_md else "")
         else:
-            markdown = _generate_fallback_markdown(results, trip_days, budget, mode)
+            markdown = _generate_fallback_markdown(results_with_budget, trip_days, budget, mode)
 
         return {
             "itinerary_plan": {
                 **plan_state,
                 "final_markdown": markdown,
+                # Persist the budget result so the Critic can read it without recomputing.
+                "step_results": results_with_budget,
             },
             "itinerary_feasible": True,
             "replanner_action":   "done",

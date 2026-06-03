@@ -25,7 +25,6 @@ from agent.nodes.itinerary.step_handlers import (
     handle_fetch_activities,
     handle_fetch_weather,
     handle_build_day,
-    handle_verify_budget,
     _wrap_result,
     _minimal_trace,
 )
@@ -78,11 +77,6 @@ class ItineraryExecutorNode:
         elif step.step_type == "build_day_schedule":
             result = handle_build_day(
                 step, results, destination, trip_days, current_plan_keys, mode, state,
-            )
-
-        elif step.step_type == "verify_budget":
-            result = handle_verify_budget(
-                results, budget, trip_days, destination, origin, mode, state,
             )
 
         else:
