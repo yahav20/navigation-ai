@@ -15,9 +15,8 @@ from langgraph.checkpoint.sqlite import SqliteSaver  # noqa: E402
 from langgraph.types import Command  # noqa: E402
 
 import ui  # noqa: E402
-from agent.graph import build_graph  # noqa: E402
-from config.session_name import generate_session_name  # noqa: E402
-from config.setting import CHOSEN_PROVIDER  # noqa: E402
+from agent.core.graph import build_graph  # noqa: E402
+from config.config import generate_session_name, CHOSEN_PROVIDER  # noqa: E402
 from security import MAX_TURNS_PER_SESSION, generate_session_id, log_turn, scan_output, validate_input  # noqa: E402
 
 CHECKPOINT_DB = Path(__file__).resolve().parent.parent / "data" / "checkpoints.db"

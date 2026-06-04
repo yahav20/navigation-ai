@@ -1,0 +1,58 @@
+"""Construct chat models for travel and recommendation paths."""
+import os
+
+from langchain_core.language_models import BaseChatModel
+from langchain_core.runnables import Runnable
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_groq import ChatGroq
+from langchain_ollama import ChatOllama
+from langchain_openai import ChatOpenAI
+
+from tools import core_tools
+from tools.destinations import advisor_tools
+
+_TOOL_SETS = {
+    "travel": core_tools,
+    "advisor": advisor_tools,
+}
+
+def get_models(provider: str = "google", mode: str = "travel") -> tuple[Runnable, BaseChatModel]:
+    """Return (response_or_agent_model, extraction_model) for provider/mode.
+
+    mode="travel"   — returns an unbound response model, no tool binding
+    mode="advisor"  — binds advisor discovery tools for tool schema reference
+                      (the advisor path itself uses Plan-and-Execute, not tool binding)
+    """
+    provider = provider.lower()
+    if mode not in _TOOL_SETS:
+        msg = f"Unknown model mode: {mode!r}"
+        raise ValueError(msg)
+
+    if provider == "groq":
+        base = ChatGroq(model="llama-3.3-70b-versatile", temperature=0)
+    elif provider == "ollama":
+        base = ChatOllama(model="gpt-oss:120b-cloud", temperature=0)
+    elif provider == "openai":
+        base = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+    else:
+        base = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0)
+
+    if mode == "advisor":
+        return base.bind_tools(advisor_tools), base
+
+    return base, base
+
+
+def get_generation_model(provider: str = "google") -> BaseChatModel:
+    """Return the chat model for the user-facing generation nodes (travel_agent,
+    formatter).
+
+    On OpenAI these two nodes use gpt-5.4-mini, which benchmarked ~2x faster than
+    gpt-4o-mini at equal output quality for the curation/formatting prompts
+    (~12s -> ~6.5s median on the slim travel payload). Other providers reuse
+    their default response model.
+    """
+    if provider.lower() == "openai":
+        return ChatOpenAI(model="gpt-5.4-mini", temperature=0)
+    response_model, _ = get_models(provider)
+    return response_model

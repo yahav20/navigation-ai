@@ -10,7 +10,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from tools.tools import tools
+from tools import core_tools, api_tools, find_connecting_flights
+
+tools = core_tools + [find_connecting_flights] + api_tools
 
 
 def verify_tools():
