@@ -54,11 +54,10 @@ from dataclasses import dataclass, field
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 # Adjust these imports according to your actual project structure
-from agent.graph import build_graph
-from config.setting import CHOSEN_PROVIDER
+from agent.core.graph import build_graph
+from config.config import CHOSEN_PROVIDER
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
-from langgraph.types import Command
 from langgraph.types import Command
 
 # ---------------------------------------------------------------------------
@@ -212,7 +211,6 @@ TESTS: list[TestCase] = [
             "Wait, I changed my mind — let's go to Tokyo instead. "
             "Build me a day-by-day itinerary for Tokyo.",
             must_plan_steps=["fetch_activities", "build_day_schedule"],
-            must_plan_steps=["fetch_activities", "build_day_schedule"],
             expected_destination="Tokyo",
             response_must_contain=["Tokyo"],
             response_must_not_contain=["Paris"],
@@ -291,7 +289,6 @@ TESTS: list[TestCase] = [
         TurnSpec(
             "Build me a day-by-day itinerary for 3 days in Atlantis "
             "from Tel Aviv.",
-            must_plan_steps=["fetch_activities"],
             must_plan_steps=["fetch_activities"],
             expect_feasible=False,
             note=(
@@ -373,14 +370,14 @@ TESTS: list[TestCase] = [
         TurnSpec(
             "Build a day-by-day itinerary for 4 days in Paris from "
             "Tel Aviv. Budget: $1200.",
-            must_plan_steps=["fetch_activities"],
+            must_plan_steps=["fetch_activities", "build_day_schedule", "verify_budget"],
             expected_destination="Paris",
             expected_days=4,
             note=(
-                "Budget $1200 for 4 days in Paris may be tight once activity "
-                "and meal costs are added. If budget fails, replanning should "
-                "NOT re-fetch activities — they're already cached. "
-                "Only rebuild days or adjust constraints."
+                "If verify_budget fails, replanning should NOT re-fetch activities "
+                "— they are already cached in step_results. Only rebuild day "
+                "schedules or adjust trip_days. Paris has 20 activities so "
+                "there's plenty to work with across replans."
             ),
         ),
     ]),

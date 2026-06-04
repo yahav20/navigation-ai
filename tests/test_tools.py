@@ -1,10 +1,10 @@
-from tools.tools import (
-    fetch_flights, 
-    fetch_hotels, 
+from tools import (
+    fetch_flights,
+    fetch_hotels,
     calculate_trip_cost,
     fetch_activities,
     get_best_time_to_visit,
-    get_average_weather
+    get_average_weather,
 )
 
 # --- Tests for fetch_flights (Travelpayouts-backed) ---
