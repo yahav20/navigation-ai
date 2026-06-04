@@ -1,15 +1,23 @@
-from tools.tools import (
-    fetch_flights, 
-    fetch_hotels, 
+import os
+
+import pytest
+
+from tools import (
+    fetch_flights,
+    fetch_hotels,
     calculate_trip_cost,
     fetch_activities,
     get_best_time_to_visit,
-    get_average_weather
+    get_average_weather,
+)
+
+_has_flights_key = bool(
+    os.getenv("TRAVELPAYOUTS_API_KEY") or os.getenv("FLIGHTS_API_KEY")
 )
 
 # --- Tests for fetch_flights (Travelpayouts-backed) ---
+@pytest.mark.skipif(not _has_flights_key, reason="TRAVELPAYOUTS_API_KEY not set")
 def test_fetch_flights_valid_route():
-    # Major real-world route — the Travelpayouts feed should always have offers.
     result = fetch_flights.invoke({"origin": "New York", "destination": "London"})
     assert isinstance(result, list)
     assert len(result) > 0
@@ -20,7 +28,6 @@ def test_fetch_flights_valid_route():
 
 
 def test_fetch_flights_unknown_city():
-    # An unresolvable city name has no IATA code, so the tool returns an empty list.
     result = fetch_flights.invoke({"origin": "Atlantis", "destination": "Wakanda"})
     assert isinstance(result, list)
     assert result == []
@@ -37,44 +44,37 @@ def test_fetch_hotels_valid_city():
     assert "amenities" in result[0]
     
 def test_fetch_hotels_no_hotels():
-    # Assuming travel_db.json has no hotels in Hawaii
-    result = fetch_hotels.invoke({"city" : "Hawaii"})
-    assert isinstance(result, list) 
-    assert len(result) == 1
-    assert "message" in result[0]
-    assert "No available hotels" in result[0]["message"]
+    result = fetch_hotels.invoke({"city": "Hawaii"})
+    assert isinstance(result, list)
+    assert len(result) == 0
     
 # --- Tests for calculate_trip_cost ---
 def test_calculate_trip_cost():
     flight_price = 500.0
     hotel_price_per_night = 150.0
-    nights = 5
+    duration_days = 5
     result = calculate_trip_cost.invoke({
         "flight_price": flight_price,
         "hotel_price_per_night": hotel_price_per_night,
-        "nights": nights
+        "duration_days": duration_days,
     })
-    expected_total_cost = (flight_price + (hotel_price_per_night * nights)) * 1.10
-    assert isinstance(result, str)
-    assert f"${expected_total_cost:.2f}" in result  
+    assert isinstance(result, dict)
+    assert result["total_estimate"] == flight_price + hotel_price_per_night * duration_days
+    assert result["breakdown"]["days"] == duration_days
     
 # --- Tests for fetch_activities ---
 def test_fetch_activities_valid_city():
-    # Assuming travel_db.json has activities in Paris
     result = fetch_activities.invoke({"city": "Paris"})
     assert isinstance(result, list)
     assert len(result) > 0
     assert "name" in result[0]
-    assert "category" in result[0]
+    assert "categories" in result[0]
     assert "price" in result[0]
 
 def test_fetch_activities_no_activities():
-    # Assuming travel_db.json has no activities for Atlantis
     result = fetch_activities.invoke({"city": "Atlantis"})
     assert isinstance(result, list)
-    assert len(result) == 1
-    assert "message" in result[0]
-    assert "No available activities" in result[0]["message"]
+    assert len(result) == 0
 
 # --- Tests for get_best_time_to_visit ---
 def test_get_best_time_to_visit_valid_city():
@@ -102,15 +102,13 @@ def test_get_average_weather_valid_data():
     assert result["season"].lower() == "winter"
 
 def test_get_average_weather_invalid_season():
-    # Assuming travel_db.json doesn't have a "Monsoon" season for Paris
     result = get_average_weather.invoke({"city": "Paris", "season": "Monsoon"})
     assert isinstance(result, dict)
     assert "message" in result
-    assert "No weather data found for season" in result["message"]
+    assert "No weather data found" in result["message"]
 
 def test_get_average_weather_invalid_city():
-    # Assuming travel_db.json has no weather data for Atlantis
     result = get_average_weather.invoke({"city": "Atlantis", "season": "Summer"})
     assert isinstance(result, dict)
     assert "message" in result
-    assert "No average weather data found" in result["message"]
+    assert "No weather data found" in result["message"]

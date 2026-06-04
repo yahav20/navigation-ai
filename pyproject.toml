@@ -1,9 +1,21 @@
 [tool.pytest.ini_options]
 pythonpath = ["src"]
+markers = [
+    "unit: pure Python, no LLM or network (fast)",
+    "integration: real LLM call, requires GROQ_API_KEY",
+]
+addopts = "--tb=short"
 
 [tool.ruff.lint]
 select = ["ALL"]
 ignore = ["E501", "ERA001", "D203", "D213", "T201"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "ANN", "D100", "D101", "D102", "D103", "D104", "D401", "INP001", "PLR2004", "FBT001", "FBT002", "COM812", "PT011", "B017", "PLC0415", "RUF100", "C901", "PLR0915", "BLE001", "FBT003", "PERF401"]
+# These two custom runner scripts use sys.path.insert() before first-party imports,
+# which ruff can't reorder without breaking the runtime path setup.
+"tests/test_itinerary.py" = ["E402", "I001", "PTH118", "PTH120"]
+"tests/test_router.py" = ["E402", "I001", "PTH118", "PTH120"]
 
 [tool.ruff.lint.flake8-tidy-imports]
 ban-relative-imports = "all"

@@ -140,6 +140,97 @@ CREATE TABLE transportation (
     FOREIGN KEY (from_city_id) REFERENCES cities (id),
     FOREIGN KEY (to_city_id) REFERENCES cities (id)
 );
+
+CREATE TABLE api_hotels (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    city_id         INTEGER NOT NULL REFERENCES cities(id),
+    api_source      TEXT NOT NULL,
+    place_id        TEXT,
+    tripadvisor_key TEXT,
+    name            TEXT NOT NULL,
+    stars           REAL,
+    rating          REAL,
+    review_count    INTEGER,
+    price_per_night REAL,
+    currency        TEXT DEFAULT 'USD',
+    latitude        REAL,
+    longitude       REAL,
+    address         TEXT,
+    phone           TEXT,
+    website         TEXT,
+    amenities       TEXT,
+    image_urls      TEXT,
+    booking_url     TEXT,
+    last_updated    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_api_hotels_city ON api_hotels(city_id);
+CREATE UNIQUE INDEX idx_api_hotels_place_id ON api_hotels(place_id)        WHERE place_id IS NOT NULL;
+CREATE UNIQUE INDEX idx_api_hotels_ta_key   ON api_hotels(tripadvisor_key) WHERE tripadvisor_key IS NOT NULL;
+
+CREATE TABLE api_attractions (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    city_id          INTEGER NOT NULL REFERENCES cities(id),
+    place_id         TEXT,
+    name             TEXT NOT NULL,
+    rating           REAL,
+    review_count     INTEGER,
+    price            REAL,
+    price_level      INTEGER,
+    latitude         REAL,
+    longitude        REAL,
+    address          TEXT,
+    types            TEXT,
+    categories       TEXT,
+    phone            TEXT,
+    website          TEXT,
+    hours            TEXT,
+    image_urls       TEXT,
+    wiki_title       TEXT,
+    wiki_description TEXT,
+    wiki_url         TEXT,
+    wikidata_id      TEXT,
+    last_updated     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (city_id) REFERENCES cities(id)
+);
+CREATE INDEX idx_api_attractions_city ON api_attractions(city_id);
+CREATE UNIQUE INDEX idx_api_attractions_place_id ON api_attractions(place_id) WHERE place_id IS NOT NULL;
+
+CREATE TABLE api_restaurants (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    city_id      INTEGER NOT NULL REFERENCES cities(id),
+    place_id     TEXT,
+    name         TEXT NOT NULL,
+    rating       REAL,
+    review_count INTEGER,
+    price        REAL,
+    price_level  INTEGER,
+    cuisine      TEXT,
+    latitude     REAL,
+    longitude    REAL,
+    address      TEXT,
+    phone        TEXT,
+    website      TEXT,
+    hours        TEXT,
+    image_urls   TEXT,
+    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (city_id) REFERENCES cities(id)
+);
+CREATE INDEX idx_api_restaurants_city ON api_restaurants(city_id);
+CREATE UNIQUE INDEX idx_api_restaurants_place_id ON api_restaurants(place_id) WHERE place_id IS NOT NULL;
+
+CREATE TABLE api_sync_log (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    city_id       INTEGER REFERENCES cities(id),
+    api_name      TEXT NOT NULL,
+    entity_type   TEXT NOT NULL,
+    status        TEXT NOT NULL,
+    record_count  INTEGER,
+    error_message TEXT,
+    synced_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (city_id) REFERENCES cities(id)
+);
+CREATE INDEX idx_sync_log_city   ON api_sync_log(city_id);
+CREATE INDEX idx_sync_log_synced ON api_sync_log(synced_at DESC);
 """
 
 
@@ -313,6 +404,26 @@ def seed_travel(conn: sqlite3.Connection) -> None:
         ("paris", "Angelina Paris (Rivoli)", json.dumps(["Food", "Cafe", "Dessert"]), 30, 0, 48.8651, 2.3283, 60, "08:00", "19:00", "1,2,3,4,5,6,7", "MORNING", True, False, 4.5),
         ("paris", "Catacombs of Paris", json.dumps(["History", "Unique", "Indoor"]), 29, 10, 48.8338, 2.3324, 90, "09:45", "20:30", "2,3,4,5,6,7", "AFTERNOON", False, True, 4.6),
         ("paris", "Macaron Baking Class", json.dumps(["Activity", "Food", "Class"]), 55, 12, 48.8732, 2.3291, 90, "10:00", "18:00", "1,2,3,4,5,6", "AFTERNOON", True, True, 4.7),
+        
+        # --- Genuine Kosher & Jewish Heritage Activities in Paris ---
+        ("paris", "Le Marais Jewish Quarter Tour", json.dumps(["Culture", "Walking", "Outdoor"]), 25, 0, 48.8575, 2.3588, 120, "10:00", "16:00", "1,2,3,4,5,6,7", "MORNING", False, True, 4.8),
+        ("paris", "Musée d'Art et d'Histoire du Judaïsme", json.dumps(["Culture", "Museum", "Indoor"]), 10, 0, 48.8611, 2.3553, 120, "11:00", "18:00", "2,3,4,5,7", "AFTERNOON", False, False, 4.6),
+        ("paris", "Memorial de la Shoah", json.dumps(["History", "Museum", "Indoor"]), 0, 10, 48.8553, 2.3561, 150, "10:00", "18:00", "1,2,3,4,5,7", "MORNING", False, False, 4.8),
+        ("paris", "Grande Synagogue de Paris", json.dumps(["History", "Culture", "Indoor"]), 0, 0, 48.8756, 2.3403, 60, "09:00", "17:00", "1,2,3,4,5", "MORNING", False, False, 4.7),
+        
+        # Kosher Food (Breakfast / Morning)
+        ("paris", "Korcarz Kosher Bakery", json.dumps(["Food", "Cafe", "Breakfast"]), 15, 0, 48.8572, 2.3592, 45, "07:30", "19:30", "1,2,3,4,5,7", "MORNING", True, False, 4.8),
+        
+        # Kosher Food (Lunch / Casual)
+        ("paris", "Pitzman Kosher Dairy", json.dumps(["Food", "Casual", "Indoor"]), 20, 0, 48.8576, 2.3595, 60, "11:00", "22:00", "1,2,3,4,5,7", "AFTERNOON", True, False, 4.5),
+        
+        # Kosher Food (Dinner / Evening)
+        ("paris", "Kavod French Kosher Restaurant", json.dumps(["Food", "Fine Dining", "Indoor"]), 80, 0, 48.8711, 2.3022, 120, "18:30", "23:00", "1,2,3,4,5,7", "EVENING", True, True, 4.7),
+        ("paris", "Miel et Paprika Kosher", json.dumps(["Food", "Restaurant", "Casual"]), 35, 0, 48.8680, 2.3600, 90, "12:00", "22:30", "1,2,3,4,5,7", "EVENING", True, True, 4.6),
+        
+        # Social / Evening
+        ("paris", "Chabad Champs-Élysées", json.dumps(["Culture", "Social", "Indoor"]), 0, 0, 48.8705, 2.3045, 90, "09:00", "21:00", "1,2,3,4,5,6,7", "EVENING", True, False, 4.9),
+        
 
         ("london", "London Eye", json.dumps(["Sightseeing", "Viewpoint"]), 30, 0, 51.5033, -0.1195, 60, "10:00", "20:30", "1,2,3,4,5,6,7", "SUNSET", False, True, 4.5),
         ("london", "British Museum", json.dumps(["Culture", "Museum", "Indoor"]), 0, 0, 51.5194, -0.1270, 150, "10:00", "17:00", "1,2,3,4,5,6,7", "MORNING", True, False, 4.8),
@@ -384,6 +495,16 @@ def seed_travel(conn: sqlite3.Connection) -> None:
         ("London Eye", ["Wheelchair Accessible", "Air Conditioned"]),
         ("Mount Fuji Day Trip", ["Guided Tour"]),
         ("Rijksmuseum", ["Wheelchair Accessible", "Air Conditioned", "Vegetarian Options"]),        
+        
+        ("Le Marais Jewish Quarter Tour", ["Guided Tour", "Family Friendly", "Kosher"]),
+        ("Musée d'Art et d'Histoire du Judaïsme", ["Wheelchair Accessible", "Air Conditioned", "Kosher"]),
+        ("Memorial de la Shoah", ["Wheelchair Accessible", "Air Conditioned", "Kosher"]),
+        ("Grande Synagogue de Paris", ["Wheelchair Accessible", "Kosher"]),
+        ("Korcarz Kosher Bakery", ["Kosher", "Vegetarian Options", "Family Friendly"]),
+        ("Kavod French Kosher Restaurant", ["Kosher", "Air Conditioned", "Wheelchair Accessible"]),
+        ("Pitzman Kosher Dairy", ["Kosher", "Vegetarian Options", "Family Friendly"]),
+        ("Miel et Paprika Kosher", ["Kosher", "Family Friendly"]),
+        ("Chabad Champs-Élysées", ["Kosher", "Family Friendly", "Wheelchair Accessible"]),
     ]
     mapping_insert_data = []
     for activity_name, feats in activity_features_map:
@@ -509,7 +630,279 @@ def seed_travel(conn: sqlite3.Connection) -> None:
     print(f"  recommended_duration:{len(durations)}")
 
 
-def create_travel_db() -> None:
+_PRICE_LEVEL_TO_USD = {0: 0.0, 1: 15.0, 2: 40.0, 3: 100.0, 4: 250.0}
+
+
+def _sync_xotelo_hotels(conn: sqlite3.Connection, city_key: str, city_id: int, ta_key: str) -> int:
+    from providers.xotelo.hotels_api import xotelo_list_hotels
+
+    try:
+        hotels = xotelo_list_hotels(ta_key, limit=15)
+        count = 0
+        for hotel in hotels:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO api_hotels
+                (city_id, api_source, tripadvisor_key, name, stars, rating, review_count,
+                 price_per_night, currency, latitude, longitude, address)
+                VALUES (?, 'xotelo', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    city_id,
+                    hotel.get("hotel_key"),
+                    hotel["name"],
+                    hotel.get("stars"),
+                    hotel.get("stars"),
+                    hotel.get("review_count"),
+                    hotel.get("price_per_night"),
+                    hotel.get("currency", "USD"),
+                    hotel.get("lat"),
+                    hotel.get("lng"),
+                    hotel.get("address"),
+                ),
+            )
+            count += 1
+        conn.execute(
+            "INSERT INTO api_sync_log (city_id, api_name, entity_type, status, record_count) VALUES (?, 'xotelo', 'hotels', 'success', ?)",
+            (city_id, count),
+        )
+        print(f"    xotelo hotels:       {count}")
+        return count
+    except Exception as e:
+        conn.execute(
+            "INSERT INTO api_sync_log (city_id, api_name, entity_type, status, error_message) VALUES (?, 'xotelo', 'hotels', 'failed', ?)",
+            (city_id, str(e)),
+        )
+        print(f"    xotelo hotels:       FAILED ({e})")
+        return 0
+
+
+def _sync_google_attractions(conn: sqlite3.Connection, city_key: str, city_id: int, lat: float, lng: float) -> int:
+    from providers.google_maps.places_api import search_nearby_places
+    from providers.wikipedia.enrichment import fetch_wiki_summary
+
+    try:
+        attractions = search_nearby_places((lat, lng), "tourist_attraction", limit=20)
+        count = 0
+        for attr in attractions:
+            wiki = fetch_wiki_summary(attr["name"])
+            price_level = attr.get("price_level")
+            price = _PRICE_LEVEL_TO_USD.get(price_level, 0.0) if price_level is not None else 0.0
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO api_attractions
+                (city_id, place_id, name, rating, review_count, price, price_level,
+                 latitude, longitude, address, types,
+                 wiki_title, wiki_description, wiki_url)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    city_id,
+                    attr.get("place_id"),
+                    attr["name"],
+                    attr.get("rating"),
+                    attr.get("review_count"),
+                    price,
+                    price_level,
+                    attr.get("lat"),
+                    attr.get("lng"),
+                    attr.get("formatted_address"),
+                    json.dumps(attr.get("types", [])),
+                    wiki.get("title") if wiki else None,
+                    wiki.get("extract") if wiki else None,
+                    wiki.get("url") if wiki else None,
+                ),
+            )
+            count += 1
+        conn.execute(
+            "INSERT INTO api_sync_log (city_id, api_name, entity_type, status, record_count) VALUES (?, 'google_maps', 'attractions', 'success', ?)",
+            (city_id, count),
+        )
+        print(f"    google attractions:  {count}")
+        return count
+    except Exception as e:
+        conn.execute(
+            "INSERT INTO api_sync_log (city_id, api_name, entity_type, status, error_message) VALUES (?, 'google_maps', 'attractions', 'failed', ?)",
+            (city_id, str(e)),
+        )
+        print(f"    google attractions:  FAILED ({e})")
+        return 0
+
+
+def _sync_google_restaurants(conn: sqlite3.Connection, city_key: str, city_id: int, lat: float, lng: float) -> int:
+    from providers.google_maps.places_api import search_nearby_places
+
+    try:
+        restaurants = search_nearby_places((lat, lng), "restaurant", limit=15)
+        count = 0
+        for rest in restaurants:
+            price_level = rest.get("price_level")
+            price = _PRICE_LEVEL_TO_USD.get(price_level, 0.0) if price_level is not None else 0.0
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO api_restaurants
+                (city_id, place_id, name, rating, review_count, price, price_level,
+                 latitude, longitude, address)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    city_id,
+                    rest.get("place_id"),
+                    rest["name"],
+                    rest.get("rating"),
+                    rest.get("review_count"),
+                    price,
+                    price_level,
+                    rest.get("lat"),
+                    rest.get("lng"),
+                    rest.get("formatted_address"),
+                ),
+            )
+            count += 1
+        conn.execute(
+            "INSERT INTO api_sync_log (city_id, api_name, entity_type, status, record_count) VALUES (?, 'google_maps', 'restaurants', 'success', ?)",
+            (city_id, count),
+        )
+        print(f"    google restaurants:  {count}")
+        return count
+    except Exception as e:
+        conn.execute(
+            "INSERT INTO api_sync_log (city_id, api_name, entity_type, status, error_message) VALUES (?, 'google_maps', 'restaurants', 'failed', ?)",
+            (city_id, str(e)),
+        )
+        print(f"    google restaurants:  FAILED ({e})")
+        return 0
+
+
+_TA_KEY_TO_CITY = {
+    "g293984": ("tel aviv",      "IL"),
+    "g187147": ("paris",         "FR"),
+    "g186338": ("london",        "GB"),
+    "g298184": ("tokyo",         "JP"),
+    "g60763":  ("new york city", "US"),
+    "g187323": ("berlin",        "DE"),
+    "g188590": ("amsterdam",     "NL"),
+}
+
+
+def fix_api_city_ids(conn: sqlite3.Connection) -> None:
+    """Repair city_id in api_hotels by rederiving it from the tripadvisor_key prefix.
+
+    Safe to call multiple times — only updates rows whose city_id is wrong or stale.
+    Also fills NULL price_per_night using a star-rating-based estimate so no hotel
+    is left without a price.
+    """
+    conn.execute(
+        """
+        UPDATE api_hotels
+        SET city_id = (
+            SELECT c.id
+            FROM cities c
+            JOIN countries ON c.country_id = countries.id
+            WHERE (
+                SUBSTR(api_hotels.tripadvisor_key, 1, INSTR(api_hotels.tripadvisor_key || '-', '-') - 1) = 'g293984'
+                AND LOWER(c.name) = 'tel aviv' AND countries.alpha2 = 'IL'
+            ) OR (
+                SUBSTR(api_hotels.tripadvisor_key, 1, INSTR(api_hotels.tripadvisor_key || '-', '-') - 1) = 'g187147'
+                AND LOWER(c.name) = 'paris' AND countries.alpha2 = 'FR'
+            ) OR (
+                SUBSTR(api_hotels.tripadvisor_key, 1, INSTR(api_hotels.tripadvisor_key || '-', '-') - 1) = 'g186338'
+                AND LOWER(c.name) = 'london' AND countries.alpha2 = 'GB'
+            ) OR (
+                SUBSTR(api_hotels.tripadvisor_key, 1, INSTR(api_hotels.tripadvisor_key || '-', '-') - 1) = 'g298184'
+                AND LOWER(c.name) = 'tokyo' AND countries.alpha2 = 'JP'
+            ) OR (
+                SUBSTR(api_hotels.tripadvisor_key, 1, INSTR(api_hotels.tripadvisor_key || '-', '-') - 1) = 'g60763'
+                AND c.name = 'New York City' AND countries.alpha2 = 'US'
+            ) OR (
+                SUBSTR(api_hotels.tripadvisor_key, 1, INSTR(api_hotels.tripadvisor_key || '-', '-') - 1) = 'g187323'
+                AND LOWER(c.name) = 'berlin' AND countries.alpha2 = 'DE'
+            ) OR (
+                SUBSTR(api_hotels.tripadvisor_key, 1, INSTR(api_hotels.tripadvisor_key || '-', '-') - 1) = 'g188590'
+                AND LOWER(c.name) = 'amsterdam' AND countries.alpha2 = 'NL'
+            )
+            ORDER BY (SELECT COUNT(*) FROM hotels h WHERE h.city_id = c.id) DESC
+            LIMIT 1
+        )
+        WHERE tripadvisor_key IS NOT NULL
+        """
+    )
+    # Fill any missing prices with a star-rating-based estimate
+    conn.execute(
+        """
+        UPDATE api_hotels SET price_per_night =
+            CASE
+                WHEN stars >= 4.6 THEN 300.0
+                WHEN stars >= 4.0 THEN 180.0
+                WHEN stars >= 3.5 THEN 120.0
+                ELSE 80.0
+            END
+        WHERE price_per_night IS NULL
+        """
+    )
+
+
+def seed_api(conn: sqlite3.Connection) -> None:
+    """Fetch live API data for all seeded cities and cache to api_* tables."""
+    import sys as _sys
+    _sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+
+    # Load environment variables from .env (project root or parents)
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except ImportError:
+        pass
+
+    gm_key = os.getenv("GOOGLE_MAPS_API_KEY")
+    if not gm_key:
+        print("  WARNING: GOOGLE_MAPS_API_KEY not set — Google attractions/restaurants will be skipped.")
+        print("           Add GOOGLE_MAPS_API_KEY to .env to enable Google sync.")
+
+    from providers.city_metadata import CITY_METADATA
+
+    print("Syncing API data...")
+    for city_key, meta in CITY_METADATA.items():
+        try:
+            city_id = resolve_city(conn, meta["full_name"], meta["alpha2"])
+        except ValueError as e:
+            print(f"  [{city_key}]: {e}, skipping")
+            continue
+        row = conn.execute("SELECT lat, lng FROM cities WHERE id = ?", (city_id,)).fetchone()
+        if not row:
+            print(f"  [{city_key}]: no coordinates, skipping")
+            continue
+        lat, lng = row[0], row[1]
+
+        hotels_exist      = conn.execute("SELECT COUNT(*) FROM api_hotels      WHERE city_id=?", (city_id,)).fetchone()[0] > 0
+        attractions_exist = conn.execute("SELECT COUNT(*) FROM api_attractions WHERE city_id=?", (city_id,)).fetchone()[0] > 0
+        restaurants_exist = conn.execute("SELECT COUNT(*) FROM api_restaurants WHERE city_id=?", (city_id,)).fetchone()[0] > 0
+
+        if hotels_exist and attractions_exist and restaurants_exist:
+            print(f"  [{city_key}]: already synced, skipping")
+            continue
+
+        print(f"  [{city_key}]:")
+        if not hotels_exist:
+            _sync_xotelo_hotels(conn, city_key, city_id, meta["ta_key"])
+        else:
+            print(f"    xotelo hotels:       already synced")
+        if not attractions_exist:
+            _sync_google_attractions(conn, city_key, city_id, lat, lng)
+        else:
+            print(f"    google attractions:  already synced")
+        if not restaurants_exist:
+            _sync_google_restaurants(conn, city_key, city_id, lat, lng)
+        else:
+            print(f"    google restaurants:  already synced")
+
+    # Always repair city_ids and fill missing prices after sync
+    fix_api_city_ids(conn)
+    conn.commit()
+    print("API sync complete.")
+
+
+def create_travel_db(with_api: bool = False) -> None:
     conn = sqlite3.connect(DB_PATH)
     conn.execute("PRAGMA foreign_keys = ON")
     try:
@@ -517,12 +910,24 @@ def create_travel_db() -> None:
         seed_reference(conn)
         seed_travel(conn)
         conn.commit()
+        if with_api:
+            seed_api(conn)
     finally:
         conn.close()
     print(f"Database created at: {DB_PATH}")
 
 
 if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Initialize the travel agency database.")
+    parser.add_argument(
+        "--with-api",
+        action="store_true",
+        help="After seeding fixtures, fetch and cache live data from Xotelo and Google Maps APIs.",
+    )
+    args = parser.parse_args()
+
     if os.path.exists(DB_PATH):
         answer = input(
             f"WARNING: '{DB_PATH}' already exists and will be wiped.\n"
@@ -532,4 +937,4 @@ if __name__ == "__main__":
             print("Aborted. Database was not modified.")
             raise SystemExit(0)
         os.remove(DB_PATH)
-    create_travel_db()
+    create_travel_db(with_api=args.with_api)

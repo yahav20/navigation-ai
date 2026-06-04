@@ -1,0 +1,122 @@
+"""
+schemas.py — Pydantic contracts between Planner → Executor → Replanner.
+Import from here only; never redefine these in other files.
+"""
+from __future__ import annotations
+from typing import Any, Dict, List, Literal, Optional
+from pydantic import BaseModel, ConfigDict, Field
+
+# ---------------------------------------------------------------------------
+# Mode
+# ---------------------------------------------------------------------------
+
+ItineraryMode = Literal["with_travel_data", "standalone"]
+
+# ---------------------------------------------------------------------------
+# Planner output
+# ---------------------------------------------------------------------------
+
+class PlanStep(BaseModel):
+    """A single execution step in the itinerary plan."""
+    model_config = ConfigDict(extra="forbid")
+
+    step_id: int = Field(
+        description="The sequential ID of the step."
+    )
+    step_type: Literal[
+        "fetch_activities",
+        "fetch_weather",
+        "fetch_avg_prices",
+        "fetch_min_prices",
+        "switch_travel_options",
+        "build_day_schedule",
+        "verify_budget",
+    ] = Field(
+        description="The exact type of step to execute."
+    )
+    description: str = Field(
+        description="A short human-readable description of this step."
+    )
+    day: Optional[int] = Field(
+        default=None,
+        description="The specific day number — required ONLY for build_day_schedule steps."
+    )
+
+
+class SuggestedAdjustments(BaseModel):
+    """
+    Constraint relaxations the Planner may suggest when replanning.
+    Supported: trip_days (reduce length) or total_budget (raise cap).
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    trip_days: Optional[int] = Field(
+        default=None,
+        description="Reduce trip to this many days if not enough activities."
+    )
+    total_budget: Optional[float] = Field(
+        default=None,
+        description="Raise budget ceiling to this value if costs are too high."
+    )
+
+
+class ExecutionPlan(BaseModel):
+    """The full execution plan produced by the Planner."""
+    model_config = ConfigDict(extra="forbid")
+
+    destination: str
+    origin: str
+    total_days: int
+    steps: List[PlanStep]
+    retry_count: int = 0
+    suggested_adjustments: Optional[SuggestedAdjustments] = Field(
+        default=None,
+        description=(
+            "Use to relax constraints on replan. "
+            "Set trip_days to reduce length or total_budget to raise the cap."
+        )
+    )
+
+
+# ---------------------------------------------------------------------------
+# Step execution result — stored in itinerary_plan["step_results"]
+# ---------------------------------------------------------------------------
+
+class StepExecutionResult(BaseModel):
+    """Structured result written by the Executor for each completed step."""
+    status: Literal["success", "failed", "fallback_used"] = Field(
+        description="Outcome of the step."
+    )
+    data: Any = Field(
+        default=None,
+        description="Structured data returned by the tool(s). Dict, list, or None."
+    )
+    error: Optional[str] = Field(
+        default=None,
+        description="Human-readable error message if the step failed."
+    )
+    replan_hint: Optional[str] = Field(
+        default=None,
+        description="Actionable advice for the Planner if this step needs replanning."
+    )
+    trace: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Reasoning trace: thought, action, args, observation, reflection."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Day slot — individual time slot in a built day schedule
+# ---------------------------------------------------------------------------
+
+class DaySlot(BaseModel):
+    time: str
+    end_time: str
+    duration_minutes: int
+    slot_type: Literal["activity", "meal", "rest", "transport", "checkin"]
+    name: str
+    description: str = ""
+    estimated_cost: float = 0.0
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+    notes: Optional[str] = None
