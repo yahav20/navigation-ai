@@ -1,8 +1,8 @@
 """Unit tests — pure Python, no LLM, no network. Runs in milliseconds."""
 import pytest
 
-from agent.nodes.itinerary.planner import _completed_step_types
-from agent.nodes.itinerary.schemas import ExecutionPlan, PlanStep
+from agent.itinerary.planner import _completed_step_types
+from agent.itinerary.schemas import ExecutionPlan, PlanStep
 from security import validate_city, validate_input, validate_positive_number
 
 # ---------------------------------------------------------------------------

@@ -26,9 +26,8 @@ warnings.filterwarnings("ignore", category=LangChainPendingDeprecationWarning)
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.checkpoint.sqlite import SqliteSaver
 
-from agent.graph import build_graph
-from config.session_name import generate_session_name
-from config.setting import CHOSEN_PROVIDER
+from agent.core.graph import build_graph
+from config.config import generate_session_name, CHOSEN_PROVIDER
 from security import generate_session_id, scan_output
 
 CHECKPOINT_DB = SRC_DIR.parent / "data" / "checkpoints.db"
