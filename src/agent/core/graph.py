@@ -85,12 +85,12 @@ def build_graph(
     router_node = RouterNode(extraction_model)
 
     #   -Itinerary
-    plan_check_node          = PlanCheckNode()
-    itinerary_planner_node   = ItineraryPlannerNode()
-    itinerary_executor_node  = ItineraryExecutorNode(response_model)
-    itinerary_replanner_node = ItineraryReplannerNode()
-    itinerary_critic_node    = ItineraryCriticNode()
-    itinerary_formatter_node = ItineraryFormatterNode(response_model)
+    plan_check_node           = PlanCheckNode()
+    itinerary_planner_node    = ItineraryPlannerNode(response_model)
+    itinerary_executor_node   = ItineraryExecutorNode(response_model)
+    itinerary_replanner_node  = ItineraryReplannerNode()
+    itinerary_critic_node     = ItineraryCriticNode()
+    itinerary_formatter_node  = ItineraryFormatterNode(response_model)
 
     # 2. Create nodes for the advisor path (uses its own model)
     _, advisor_extraction_model = get_models(provider, mode="advisor")
@@ -116,12 +116,12 @@ def build_graph(
     builder.add_node("summary", summary_node)
 
     # Itinerary nodes
-    builder.add_node("plan_check",        plan_check_node)
-    builder.add_node("itinerary_planner", itinerary_planner_node)
-    builder.add_node("itinerary_executor",   itinerary_executor_node)
-    builder.add_node("itinerary_replanner",  itinerary_replanner_node)
-    builder.add_node("itinerary_critic",     itinerary_critic_node)
-    builder.add_node("itinerary_formatter",  itinerary_formatter_node)
+    builder.add_node("plan_check",          plan_check_node)
+    builder.add_node("itinerary_planner",   itinerary_planner_node)
+    builder.add_node("itinerary_executor",  itinerary_executor_node)
+    builder.add_node("itinerary_replanner", itinerary_replanner_node)
+    builder.add_node("itinerary_critic",    itinerary_critic_node)
+    builder.add_node("itinerary_formatter", itinerary_formatter_node)
 
     # Advisor nodes
     builder.add_node("advisor_planner", advisor_planner_node)
@@ -149,10 +149,11 @@ def build_graph(
         "router",
         after_router,
         {
-            "extract_metadata": "extract_metadata",
-            "adjustments": "adjustments",
-            "advisor_planner": "advisor_planner",
-            "out_of_scope": "out_of_scope",
+            "extract_metadata":  "extract_metadata",
+            "adjustments":       "adjustments",
+            "advisor_planner":   "advisor_planner",
+            "itinerary_planner": "itinerary_planner",
+            "out_of_scope":      "out_of_scope",
             END: END,
         },
     )
@@ -210,7 +211,7 @@ def build_graph(
         }
     )
 
-    builder.add_edge("itinerary_executor", "itinerary_replanner")
+    builder.add_edge("itinerary_executor",  "itinerary_replanner")
 
     builder.add_conditional_edges(
         "itinerary_replanner",

@@ -28,6 +28,8 @@ from agent.itinerary.step_handlers import (
     handle_fetch_weather,
     handle_switch_travel_options,
     handle_build_day,
+    handle_update_day_schedule,
+    handle_apply_global_preference,
     _wrap_result,
     _minimal_trace,
 )
@@ -90,6 +92,25 @@ class ItineraryExecutorNode:
             result = handle_build_day(
                 step, results, destination, trip_days, current_plan_keys, mode, state,
             )
+
+        elif step.step_type == "update_day_schedule":
+            result = handle_update_day_schedule(
+                step, results, destination, trip_days, current_plan_keys, mode, state,
+            )
+            # Alias under build_day_schedule so formatter/replanner/budget code finds it
+            if result.get("status") == "success":
+                day_num = (result.get("data") or {}).get("day")
+                if day_num:
+                    results[f"build_day_schedule_{day_num}"] = result
+
+        elif step.step_type == "apply_global_preference":
+            result = handle_apply_global_preference(step, results, state)
+            # Merge modified day results into the working results dict before committing
+            for k, v in (result.get("data") or {}).get("modified_results", {}).items():
+                results[k] = v
+            # Drop stale budget so the replanner recomputes it with new day costs
+            for k in [k for k in list(results) if k.startswith("verify_budget")]:
+                del results[k]
 
         else:
             result = _wrap_result(

@@ -191,12 +191,63 @@ class TravelPlan(BaseModel):
     lowest_total_estimate: float | None
 
 
+class DayUpdateInstruction(BaseModel):
+    """Structured instruction extracted from a user request to modify their built itinerary."""
+
+    update_type: Literal[
+        "exclude_activity",
+        "replace_activity",
+        "add_activity",
+        "exclude_restaurant",
+        "replace_restaurant",
+        "global_preference",
+    ] = Field(description="The type of change the user is requesting.")
+
+    scope: Literal["single_day", "any_day", "all_days"] = Field(
+        description=(
+            "single_day: user named a specific day. "
+            "any_day: user doesn't care which day. "
+            "all_days: change applies to every day (e.g. 'no breakfast every day')."
+        )
+    )
+
+    day: int | None = Field(
+        default=None,
+        description="Day number (1, 2, 3…) when scope is single_day. Null otherwise.",
+    )
+
+    target_name: str | None = Field(
+        default=None,
+        description="Name of the activity or restaurant to remove / replace. Null if not applicable.",
+    )
+
+    replacement_name: str | None = Field(
+        default=None,
+        description="Explicit name the user wants added in place of the target, or just added. Null if not specified.",
+    )
+
+    preference_hint: str | None = Field(
+        default=None,
+        description="Any extra user context ('I like football', 'something cheaper', 'outdoor').",
+    )
+
+    excluded_slot_types: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Slot types to remove from ALL days. "
+            "Use ['breakfast'] for 'no breakfast', ['meal'] for all meals, etc. "
+            "Only populated for global_preference scope."
+        ),
+    )
+
+
 class IntentClassification(BaseModel):
     """Classify the user's primary intent to route them to the correct agent."""
 
     intent: Literal[
         "new_travel_plan",
         "update_travel_plan",
+        "update_itinerary",
         "advisor",
         "build_itinerary",
         "out_of_scope",
@@ -214,7 +265,12 @@ class IntentClassification(BaseModel):
             "- 'new_travel_plan': ONLY when the user commits to a SPECIFIC destination and wants to CHECK "
             "or BOOK flights, hotels, or costs. (e.g. 'I want to fly to Rome', 'show me hotels in Madrid', "
             "'let\\'s plan a trip to Tokyo'). Do NOT use just because a city is mentioned.\n"
-            "- 'update_travel_plan': Changing parameters (budget, days, destination) of an ALREADY-PLANNED trip.\n"
+            "- 'update_travel_plan': Changing core trip parameters (budget, days, destination, origin) "
+            "of an ALREADY-PLANNED trip.\n"
+            "- 'update_itinerary': Modifying the day-by-day schedule of an ALREADY-BUILT itinerary — "
+            "swapping or removing activities/restaurants, adding a specific place, changing meal preferences "
+            "('I don\\'t want the Eiffel Tower', 'add PSG Museum', 'remove breakfast from all days'). "
+            "Only use when an itinerary has been built and the user is editing its content.\n"
             "- 'build_itinerary': ONLY when user EXPLICITLY requests a day-by-day SCHEDULE. "
             "Trigger phrases: 'build an itinerary', 'plan my days', 'day-by-day schedule', 'replan'. "
             "Questions like 'how should I split my time', 'what should I do in Paris for 3 days', "

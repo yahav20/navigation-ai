@@ -509,6 +509,190 @@ def handle_build_day(
     )
 
 
+def handle_update_day_schedule(
+    step: PlanStep,
+    results: dict,
+    destination: str,
+    trip_days: int,
+    current_plan_keys: set[str],
+    mode: str,
+    state: dict,
+) -> dict:
+    """Rebuild one day with exclusions/replacements from itinerary_update_request."""
+    day_num    = step.day or 1
+    action     = f"update_day_schedule (Day {day_num})"
+    update_req = (state or {}).get("itinerary_update_request") or {}
+    target      = update_req.get("target_name")       # activity/restaurant to exclude
+    replacement = update_req.get("replacement_name")  # explicit replacement (may be None)
+
+    missing = _missing_prerequisites(results)
+    if missing:
+        return _wrap_result(
+            status="failed", data=None,
+            error=f"Day {day_num}: prerequisites missing: {missing}",
+            replan_hint=f"Re-include {missing} before update_day_schedule.",
+            trace=_minimal_trace(action, {"day": day_num}, f"Missing: {missing}", ""),
+        )
+
+    acts_data       = _unwrap_data(results, "fetch_activities")
+    all_activities:  list[dict] = []
+    all_restaurants: list[dict] = []
+    selection:       dict       = {}
+    if isinstance(acts_data, dict):
+        all_activities  = acts_data.get("activities",  [])
+        all_restaurants = acts_data.get("restaurants", [])
+        selection       = acts_data.get("selection",   {})
+
+    # Exclude the target from candidate pools
+    filtered_acts  = [a for a in all_activities  if a.get("name") != target]
+    filtered_rests = [r for r in all_restaurants if r.get("name") != target]
+
+    # Deduplicate against other days (but allow re-use of target slot's day)
+    used           = _used_activities(results, current_plan_keys)
+    used.discard(target or "")
+    available_acts  = [a for a in filtered_acts  if a.get("name") not in used]
+    available_rests = [r for r in filtered_rests if r.get("name") not in used]
+
+    # Build day plan — start from existing selection, remove target, pin replacement
+    day_plan      = selection.get(f"day_{day_num}", {})
+    day_act_names = [n for n in day_plan.get("activities", [])
+                     if n not in used and n != target]
+
+    if replacement:
+        # Prefer exact match, then fuzzy
+        pin = next(
+            (a for a in available_acts if a.get("name", "").lower() == replacement.lower()),
+            next((a for a in available_acts if replacement.lower() in a.get("name", "").lower()), None),
+        )
+        if pin and pin["name"] not in day_act_names:
+            day_act_names.insert(0, pin["name"])
+
+    day_plan_filtered = {**day_plan, "activities": day_act_names}
+    candidates        = resolve_candidates(available_acts, day_plan_filtered, available_rests)
+
+    # Fallback to top-rated available
+    if not candidates:
+        sorted_avail  = sorted(available_acts, key=lambda a: -(a.get("rating") or 0))
+        fallback_plan = {**day_plan, "activities": [a["name"] for a in sorted_avail[:5]]}
+        candidates    = resolve_candidates(available_acts, fallback_plan, available_rests)
+
+    if not candidates:
+        return _wrap_result(
+            status="failed", data=None,
+            error=f"Day {day_num}: no candidates after exclusion.",
+            replan_hint=f"All activities for Day {day_num} used or excluded.",
+            trace=_minimal_trace(action, {"day": day_num}, "No candidates.", ""),
+        )
+
+    weather_cond  = _resolve_weather(results, destination)
+    prefs         = (state or {}).get("user_preferences") or {}
+    blocked_times = list(prefs.get("blocked_times") or [])
+    day_blocked   = [b for b in blocked_times if isinstance(b, dict) and b.get("day") == day_num]
+    rest_blocks   = day_plan.get("recommended_rest_blocks", [])
+
+    cfg = (
+        _build_config_from_travel_plan(state, day_num, trip_days, candidates,
+                                       weather_cond, day_blocked, rest_blocks)
+        if mode == "with_travel_data"
+        else _build_config_standalone(state, day_num, trip_days, candidates,
+                                      weather_cond, day_blocked, rest_blocks)
+    )
+
+    try:
+        slots = DayScheduleBuilder(cfg).build(candidates, day_plan=day_plan_filtered)
+    except Exception as exc:
+        return _wrap_result(
+            status="failed", data=None,
+            error=f"ScheduleEngine error on Day {day_num}: {exc}",
+            replan_hint=str(exc),
+            trace=_minimal_trace(action, {"day": day_num}, str(exc), ""),
+        )
+
+    if not slots:
+        return _wrap_result(
+            status="failed", data=None,
+            error=f"Day {day_num}: no slots produced.",
+            replan_hint="Try a different replacement activity.",
+            trace=_minimal_trace(action, {"day": day_num}, "build() returned [].", ""),
+        )
+
+    day_cost = round(sum(float(s.get("estimated_cost", 0)) for s in slots), 2)
+    theme    = day_plan.get("theme") or f"Day {day_num} — Explore {destination}"
+
+    return _wrap_result(
+        status="success",
+        data={
+            "day":      day_num,
+            "theme":    theme,
+            "area":     day_plan.get("area", ""),
+            "slots":    slots,
+            "day_cost": day_cost,
+            "hotel":    cfg.hotel_name,
+            "hotel_price_per_night": 0.0 if mode == "standalone" else _hotel_price(state),
+        },
+        error=None, replan_hint="",
+        trace=_minimal_trace(action, {"day": day_num, "excluded": target, "added": replacement},
+                             f"Updated Day {day_num}. Cost: ${day_cost}.", ""),
+    )
+
+
+def handle_apply_global_preference(
+    step: PlanStep,
+    results: dict,
+    state: dict,
+) -> dict:
+    """Apply a preference change to ALL built days in-place (no rebuild needed).
+
+    Returns modified day results in data["modified_results"] so the executor
+    can merge them into the results dict before committing.
+    """
+    update_req           = (state or {}).get("itinerary_update_request") or {}
+    excluded_slot_types  = update_req.get("excluded_slot_types", [])
+
+    modified: dict = {}
+    days_modified  = 0
+
+    for key, wrapped in results.items():
+        if not key.startswith("build_day_schedule") or not isinstance(wrapped, dict):
+            continue
+        day_data = wrapped.get("data", {})
+        if not isinstance(day_data, dict):
+            continue
+
+        new_slots  = _filter_slots(day_data.get("slots", []), excluded_slot_types)
+        new_cost   = round(sum(float(s.get("estimated_cost", 0)) for s in new_slots), 2)
+        modified[key] = {**wrapped, "data": {**day_data, "slots": new_slots, "day_cost": new_cost}}
+        days_modified += 1
+
+    return _wrap_result(
+        status="success",
+        data={"days_modified": days_modified, "modified_results": modified},
+        error=None, replan_hint="",
+        trace=_minimal_trace(
+            "apply_global_preference", {},
+            f"Removed {excluded_slot_types} from {days_modified} days.", "",
+        ),
+    )
+
+
+def _filter_slots(slots: list, excluded_slot_types: list) -> list:
+    """Remove slots matching excluded_slot_types; 'breakfast' removes morning meals."""
+    remove_breakfast = "breakfast" in excluded_slot_types
+    out = []
+    for slot in slots:
+        st = slot.get("slot_type", "")
+        if st in excluded_slot_types:
+            continue
+        if remove_breakfast and st == "meal":
+            try:
+                if int(slot.get("time", "12:00").split(":")[0]) < 10:
+                    continue
+            except (ValueError, AttributeError):
+                pass
+        out.append(slot)
+    return out
+
+
 def handle_verify_budget(
     results: dict,
     budget: float,

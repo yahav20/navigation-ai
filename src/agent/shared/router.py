@@ -54,8 +54,12 @@ class RouterNode:
         3. 'build_itinerary': ONLY when user EXPLICITLY asks for a day-by-day schedule.
            ("Build a 3-day itinerary for Rome", "plan my days in Paris", "replan for $700").
            "How should I split my time?" or "how many days per city?" → 'advisor', NOT here.
-        4. 'update_travel_plan': Changing an existing confirmed plan's parameters (budget, dates, destination).
-        5. 'out_of_scope': ONLY for queries with zero travel relevance (coding, math, recipes, sports).
+        4. 'update_travel_plan': Changing an existing confirmed plan's core parameters (budget, dates, destination, origin).
+        5. 'update_itinerary': Editing the day-by-day schedule of an ALREADY-BUILT itinerary — swapping or
+           removing activities/restaurants, adding a specific place, changing meal preferences
+           ("I don't want the Eiffel Tower", "add PSG Museum", "remove breakfast from all days").
+           Only use when an itinerary has already been built.
+        6. 'out_of_scope': ONLY for queries with zero travel relevance (coding, math, recipes, sports).
 
         TRANSITION RULE (critical): If the system is in ACTIVE ADVISOR FLOW and the user
         says something like "plan this trip", "let's go", "book this", "sounds good let's do it",
@@ -100,5 +104,14 @@ class RouterNode:
         # Guardrail 5: out_of_scope cannot be overridden by trip context
         if final_intent == "out_of_scope":
             return {"intent": "out_of_scope"}
+
+        # Guardrail 6: update_itinerary requires a built itinerary; otherwise build a fresh one
+        if final_intent == "update_itinerary":
+            has_itinerary = bool(
+                isinstance(state.get("itinerary_plan"), dict)
+                and state["itinerary_plan"].get("step_results")
+            )
+            if not has_itinerary:
+                final_intent = "build_itinerary"
 
         return {"intent": final_intent}

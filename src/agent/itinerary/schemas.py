@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 # Mode
 # ---------------------------------------------------------------------------
 
-ItineraryMode = Literal["with_travel_data", "standalone"]
+ItineraryMode = Literal["with_travel_data", "standalone", "update"]
 
 # ---------------------------------------------------------------------------
 # Planner output
@@ -31,6 +31,8 @@ class PlanStep(BaseModel):
         "switch_travel_options",
         "build_day_schedule",
         "verify_budget",
+        "update_day_schedule",
+        "apply_global_preference",
     ] = Field(
         description="The exact type of step to execute."
     )

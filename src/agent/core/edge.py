@@ -60,6 +60,8 @@ def after_router(state: AgentState) -> str:
         return "advisor_planner"
     elif intent == "build_itinerary":
         return "extract_metadata"
+    elif intent == "update_itinerary":
+        return "itinerary_planner"
     elif intent == "general_chat":
         return "advisor_planner"
     elif intent == "out_of_scope":

@@ -131,7 +131,7 @@ class ItineraryReplannerNode:
         budget        = state.get("total_budget", 0)
         trip_days     = state.get("trip_days", 3)
 
-        last_step   = plan_steps[current_index - 1] if current_index > 0 else {}
+        last_step   = plan_steps[current_index - 1] if (0 < current_index <= len(plan_steps)) else {}
         step_type   = last_step.get("step_type", "unknown")
         step_id     = last_step.get("step_id", 0)
         last_key    = f"{step_type}_{step_id}"
