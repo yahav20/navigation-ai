@@ -135,12 +135,15 @@ class ItineraryCriticNode:
                 state.get("current_city", ""),
                 mode, state,
             )
+            # Persist so the formatter can read it without recomputing
+            results    = {**results, "verify_budget_0": raw_result}
+            plan_state = {**plan_state, "step_results": results}
 
         # If budget is satisfied and we used min prices → signal min_travel to formatter
         if raw_result.get("status") != "over_budget":
             if use_min:
-                return {"critic_action": "min_travel"}
-            return {"critic_action": "pass"}
+                return {"critic_action": "min_travel", "itinerary_plan": plan_state}
+            return {"critic_action": "pass", "itinerary_plan": plan_state}
 
         data        = raw_result.get("data") or {}
         grand_total = float(data.get("grand_total", 0))

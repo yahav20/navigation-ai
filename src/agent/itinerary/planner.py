@@ -1,23 +1,18 @@
 """
-ItineraryPlannerNode — v4
-=========================
+ItineraryPlannerNode
+====================
 Generates a minimal ordered execution plan for the schedule builder.
+All plan generation is deterministic — no LLM calls.
 
 Two modes (set by PlanCheckNode / edge.py):
   with_travel_data — state["travel_plan"] already has flights + hotel.
-                     Steps include build_day_schedule anchored to real
-                     arrival/departure times.
-  standalone       — no booking data. Steps are the same but build_day_schedule
-                     has no flight anchors.
-
-Budget verification is NOT a plan step — it is computed by the Replanner after
-all day schedules are built and enforced exclusively by the Critic node.
+  standalone       — no booking data. Steps include fetch_avg_prices.
 
 Replan flow:
   On the first call, replan_context is empty → fresh plan.
   On subsequent calls (from Replanner), replan_context contains a JSON blob
-  describing what failed and which steps already succeeded. The Planner emits
-  only the remaining steps.
+  describing what failed and which steps already succeeded. The planner emits
+  only the remaining steps, derived from completed_steps in state/context.
 
 Safety:
   MAX_REPLANS hard-stops the Planner and hands off to the Formatter with an
@@ -28,8 +23,7 @@ from __future__ import annotations
 import json
 from typing import Optional
 
-from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage
 
 from agent.itinerary.schemas import ExecutionPlan, PlanStep
 from agent.core.state import AgentState
@@ -51,76 +45,19 @@ VALID_STEP_TYPES = {
 # Steps that must complete before any build_day_schedule can run
 PREREQUISITE_STEPS = {"fetch_activities"}
 
-# ── System prompt ──────────────────────────────────────────────────────────
-SYSTEM_PROMPT = """
-You are a travel schedule planner. Output a minimal ordered list of execution steps.
-
-STEP TYPES (use exact names):
-  fetch_activities, fetch_weather,
-  fetch_avg_prices (standalone mode only),
-  build_day_schedule (needs day=N)
-
-RULES:
-- fetch_activities MUST come before all build_day_schedule steps.
-- In standalone mode ONLY: include fetch_avg_prices before the build_day_schedule steps.
-- Do NOT include switch_travel_options — it is injected automatically when needed.
-- Do NOT include verify_budget — budget verification is handled automatically after scheduling.
-- NEVER re-emit steps listed in "completed_steps".
-- On replan: emit only remaining steps, skip completed ones.
-- Each build_day_schedule needs its own entry with the correct day number.
-- If replanning due to missing resources, use suggested_adjustments:
-    trip_days (int) to reduce days, or total_budget (float) to raise budget.
-
-Output only the structured JSON. Include a description for every step.
-"""
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _build_user_message(
-    destination: str,
-    origin: str,
-    trip_days: int,
-    budget: float,
-    prefs: dict,
-    mode: str,
-    replan_context: Optional[dict],
-    completed_step_types: list[str],
-    replan_count: int,
-) -> str:
-    parts = [
-        f"Destination: {destination}",
-        f"Origin: {origin}",
-        f"Trip duration: {trip_days} days",
-        f"Budget: ${budget or 'flexible'}",
-        f"Mode: {mode}",
-        f"User preferences: {json.dumps(prefs, ensure_ascii=False)}",
-    ]
-    if completed_step_types:
-        parts.append(
-            f"\nCompleted steps (DO NOT re-emit): {json.dumps(completed_step_types)}"
-        )
-    if replan_context:
-        parts.append(
-            f"\nREPLAN CONTEXT (attempt {replan_count}/{MAX_REPLANS}):\n"
-            + json.dumps(replan_context, ensure_ascii=False, indent=2)
-        )
-    else:
-        parts.append("\nThis is the initial plan — include all necessary steps.")
-    return "\n".join(parts)
-
-
 def _completed_step_types(step_results: dict) -> list[str]:
-    """Return step_types that have a successful (non-error) v3 result cached."""
+    """Return step_types that have a successful result cached."""
     completed: list[str] = []
     for key, val in step_results.items():
         if not isinstance(val, dict):
             continue
         if val.get("status") != "success":
             continue
-        # key format: "{step_type}_{step_id}" — strip trailing _N
         parts = key.rsplit("_", 1)
         step_type = parts[0] if len(parts) == 2 and parts[1].isdigit() else key
         if step_type and step_type not in completed:
@@ -143,7 +80,7 @@ def _completed_days(step_results: dict) -> set[int]:
 
 
 def _parse_replan_context(raw: str) -> Optional[dict]:
-    """Parse JSON replan context written by the Replanner. Falls back gracefully."""
+    """Parse JSON replan context written by the Replanner."""
     if not raw:
         return None
     try:
@@ -153,10 +90,10 @@ def _parse_replan_context(raw: str) -> Optional[dict]:
     except (json.JSONDecodeError, TypeError):
         pass
     return {
-        "error_code": "unknown",
-        "error_message": raw,
-        "failed_step": None,
-        "replan_hint": raw,
+        "error_code":      "unknown",
+        "error_message":   raw,
+        "failed_step":     None,
+        "replan_hint":     raw,
         "completed_steps": [],
     }
 
@@ -174,15 +111,14 @@ def _validate_and_fix(
     """Enforce hard ordering constraints and fill missing day steps."""
     steps = plan.steps
 
-    # Strip any verify_budget steps the LLM may have emitted — budget is handled by the Critic.
+    # Strip any verify_budget steps — budget is handled by the Critic
     steps = [s for s in steps if s.step_type != "verify_budget"]
 
-    # Strip price-fetch steps if not standalone (they're standalone-only)
+    # Strip price-fetch steps if not standalone
     if mode != "standalone":
         steps = [s for s in steps if s.step_type not in ("fetch_avg_prices", "fetch_min_prices")]
 
-    # Strip switch_travel_options unless explicitly requested — prevents the LLM from
-    # adding it prematurely before cheaper-activity replans have been attempted.
+    # Strip switch_travel_options unless explicitly requested
     if not need_switch_travel:
         steps = [s for s in steps if s.step_type != "switch_travel_options"]
 
@@ -211,7 +147,7 @@ def _validate_and_fix(
             description=f"Fetch and select activities in {destination}",
         ))
 
-    # In standalone mode: inject fetch_avg_prices and fetch_min_prices if absent
+    # In standalone mode: inject fetch_avg_prices / fetch_min_prices if absent
     if mode == "standalone":
         if "fetch_avg_prices" not in other_types and "fetch_avg_prices" not in completed:
             other_steps.append(PlanStep(
@@ -256,12 +192,11 @@ def _validate_and_fix(
     for i, s in enumerate(final_steps, start=1):
         s.step_id = i
 
-    # Override LLM-generated descriptions with canonical ones so the log is accurate
     _CANONICAL_DESC: dict[str, str] = {
-        "fetch_activities":     f"Fetch and select activities in {destination}",
-        "fetch_weather":        f"Seasonal weather conditions for {destination}",
-        "fetch_avg_prices":     f"Fetch average flight + hotel prices for {destination}",
-        "fetch_min_prices":     f"Fetch minimum available flight + hotel prices for {destination}",
+        "fetch_activities":      f"Fetch and select activities in {destination}",
+        "fetch_weather":         f"Seasonal weather conditions for {destination}",
+        "fetch_avg_prices":      f"Fetch average flight + hotel prices for {destination}",
+        "fetch_min_prices":      f"Fetch minimum available flight + hotel prices for {destination}",
         "switch_travel_options": "Switch to cheapest available flight and hotel options",
     }
     for s in final_steps:
@@ -282,7 +217,7 @@ def _default_plan(
     need_min_prices: bool = False,
     need_switch_travel: bool = False,
 ) -> ExecutionPlan:
-    """Minimal viable plan — only includes steps not already completed."""
+    """Deterministic plan — only includes steps not already completed."""
     steps: list[PlanStep] = []
     sid = 1
 
@@ -318,21 +253,17 @@ def _default_plan(
 # ---------------------------------------------------------------------------
 
 class ItineraryPlannerNode:
-    def __init__(self, llm: BaseChatModel) -> None:
-        self.llm = llm.with_structured_output(ExecutionPlan, method="function_calling")
-
     def __call__(self, state: AgentState) -> dict:
         destination = state.get("destination_city", "")
         origin      = state.get("current_city", "")
         trip_days   = state.get("trip_days", 3)
         budget      = state.get("total_budget", 0)
-        prefs       = state.get("user_preferences", {})
         mode        = state.get("itinerary_mode", "standalone")
 
-        prev_plan       = state.get("itinerary_plan") or {}
-        replan_count    = prev_plan.get("replan_count", 0)
-        step_results    = prev_plan.get("step_results", {})
-        replan_raw      = prev_plan.get("replan_context", "")
+        prev_plan          = state.get("itinerary_plan") or {}
+        replan_count       = prev_plan.get("replan_count", 0)
+        step_results       = prev_plan.get("step_results", {})
+        replan_raw         = prev_plan.get("replan_context", "")
         need_min_prices    = bool(state.get("use_min_prices_for_budget"))
         need_switch_travel = bool(state.get("switch_travel_triggered")) and mode == "with_travel_data"
 
@@ -342,7 +273,7 @@ class ItineraryPlannerNode:
         if replan_count >= MAX_REPLANS:
             reason = replan_raw or "max_replans_exceeded"
             return {
-                "itinerary_feasible": False,
+                "itinerary_feasible":       False,
                 "itinerary_fallback_reason": reason,
                 "messages": [AIMessage(
                     content=(
@@ -363,7 +294,7 @@ class ItineraryPlannerNode:
                 if s not in completed:
                     completed.append(s)
 
-        # ── Log header ────────────────────────────────────────────────────
+        # ── Log header ─────────────────────────────────────────────────────
         if is_replan:
             reason_msg  = (replan_context or {}).get("error_message", replan_raw)
             failed_step = (replan_context or {}).get("failed_step", "unknown")
@@ -379,31 +310,16 @@ class ItineraryPlannerNode:
                 f"budget `${budget}` · mode `{mode}`\n"
             )
 
-        # ── LLM call ──────────────────────────────────────────────────────
-        user_msg = _build_user_message(
-            destination=destination,
-            origin=origin,
-            trip_days=trip_days,
-            budget=budget,
-            prefs=prefs,
-            mode=mode,
-            replan_context=replan_context,
-            completed_step_types=completed,
-            replan_count=replan_count,
-        )
-        try:
-            plan: ExecutionPlan = self.llm.invoke([
-                SystemMessage(content=SYSTEM_PROMPT),
-                HumanMessage(content=user_msg),
-            ])
-        except Exception as e:
-            plan_md += f"\n⚠️ LLM failed (`{e}`) — using default plan\n"
-            plan = _default_plan(destination, origin, trip_days, replan_count, completed, mode, need_min_prices, need_switch_travel)
-
-        # ── Validate & fix ─────────────────────────────────────────────────
-        # Always use trip_days from state — the critic owns any day/budget adjustments.
+        # ── Deterministic plan generation ──────────────────────────────────
         comp_days = _completed_days(step_results)
-        plan = _validate_and_fix(plan, completed, trip_days, destination, comp_days, mode, need_min_prices, need_switch_travel)
+        plan = _default_plan(
+            destination, origin, trip_days, replan_count, completed,
+            mode, need_min_prices, need_switch_travel,
+        )
+        plan = _validate_and_fix(
+            plan, completed, trip_days, destination, comp_days,
+            mode, need_min_prices, need_switch_travel,
+        )
 
         plan_md += "\n**Execution Plan:**\n"
         for step in plan.steps:
@@ -419,22 +335,16 @@ class ItineraryPlannerNode:
                 + ", ".join(f"`{s}`" for s in completed) + "\n"
             )
 
-        # trip_days and total_budget adjustments are managed by ItineraryCriticNode;
-        # the planner never modifies these state fields directly.
-        state_updates: dict = {}
-
-        result = {
+        return {
             "current_step_index": 0,
             "itinerary_plan": {
-                "execution_plan": plan.model_dump(),
-                "step_results":   step_results,
-                "replan_count":   replan_count + 1,
-                "replan_context": "",          # cleared after consumption
+                "execution_plan":    plan.model_dump(),
+                "step_results":      step_results,
+                "replan_count":      replan_count + 1,
+                "replan_context":    "",
                 "recovery_attempts": prev_plan.get("recovery_attempts", 0),
             },
-            "itinerary_feasible": True,
+            "itinerary_feasible":       True,
             "itinerary_fallback_reason": None,
             "messages": [AIMessage(content=plan_md.strip(), name="planner_log")],
         }
-        result.update(state_updates)
-        return result
