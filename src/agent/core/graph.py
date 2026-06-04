@@ -268,6 +268,6 @@ def make_graph() -> CompiledStateGraph:
     custom saver here would be ignored or conflict. Use ``build_graph`` for the
     CLI and tests instead.
     """
-    from config.setting import CHOSEN_PROVIDER
+    from config.config import CHOSEN_PROVIDER
 
     return _assemble_builder(CHOSEN_PROVIDER).compile()

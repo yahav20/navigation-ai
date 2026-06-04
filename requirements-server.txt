@@ -7,7 +7,7 @@
 # main env (tavenv) stay on protobuf 5.x so the Gemini provider is unaffected.
 #
 # Setup (plain venv + pip; pip may print a harmless protobuf conflict warning):
-#   python3 -m venv .lgenv
+#   python3.12 -m venv .lgenv
 #   .lgenv/bin/pip install -r requirements-server.txt
 #   .lgenv/bin/langgraph dev --allow-blocking    # serves http://127.0.0.1:2024
 #

@@ -88,7 +88,7 @@ except Exception as e:
 ## Web UI — `atlas-web`
 
 The graph is exposed as a LangGraph server via `langgraph.json` (graph id `agent`,
-factory `src/agent/graph.py:make_graph`). The web frontend lives in **`atlas-web/`** — a
+factory `src/agent/core/graph.py:make_graph`). The web frontend lives in **`atlas-web/`** — a
 vendored copy of [agent-chat-ui](https://github.com/langchain-ai/agent-chat-ui) checked
 into this repo and pre-configured (via `atlas-web/.env`) to talk to the local server.
 
@@ -99,7 +99,7 @@ The dev server needs `langgraph-cli`, whose backend (`langgraph-api`) is best ke
 `protobuf>=6` and clash with the Gemini SDK (`protobuf<6`).
 
 ```bash
-python3 -m venv .lgenv
+python3.12 -m venv .lgenv
 .lgenv/bin/pip install -r requirements-server.txt
 .lgenv/bin/langgraph dev --allow-blocking          # http://127.0.0.1:2024
 ```
