@@ -80,7 +80,7 @@ def build_graph(
     flight_search_node = FlightSearchNode()
     travel_agent_node = TravelAgentNode(generation_model)
     summary_node = SummaryNode(extraction_model)
-    formatter = FormatterNode(generation_model)
+    formatter = FormatterNode()
     alternative_destination_node = AlternativeDestinationNode(extraction_model)
     formatter_alternative = FormatterAlternativeNode(extraction_model)
     router_node = RouterNode(extraction_model)

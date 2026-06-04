@@ -411,8 +411,6 @@ def build_travel_prompt_payload(state: AgentState) -> dict:
     restaurants: list[dict] = []
 
     if destination:
-        # Hotels: use "api" approach (reads from api_hotels cache / Xotelo live).
-        # Fall back to local fixtures only when the API returns nothing.
         _api_hotels = _valid_items(data_provider.fetch_hotels(destination, approach="api"))
         if _api_hotels:
             hotels = _apply_hotel_preferences(_api_hotels, preferences)
@@ -422,10 +420,6 @@ def build_travel_prompt_payload(state: AgentState) -> dict:
                 preferences,
             )
 
-        # Activities: use "api" approach (reads from api_attractions cache / Google Maps live).
-        # Fall back to local fixtures only when the API returns nothing.
-        # Exclude lodging entries — Google Maps sometimes returns hotels as tourist attractions,
-        # which confuses the LLM into treating them as activities with price=0.
         _api_activities = [
             a for a in _valid_items(data_provider.fetch_activities(destination, approach="api"))
             if not _is_lodging(a)
@@ -443,6 +437,7 @@ def build_travel_prompt_payload(state: AgentState) -> dict:
 
     budget = state.get("total_budget")
     budget_value = budget if isinstance(budget, (int, float)) else None
+
 
     # Build costs using all candidate hotels (before budget filter)
     costs = _build_costs(

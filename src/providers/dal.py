@@ -288,8 +288,13 @@ class HybridDAL:
 
         if max_price is not None:
             # Keep hotels with no price (can't prove unaffordable) or within budget
-            merged = [h for h in merged if h.get("price_per_night") is None
-                      or h["price_per_night"] <= max_price]
+            def _price(h):
+                p = h.get("price_per_night")
+                try:
+                    return float(p) if p is not None else None
+                except (TypeError, ValueError):
+                    return None
+            merged = [h for h in merged if _price(h) is None or _price(h) <= max_price]
 
         return merged
 

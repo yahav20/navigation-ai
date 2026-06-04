@@ -35,7 +35,11 @@ def get_models(provider: str = "google", mode: str = "travel") -> tuple[Runnable
     elif provider == "openai":
         base = ChatOpenAI(model="gpt-4o-mini", temperature=0)
     else:
-        base = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0)
+        base = ChatGoogleGenerativeAI(
+            model="gemini-2.5-flash",
+            temperature=0,
+            thinking_budget=0,
+        )
 
     if mode == "advisor":
         return base.bind_tools(advisor_tools), base
