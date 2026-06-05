@@ -81,7 +81,12 @@ Return is_travel_related=False ONLY when the question has zero travel connection
 
 def _is_travel_related(extraction_model: BaseChatModel, question: str) -> bool:
     """Return False only when the question is clearly unrelated to travel."""
-    result: _TravelRelevance = extraction_model.with_structured_output(_TravelRelevance).invoke([
+    # silent(): keep this classifier's structured-output tokens off the chat
+    # stream, otherwise `{"is_travel_related": ...}` flashes in the UI before the
+    # real answer (matches the other silenced calls in this file).
+    result: _TravelRelevance = silent(
+        extraction_model.with_structured_output(_TravelRelevance)
+    ).invoke([
         {"role": "system", "content": _TRAVEL_RELEVANCE_PROMPT},
         {"role": "user", "content": question},
     ])
