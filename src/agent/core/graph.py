@@ -76,7 +76,8 @@ def _assemble_builder(provider: str = "google") -> StateGraph:
     alternative_destination_node = AlternativeDestinationNode(extraction_model)
     formatter_alternative = FormatterAlternativeNode(extraction_model)
     router_node = RouterNode(extraction_model)
-    save_plan_prompt_node = SavePlanPromptNode()
+    # save_plan_prompt HITL disabled for now — not wired into the graph below.
+    # save_plan_prompt_node = SavePlanPromptNode()
 
     #   -Itinerary
     plan_check_node          = PlanCheckNode()
@@ -105,7 +106,8 @@ def _assemble_builder(provider: str = "google") -> StateGraph:
     builder.add_node("flight_search", flight_search_node)
     builder.add_node("travel_agent", travel_agent_node)
     builder.add_node("formatter", formatter)
-    builder.add_node("save_plan_prompt", save_plan_prompt_node)
+    # save_plan_prompt HITL disabled for now (see edges below); node not registered.
+    # builder.add_node("save_plan_prompt", save_plan_prompt_node)
     builder.add_node("alternative_destination", alternative_destination_node)
     builder.add_node("formatter_alternative", formatter_alternative)
     builder.add_node("summary", summary_node)
@@ -183,8 +185,9 @@ def _assemble_builder(provider: str = "google") -> StateGraph:
     )
     builder.add_edge("alternative_destination", "formatter_alternative")
     builder.add_edge("formatter_alternative", "summary")
-    builder.add_edge("formatter", "save_plan_prompt")
-    builder.add_edge("save_plan_prompt", "summary")
+    # save_plan_prompt HITL disabled for now — formatter goes straight to summary.
+    # To re-enable, restore: formatter -> save_plan_prompt -> summary.
+    builder.add_edge("formatter", "summary")
 
     # -----   -Itinerary (Plan & Execute + Replanner) -----
     builder.add_conditional_edges(

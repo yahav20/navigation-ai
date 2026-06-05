@@ -6,7 +6,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeKatex from "rehype-katex";
 import remarkMath from "remark-math";
-import { FC, memo, useState } from "react";
+import { FC, memo, useMemo, useState } from "react";
 import { CheckIcon, CopyIcon } from "lucide-react";
 import { SyntaxHighlighter } from "@/components/thread/syntax-highlighter";
 
@@ -243,16 +243,63 @@ const defaultComponents: any = {
   },
 };
 
+// While streaming, the full markdown string changes on every token. Re-running
+// the react-markdown pipeline (remark-gfm/math + rehype-katex + syntax
+// highlighting) over the WHOLE document per token is ~O(n²) and freezes the main
+// thread for seconds on long messages — so it "starts streaming then gets stuck".
+//
+// Fix: split the text into top-level blocks and memoize each one. A new token
+// only mutates the LAST block, so only that block re-parses; every completed
+// block keeps identical props and is skipped by React.memo. This is the
+// block-memoization approach used by Vercel's ai-chatbot / Streamdown.
+function splitIntoBlocks(markdown: string): string[] {
+  const lines = markdown.split("\n");
+  const blocks: string[] = [];
+  let current: string[] = [];
+  let inFence = false;
+
+  for (const line of lines) {
+    const trimmed = line.trimStart();
+    // Toggle on code-fence boundaries so we never split inside a ``` block.
+    if (trimmed.startsWith("```") || trimmed.startsWith("~~~")) {
+      inFence = !inFence;
+    }
+    if (line.trim() === "" && !inFence) {
+      if (current.length) {
+        blocks.push(current.join("\n"));
+        current = [];
+      }
+    } else {
+      current.push(line);
+    }
+  }
+  if (current.length) blocks.push(current.join("\n"));
+  return blocks;
+}
+
+const MarkdownBlock = memo(function MarkdownBlock({
+  content,
+}: {
+  content: string;
+}) {
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm, remarkMath]}
+      rehypePlugins={[rehypeKatex]}
+      components={defaultComponents}
+    >
+      {content}
+    </ReactMarkdown>
+  );
+});
+
 const MarkdownTextImpl: FC<{ children: string }> = ({ children }) => {
+  const blocks = useMemo(() => splitIntoBlocks(children), [children]);
   return (
     <div className="markdown-content">
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={[rehypeKatex]}
-        components={defaultComponents}
-      >
-        {children}
-      </ReactMarkdown>
+      {blocks.map((block, i) => (
+        <MarkdownBlock key={i} content={block} />
+      ))}
     </div>
   );
 };
