@@ -26,6 +26,9 @@ class AgentState(TypedDict):
     enrichment_asked_fields: list  # field keys already requested from the user
     budget_optional: bool          # True when user explicitly declined to provide a budget
     trip_days: int                 # number of trip days; defaults to 3 if user skips after being asked
+    num_adults: NotRequired[int]   # travelling adults; defaults to 1 if user skips after being asked
+    num_children: NotRequired[int] # travelling children; defaults to 0
+    num_rooms: NotRequired[int]    # hotel rooms; auto-derived from group size unless the user sets it explicitly
     summary: str                   # rolling conversation summary maintained by summary_node
     last_summarized_index: NotRequired[int]  # watermark: count of messages already folded into `summary`
     alternative_destinations: list # populated when fetch_flights returns no results for the route

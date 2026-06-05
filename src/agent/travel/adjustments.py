@@ -4,6 +4,7 @@ from langchain_core.language_models import BaseChatModel
 from agent.core.llm import silent
 from agent.core.models import TravelAdjustments
 from agent.core.state import AgentState
+from agent.shared.travelers import apply_traveler_updates
 
 
 class AdjustmentsNode:
@@ -32,10 +33,17 @@ class AdjustmentsNode:
         - Destination: {state.get("destination_city", "None")}
         - Budget: {state.get("total_budget", "None")}
         - Trip Days: {state.get("trip_days", "None")}
+        - Adults: {state.get("num_adults", "None")}
+        - Children: {state.get("num_children", "None")}
+        - Hotel Rooms: {state.get("num_rooms", "None")}
 
         User's latest message: "{last_msg.content}"
 
         Is the user explicitly asking to adjust any of these parameters?
+        For travellers/rooms return ABSOLUTE counts (resolve "2 more adults"
+        against the current value). Set new_num_rooms only for an explicit room
+        TOTAL and rooms_delta for add/remove-a-room phrasing. Never calculate
+        rooms from the number of people.
         """
 
         adjustment: TravelAdjustments = self.extraction_model.invoke(prompt)
@@ -63,8 +71,22 @@ class AdjustmentsNode:
             updates["trip_days"] = adjustment.new_trip_days
             summary_parts.append(f"Trip days changed to {adjustment.new_trip_days}")
 
+        # Travellers / rooms are isolated: they update the new group-size fields
+        # but must NOT trigger the re-search side effects below (no summary
+        # overwrite, no flight/plan resets). A room-only edit changes rooms and
+        # nothing else; a people change also auto-recomputes rooms.
+        traveler_updates = apply_traveler_updates(
+            state,
+            new_adults=adjustment.new_num_adults,
+            new_children=adjustment.new_num_children,
+            new_rooms_abs=adjustment.new_num_rooms,
+            rooms_delta=adjustment.rooms_delta,
+        )
+
         if not updates:
-            return {}
+            # No trip-parameter change to re-search for; return any traveler
+            # updates on their own so nothing else is disturbed.
+            return traveler_updates
 
         # 1. Overwrite summary to force the agent to search again
         #
@@ -87,5 +109,8 @@ class AdjustmentsNode:
         updates["has_flights"] = False
         updates["travel_plan"] = {}
         updates["itinerary_plan"] = {}
+
+        # Fold in any traveller/room changes made in the same message.
+        updates.update(traveler_updates)
 
         return updates
