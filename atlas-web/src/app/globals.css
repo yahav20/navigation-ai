@@ -2,6 +2,9 @@
 
 @plugin "tailwindcss-animate";
 
+/* Generate Tailwind utility classes used by Streamdown's components. */
+@source "../../node_modules/streamdown/dist/*.js";
+
 @custom-variant dark (&:is(.dark *));
 
 /* ============================================================

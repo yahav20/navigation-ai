@@ -2,18 +2,14 @@
 
 import "./markdown-styles.css";
 
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import rehypeKatex from "rehype-katex";
-import remarkMath from "remark-math";
-import { FC, memo, useMemo, useState } from "react";
+import { Streamdown } from "streamdown";
+import "streamdown/styles.css";
+import { FC, memo, useState } from "react";
 import { CheckIcon, CopyIcon } from "lucide-react";
 import { SyntaxHighlighter } from "@/components/thread/syntax-highlighter";
 
 import { TooltipIconButton } from "@/components/thread/tooltip-icon-button";
 import { cn } from "@/lib/utils";
-
-import "katex/dist/katex.min.css";
 
 interface CodeHeaderProps {
   language?: string;
@@ -243,63 +239,25 @@ const defaultComponents: any = {
   },
 };
 
-// While streaming, the full markdown string changes on every token. Re-running
-// the react-markdown pipeline (remark-gfm/math + rehype-katex + syntax
-// highlighting) over the WHOLE document per token is ~O(n²) and freezes the main
-// thread for seconds on long messages — so it "starts streaming then gets stuck".
+// Streamdown is Vercel's drop-in react-markdown replacement built for AI
+// streaming: it splits the message into blocks and memoizes each one (so a new
+// token only re-renders the LAST block — no O(n²) full-document re-parse / freeze)
+// and gracefully closes incomplete markdown mid-stream (no flashing of broken
+// **bold** or half-open ``` fences).
 //
-// Fix: split the text into top-level blocks and memoize each one. A new token
-// only mutates the LAST block, so only that block re-parses; every completed
-// block keeps identical props and is skipped by React.memo. This is the
-// block-memoization approach used by Vercel's ai-chatbot / Streamdown.
-function splitIntoBlocks(markdown: string): string[] {
-  const lines = markdown.split("\n");
-  const blocks: string[] = [];
-  let current: string[] = [];
-  let inFence = false;
-
-  for (const line of lines) {
-    const trimmed = line.trimStart();
-    // Toggle on code-fence boundaries so we never split inside a ``` block.
-    if (trimmed.startsWith("```") || trimmed.startsWith("~~~")) {
-      inFence = !inFence;
-    }
-    if (line.trim() === "" && !inFence) {
-      if (current.length) {
-        blocks.push(current.join("\n"));
-        current = [];
-      }
-    } else {
-      current.push(line);
-    }
-  }
-  if (current.length) blocks.push(current.join("\n"));
-  return blocks;
-}
-
-const MarkdownBlock = memo(function MarkdownBlock({
-  content,
-}: {
-  content: string;
-}) {
-  return (
-    <ReactMarkdown
-      remarkPlugins={[remarkGfm, remarkMath]}
-      rehypePlugins={[rehypeKatex]}
-      components={defaultComponents}
-    >
-      {content}
-    </ReactMarkdown>
-  );
-});
-
+// Math is an opt-in plugin — we deliberately omit it so prices like "$5000" are
+// NOT parsed as KaTeX math. GFM is applied by default (tables, strikethrough).
+// Our existing element styling is preserved via the `components` map.
 const MarkdownTextImpl: FC<{ children: string }> = ({ children }) => {
-  const blocks = useMemo(() => splitIntoBlocks(children), [children]);
   return (
     <div className="markdown-content">
-      {blocks.map((block, i) => (
-        <MarkdownBlock key={i} content={block} />
-      ))}
+      <Streamdown
+        components={defaultComponents}
+        parseIncompleteMarkdown
+        controls={false}
+      >
+        {children}
+      </Streamdown>
     </div>
   );
 };
