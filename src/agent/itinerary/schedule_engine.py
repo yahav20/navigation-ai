@@ -368,7 +368,11 @@ class DayScheduleBuilder:
         if cfg.is_first_day and cfg.arrival_time:
             cursor, location = self._arrival_sequence(cfg, blocked)
         else:
-            cursor = self._insert_breakfast(cfg, cursor, breakfast_name=day_plan.get("breakfast_place"))
+            breakfast_name = (
+                day_plan.get("breakfast_place")
+                or day_plan.get("coffee_place")
+            )
+            cursor = self._insert_breakfast(cfg, cursor, breakfast_name=breakfast_name)
             self._last_food_time = cursor
 
         # ── Split candidates into sightseeing vs meal venues ─────────────────
@@ -398,12 +402,14 @@ class DayScheduleBuilder:
                 cursor, location = self._insert_pinned_meal(
                     pinned_coffee, "coffee", meal_idx,
                     cursor, departure_anchor, location, blocked)
+                meal_cands = [c for c in meal_cands if c.name != pinned_coffee]
 
             # — Pinned lunch (12:00–14:30 window) —
             if not self._had_lunch and pinned_lunch and 12 <= cursor.hour < 15:
                 cursor, location = self._insert_pinned_meal(
                     pinned_lunch, "lunch", meal_idx,
                     cursor, departure_anchor, location, blocked)
+                meal_cands = [c for c in meal_cands if c.name != pinned_lunch]
 
             # — Generic hunger check —
             if self._is_hungry(cursor):
@@ -413,18 +419,22 @@ class DayScheduleBuilder:
                 if cursor >= departure_anchor:
                     break
 
-            # — Legacy rest: once per day around 13-14 if no LLM rest given —
-            if not self._had_rest and not pending_rests and 13 <= cursor.hour <= 14:
+            # — Legacy rest: once per day around 14-16 if no LLM rest given —
+            if not self._had_rest and not pending_rests and 14 <= cursor.hour <= 16:
                 cursor = self._inject_rest(cursor, "Afternoon rest — recharge")
                 if cursor >= departure_anchor:
                     break
 
             # — Compute transit to activity —
-            act_pt             = GeoPoint(act.lat, act.lng, act.name)
+            act_pt              = GeoPoint(act.lat, act.lng, act.name)
             mode, t_min, t_cost = transit_plan(location, act_pt)
-            act_start           = cursor + timedelta(minutes=t_min)
 
-            # Respect opening time
+            # FIX: separate transit_end from act_start so the transit slot
+            # only reflects actual travel time, not waiting for opening.
+            transit_end = cursor + timedelta(minutes=t_min)
+            act_start   = transit_end
+
+            # Respect opening time (silent wait — not shown as "transit")
             opening = _pt(self._date, act.opening_time)
             if act_start < opening:
                 act_start = opening
@@ -448,15 +458,18 @@ class DayScheduleBuilder:
                 free = _next_free(cursor, t_min + act.duration_minutes, blocked, departure_anchor)
                 if free is None:
                     continue
-                act_start = free + timedelta(minutes=t_min)
-                act_end   = act_start + timedelta(minutes=act.duration_minutes)
+                transit_end = free + timedelta(minutes=t_min)
+                act_start   = transit_end
+                if act_start < opening:
+                    act_start = opening
+                act_end = act_start + timedelta(minutes=act.duration_minutes)
                 if act_end > departure_anchor or act_end > closing:
                     continue
 
-            # — Insert transit slot —
+            # — Insert transit slot (actual travel time only) —
             if t_min > 0:
                 self._push(TimeSlot(
-                    start=cursor, end=act_start,
+                    start=cursor, end=transit_end,
                     slot_type="transport",
                     name=f"Transit to {act.name}",
                     description=f"{mode} · {haversine_km(location, act_pt):.1f} km",
@@ -495,6 +508,7 @@ class DayScheduleBuilder:
             cursor, location = self._insert_pinned_meal(
                 pinned_dinner, "dinner", meal_idx,
                 cursor, departure_anchor, location, blocked)
+            meal_cands = [c for c in meal_cands if c.name != pinned_dinner]
 
         # "Free time" gap before 18:00 if ending early
         if not self._had_dinner and cursor < departure_anchor:
@@ -604,8 +618,11 @@ class DayScheduleBuilder:
 
         vpt             = GeoPoint(venue.lat, venue.lng, venue_name)
         mode, t_min, tc = transit_plan(location, vpt)
-        start           = cursor + timedelta(minutes=t_min)
-        opening         = _pt(self._date, venue.opening_time)
+
+        # FIX: separate transit_end from start (opening-time adjustment)
+        transit_end = cursor + timedelta(minutes=t_min)
+        start       = transit_end
+        opening     = _pt(self._date, venue.opening_time)
         if start < opening:
             start = opening
 
@@ -620,7 +637,7 @@ class DayScheduleBuilder:
 
         if t_min > 0:
             self._push(TimeSlot(
-                start=cursor, end=start,
+                start=cursor, end=transit_end,
                 slot_type="transport",
                 name=f"Transit to {venue_name}",
                 estimated_cost=tc, transport_mode=mode,
@@ -677,7 +694,8 @@ class DayScheduleBuilder:
             meal_cands.pop(i)
             mpt             = GeoPoint(meal.lat, meal.lng, meal.name)
             mode, t, tc     = transit_plan(location, mpt)
-            start           = cursor + timedelta(minutes=t)
+            transit_end     = cursor + timedelta(minutes=t)
+            start           = transit_end
             opening         = _pt(self._date, meal.opening_time)
             if start < opening:
                 start = opening
@@ -686,7 +704,7 @@ class DayScheduleBuilder:
                 end = limit
             if t > 0:
                 self._push(TimeSlot(
-                    start=cursor, end=start,
+                    start=cursor, end=transit_end,
                     slot_type="transport",
                     name=f"Transit to {meal.name}",
                     estimated_cost=tc, transport_mode=mode,
@@ -737,14 +755,15 @@ class DayScheduleBuilder:
             meal_cands.pop(i)
             mpt             = GeoPoint(meal.lat, meal.lng, meal.name)
             mode, t, tc     = transit_plan(location, mpt)
-            start           = cursor + timedelta(minutes=t)
+            transit_end     = cursor + timedelta(minutes=t)
+            start           = transit_end
             opening         = _pt(self._date, meal.opening_time)
             if start < opening:
                 start = opening
             end = min(start + timedelta(minutes=meal.duration_minutes), limit)
             if t > 0:
                 self._push(TimeSlot(
-                    start=cursor, end=start,
+                    start=cursor, end=transit_end,
                     slot_type="transport",
                     name=f"Transit to {meal.name}",
                     estimated_cost=tc, transport_mode=mode,
@@ -763,12 +782,13 @@ class DayScheduleBuilder:
         # Near-hotel fallback
         hpt         = GeoPoint(cfg.hotel_lat, cfg.hotel_lng, cfg.hotel_name)
         mode, t, tc = transit_plan(location, hpt)
-        ds          = cursor + timedelta(minutes=t)
+        transit_end = cursor + timedelta(minutes=t)
+        ds          = transit_end
         if ds >= limit:
             return cursor, location
         if t > 0:
             self._push(TimeSlot(
-                start=cursor, end=ds,
+                start=cursor, end=transit_end,
                 slot_type="transport",
                 name="Return to hotel area",
                 description=f"{mode} back",

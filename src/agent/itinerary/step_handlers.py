@@ -419,7 +419,10 @@ def handle_build_day(
 
     candidates = resolve_candidates(available_acts, day_plan_filtered, available_rests)
 
-    if not candidates:
+    # Fallback: backup meal pool means candidates is never empty, so check for
+    # sightseeing candidates specifically — not just any candidate.
+    has_sights = any(not c.is_meal_venue for c in candidates)
+    if not candidates or not has_sights:
         # ActivitySelector returned empty/unrecognised names — fall back to top-rated available acts
         sorted_avail = sorted(available_acts, key=lambda a: -(a.get("rating") or 0))
         fallback_plan = {**day_plan, "activities": [a["name"] for a in sorted_avail[:5]]}

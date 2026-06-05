@@ -246,7 +246,7 @@ def select_activities_per_day(
 
     # ── Token-safe payload caps ──────────────────────────────────────────────
     MAX_ACT  = min(trip_days * 5, 12)   # 1d→5, 2d→10, 3d+→12
-    MAX_REST = min(trip_days * 3, 8)    # 1d→3, 2d→6, 3d+→8
+    MAX_REST = min(trip_days * 4, 12)   # 1d→4, 2d→8, 3d+→12
 
     sorted_acts  = sorted(activities,  key=lambda a: -(a.get("rating") or 0))
     sorted_rests = sorted(restaurants, key=lambda r: -(r.get("rating") or 0))
@@ -473,6 +473,7 @@ def resolve_candidates(
         meal_names: list[str] = [
             n for n in [
                 day_plan.get("lunch_restaurant"),
+                day_plan.get("coffee_place"),
                 day_plan.get("breakfast_place"),
                 day_plan.get("dinner_restaurant"),
             ] if n
@@ -505,7 +506,7 @@ def resolve_candidates(
                 price            = float(raw.get("price") or
                                          _price_from_level(raw.get("price_level")) or 0),
                 opening_time     = raw.get("opening_time")  or "08:00",
-                closing_time     = raw.get("closing_time")  or "21:00",
+                closing_time     = raw.get("closing_time")  or "22:00",
                 food_available   = bool(raw.get("food_available")),
                 categories       = str(cats),
                 rating           = float(raw.get("rating") or 0),
@@ -516,14 +517,31 @@ def resolve_candidates(
             return None
 
     candidates: list[ActivityCandidate] = []
+
+    # 1. Sightseeing activities
     for name in activity_names:
         c = _make(name)
         if c:
             candidates.append(c)
+
+    # 2. Pinned meal venues (LLM-chosen)
     for name in meal_names:
         c = _make(name)
         if c:
             candidates.append(c)
+
+    # 3. Backup meal pool — all restaurants not already added.
+    # Ensures _inject_meal never falls back to a generic placeholder
+    # when the LLM name didn't exactly match a DB record.
+    added_names = {c.name for c in candidates}
+    backup_rests = sorted(restaurants, key=lambda r: -(r.get("rating") or 0))
+    for r in backup_rests:
+        name = r.get("name", "")
+        if name and name not in added_names:
+            c = _make(name)
+            if c and c.is_meal_venue:
+                candidates.append(c)
+                added_names.add(name)
 
     return candidates
 
@@ -576,12 +594,14 @@ def _list_to_day_plan(names: list[str]) -> dict:
 
 def _normalise_day_plan(raw: dict) -> dict:
     """Ensure all expected keys exist with correct types."""
+    coffee = raw.get("coffee_place") or raw.get("breakfast_place") or None
     return {
         "theme":             str(raw.get("theme") or "Explore"),
         "area":              str(raw.get("area") or ""),
         "activities":        [str(n) for n in (raw.get("activities") or [])],
         "lunch_restaurant":  raw.get("lunch_restaurant") or None,
-        "coffee_place":      raw.get("coffee_place")     or None,
+        "coffee_place":      coffee,
+        "breakfast_place":   coffee,
         "dinner_restaurant": raw.get("dinner_restaurant") or None,
         "recommended_rest_blocks": [
             {
