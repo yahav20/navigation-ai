@@ -516,7 +516,7 @@ export function Thread() {
                 "[&::-webkit-scrollbar]:w-1",
                 "[&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-[--border]",
                 "[&::-webkit-scrollbar-track]:bg-transparent",
-                !chatStarted && "mt-[22vh] flex flex-col items-stretch",
+                !chatStarted && "flex flex-col items-stretch pt-6 pb-[28vh]",
                 chatStarted && "grid grid-rows-[1fr_auto]",
               )}
               contentClassName="pt-8 pb-16 max-w-3xl mx-auto flex flex-col gap-4 w-full"
@@ -563,7 +563,14 @@ export function Thread() {
                 </AnimatePresence>
               }
               footer={
-                <div className="sticky bottom-0 flex flex-col items-center gap-4 bg-gradient-to-t from-[--background] via-[--background]/95 to-transparent pt-4 pb-4">
+                <div
+                  className={cn(
+                    "flex flex-col items-center gap-4 pt-4 pb-4",
+                    !chatStarted && "my-auto",
+                    chatStarted &&
+                      "sticky bottom-0 bg-gradient-to-t from-[--background] via-[--background]/95 to-transparent",
+                  )}
+                >
 
                   {/* ── Welcome hero ── */}
                   {!chatStarted && (
@@ -578,7 +585,7 @@ export function Thread() {
                           className="absolute inset-0 scale-150 rounded-full blur-2xl"
                           style={{ background: "var(--glow-accent)" }}
                         />
-                        <LangGraphLogoSVG width={200} height={200} className="relative z-10 flex-shrink-0" />
+                        <LangGraphLogoSVG width={140} height={140} className="relative z-10 flex-shrink-0" />
                       </div>
                       <h1 className="text-3xl font-semibold tracking-tight" style={{ letterSpacing: "-0.03em" }}>
                         Navigation AI
