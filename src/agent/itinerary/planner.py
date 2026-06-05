@@ -315,6 +315,22 @@ def _find_day_of_target(target_name: str, results: dict) -> Optional[int]:
     return None
 
 
+def _day_with_fewest_activities(results: dict) -> Optional[int]:
+    """Return the day number that has the fewest activity slots (used as fallback placement)."""
+    counts: dict[int, int] = {}
+    for key, val in results.items():
+        if not key.startswith("build_day_schedule") or not isinstance(val, dict):
+            continue
+        inner = val.get("data", val) if isinstance(val, dict) else {}
+        day_num = inner.get("day") if isinstance(inner, dict) else None
+        if not day_num:
+            continue
+        counts[day_num] = sum(
+            1 for s in inner.get("slots", []) if s.get("slot_type") == "activity"
+        )
+    return min(counts, key=lambda d: counts[d]) if counts else None
+
+
 def _find_best_day(activity_name: str, results: dict) -> Optional[int]:
     """Return the day whose current activity centroid is nearest to the given activity."""
     acts_raw = next(
@@ -446,13 +462,14 @@ class ItineraryPlannerNode:
                         pass
 
             if instruction:
-                # Resolve any_day additions → geographically best-fit day
+                # Resolve any_day additions → geographically best-fit day, fallback to least-busy
                 if instruction.scope == "any_day" and instruction.replacement_name:
                     best = _find_best_day(instruction.replacement_name, step_results)
-                    if best:
-                        instruction = instruction.model_copy(
-                            update={"day": best, "scope": "single_day"}
-                        )
+                    if not best:
+                        best = _day_with_fewest_activities(step_results) or 1
+                    instruction = instruction.model_copy(
+                        update={"day": best, "scope": "single_day"}
+                    )
 
                 # Resolve missing day for exclusions → search slot names
                 if not instruction.day and instruction.target_name and instruction.scope != "all_days":

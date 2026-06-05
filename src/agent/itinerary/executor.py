@@ -96,6 +96,7 @@ class ItineraryExecutorNode:
         elif step.step_type == "update_day_schedule":
             result = handle_update_day_schedule(
                 step, results, destination, trip_days, current_plan_keys, mode, state,
+                llm=self.llm,
             )
             # Alias under build_day_schedule so formatter/replanner/budget code finds it
             if result.get("status") == "success":

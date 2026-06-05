@@ -26,11 +26,12 @@ from agent.itinerary.itinerary_tools import (
     get_min_location_cost,
     get_weather,
 )
-from agent.itinerary.schedule_engine import DayConfig, DayScheduleBuilder
+from agent.itinerary.schedule_engine import DayConfig, DayScheduleBuilder, haversine_km, GeoPoint
 from agent.itinerary.activity_selector import select_activities_per_day, resolve_candidates
 from agent.itinerary.schemas import PlanStep
 from tools.activities import fetch_attractions, fetch_restaurants
 from tools.weather import get_average_weather
+from providers.google_maps import search_places
 
 # ---------------------------------------------------------------------------
 # Tool registry — used by handle_fetch_weather
@@ -517,13 +518,24 @@ def handle_update_day_schedule(
     current_plan_keys: set[str],
     mode: str,
     state: dict,
+    llm=None,
 ) -> dict:
-    """Rebuild one day with exclusions/replacements from itinerary_update_request."""
+    """Rebuild one day with exclusions/replacements from itinerary_update_request.
+
+    Quality path (when llm + replacement present):
+      Phase 2 — targeted single-day LLM re-plan for full geographic/energy-curve quality.
+
+    Deterministic fallback (always used for exclusions, or when Phase 2 fails):
+      Phase 1A — backfill to original activity count by geographic proximity
+      Phase 1B — geo-sort activities by nearest-neighbor chain from hotel
+      Phase 1C — re-pick meal venues nearest to updated activity centroid
+      Phase 1D — skip outdoor backfill candidates when weather is bad
+    """
     day_num    = step.day or 1
     action     = f"update_day_schedule (Day {day_num})"
     update_req = (state or {}).get("itinerary_update_request") or {}
-    target      = update_req.get("target_name")       # activity/restaurant to exclude
-    replacement = update_req.get("replacement_name")  # explicit replacement (may be None)
+    target      = update_req.get("target_name")
+    replacement = update_req.get("replacement_name")
 
     missing = _missing_prerequisites(results)
     if missing:
@@ -547,34 +559,91 @@ def handle_update_day_schedule(
     filtered_acts  = [a for a in all_activities  if a.get("name") != target]
     filtered_rests = [r for r in all_restaurants if r.get("name") != target]
 
-    # Deduplicate against other days (but allow re-use of target slot's day)
-    used           = _used_activities(results, current_plan_keys)
+    # Deduplicate against other days
+    used = _used_activities(results, current_plan_keys)
     used.discard(target or "")
     available_acts  = [a for a in filtered_acts  if a.get("name") not in used]
     available_rests = [r for r in filtered_rests if r.get("name") not in used]
 
-    # Build day plan — start from existing selection, remove target, pin replacement
+    # Start from the original LLM day plan, stripped of excluded/used activities
     day_plan      = selection.get(f"day_{day_num}", {})
+    original_count = len(day_plan.get("activities", []))
     day_act_names = [n for n in day_plan.get("activities", [])
                      if n not in used and n != target]
 
+    # ── Replacement resolution + weather guard (Phase 1D) ─────────────────────
+    weather_cond = _resolve_weather(results, destination)
+    pin: Optional[dict] = None
+
     if replacement:
-        # Prefer exact match, then fuzzy
         pin = next(
             (a for a in available_acts if a.get("name", "").lower() == replacement.lower()),
             next((a for a in available_acts if replacement.lower() in a.get("name", "").lower()), None),
         )
-        if pin and pin["name"] not in day_act_names:
+        if pin is None:
+            fetched = _search_activity(replacement, destination)
+            # Phase 1D: if searched result is outdoor and weather is bad, warn but keep it;
+            # the ScheduleEngine will handle skipping + backfill covers the gap.
+            available_acts = [*available_acts, fetched]
+            pin = fetched
+        if pin["name"] not in day_act_names:
             day_act_names.insert(0, pin["name"])
 
-    day_plan_filtered = {**day_plan, "activities": day_act_names}
-    candidates        = resolve_candidates(available_acts, day_plan_filtered, available_rests)
+    # ── Phase 2: LLM single-day re-plan ───────────────────────────────────────
+    # Only when a replacement is specified and an LLM is available.
+    # Gives full geographic clustering, meal proximity, and energy-curve ordering.
+    day_plan_filtered: Optional[dict] = None
+    pin_name = pin["name"] if pin else None
 
-    # Fallback to top-rated available
+    if replacement and pin_name and llm:
+        try:
+            from agent.itinerary.activity_selector import select_single_day_update
+            prefs = (state or {}).get("user_preferences") or {}
+            fresh = select_single_day_update(
+                llm=llm,
+                available_acts=available_acts,
+                available_rests=available_rests,
+                pinned_activity=pin_name,
+                excluded_names={target} if target else set(),
+                day_num=day_num,
+                weather=weather_cond,
+                prefs=prefs,
+                destination=destination,
+            )
+            # Accept the LLM plan only if it actually includes the requested activity
+            if fresh.get("activities") and pin_name in fresh["activities"]:
+                day_act_names     = fresh["activities"]
+                day_plan_filtered = {**day_plan, **fresh}
+        except Exception:
+            pass  # fall through to deterministic path
+
+    # ── Phase 1: Deterministic quality (when no LLM or Phase 2 failed) ────────
+    if day_plan_filtered is None:
+        act_idx      = {a["name"]: a for a in available_acts}
+        hotel_lat, hotel_lng = _hotel_latlng(state, mode, available_acts)
+
+        # 1A: Backfill to original activity count
+        target_count  = max(original_count, 3)
+        day_act_names = _backfill_activities(
+            day_act_names, available_acts, target_count, act_idx, weather_cond
+        )
+
+        # 1B: Geo-sort for efficient routing
+        day_act_names = _geo_sort_activities(day_act_names, act_idx, hotel_lat, hotel_lng)
+
+        # 1C: Re-pick meal venues to match updated activity cluster
+        updated_plan      = _repick_meals(day_plan, day_act_names, act_idx, available_rests)
+        day_plan_filtered = {**updated_plan, "activities": day_act_names}
+
+    # ── Resolve candidates and build schedule ──────────────────────────────────
+    candidates = resolve_candidates(available_acts, day_plan_filtered, available_rests)
+
     if not candidates:
         sorted_avail  = sorted(available_acts, key=lambda a: -(a.get("rating") or 0))
-        fallback_plan = {**day_plan, "activities": [a["name"] for a in sorted_avail[:5]]}
+        fallback_plan = {**day_plan_filtered, "activities": [a["name"] for a in sorted_avail[:5]]}
         candidates    = resolve_candidates(available_acts, fallback_plan, available_rests)
+        if candidates:
+            day_plan_filtered = fallback_plan
 
     if not candidates:
         return _wrap_result(
@@ -584,11 +653,10 @@ def handle_update_day_schedule(
             trace=_minimal_trace(action, {"day": day_num}, "No candidates.", ""),
         )
 
-    weather_cond  = _resolve_weather(results, destination)
     prefs         = (state or {}).get("user_preferences") or {}
     blocked_times = list(prefs.get("blocked_times") or [])
     day_blocked   = [b for b in blocked_times if isinstance(b, dict) and b.get("day") == day_num]
-    rest_blocks   = day_plan.get("recommended_rest_blocks", [])
+    rest_blocks   = day_plan_filtered.get("recommended_rest_blocks", [])
 
     cfg = (
         _build_config_from_travel_plan(state, day_num, trip_days, candidates,
@@ -617,14 +685,14 @@ def handle_update_day_schedule(
         )
 
     day_cost = round(sum(float(s.get("estimated_cost", 0)) for s in slots), 2)
-    theme    = day_plan.get("theme") or f"Day {day_num} — Explore {destination}"
+    theme    = day_plan_filtered.get("theme") or day_plan.get("theme") or f"Day {day_num} — Explore {destination}"
 
     return _wrap_result(
         status="success",
         data={
             "day":      day_num,
             "theme":    theme,
-            "area":     day_plan.get("area", ""),
+            "area":     day_plan_filtered.get("area") or day_plan.get("area", ""),
             "slots":    slots,
             "day_cost": day_cost,
             "hotel":    cfg.hotel_name,
@@ -1071,6 +1139,250 @@ def _unwrap_data(results: dict, prefix: str) -> Optional[dict]:
         if key.startswith(prefix):
             return _inner_data(results[key])
     return None
+
+
+# ---------------------------------------------------------------------------
+# update_day_schedule helpers — Phase 1 deterministic quality
+# ---------------------------------------------------------------------------
+
+_BAD_WEATHER_KW = {"rain", "storm", "thunder", "shower"}
+_OUTDOOR_KW_LOCAL = {
+    "beach", "park", "garden", "promenade", "walk", "hike", "trail",
+    "viewpoint", "outdoor", "open-air", "open air", "market", "bazaar",
+    "boardwalk", "rooftop", "terrace", "square", "plaza",
+}
+
+
+def _is_outdoor_act(act: dict) -> bool:
+    cats = str(act.get("categories") or act.get("types") or "").lower()
+    name = str(act.get("name") or "").lower()
+    return any(kw in cats + " " + name for kw in _OUTDOOR_KW_LOCAL)
+
+
+def _is_bad_weather(cond: str) -> bool:
+    return any(kw in cond.lower() for kw in _BAD_WEATHER_KW)
+
+
+def _hotel_latlng(state: dict, mode: str, acts: list[dict]) -> tuple[float, float]:
+    """Return hotel coordinates for geo-routing; falls back to activity centroid."""
+    if mode == "with_travel_data":
+        hotel = (state or {}).get("itinerary_selected_hotel") or {}
+        lat = float(hotel.get("latitude") or hotel.get("lat") or 0)
+        lng = float(hotel.get("longitude") or hotel.get("lng") or 0)
+        if lat or lng:
+            return lat, lng
+    coords = [
+        (float(a.get("lat") or a.get("latitude") or 0),
+         float(a.get("lng") or a.get("longitude") or 0))
+        for a in acts
+        if float(a.get("lat") or a.get("latitude") or 0)
+           or float(a.get("lng") or a.get("longitude") or 0)
+    ]
+    if coords:
+        return sum(c[0] for c in coords) / len(coords), sum(c[1] for c in coords) / len(coords)
+    return 0.0, 0.0
+
+
+def _backfill_activities(
+    day_act_names: list[str],
+    available_acts: list[dict],
+    target_count: int,
+    act_idx: dict[str, dict],
+    weather_cond: str,
+) -> list[str]:
+    """Fill day_act_names up to target_count with activities nearest the day's centroid.
+
+    Skips outdoor activities when weather is bad (ScheduleEngine would skip them anyway).
+    """
+    if len(day_act_names) >= target_count:
+        return day_act_names
+
+    bad_weather = _is_bad_weather(weather_cond)
+
+    coords = []
+    for name in day_act_names:
+        a = act_idx.get(name)
+        if a:
+            lat = float(a.get("lat") or a.get("latitude") or 0)
+            lng = float(a.get("lng") or a.get("longitude") or 0)
+            if lat or lng:
+                coords.append((lat, lng))
+
+    if coords:
+        clat = sum(c[0] for c in coords) / len(coords)
+        clng = sum(c[1] for c in coords) / len(coords)
+    else:
+        clat, clng = 0.0, 0.0
+
+    anchor  = GeoPoint(lat=clat, lng=clng)
+    current = set(day_act_names)
+
+    scored: list[tuple[float, dict]] = []
+    for a in available_acts:
+        name = a.get("name", "")
+        if not name or name in current:
+            continue
+        if bad_weather and _is_outdoor_act(a):
+            continue
+        lat = float(a.get("lat") or a.get("latitude") or 0)
+        lng = float(a.get("lng") or a.get("longitude") or 0)
+        dist = haversine_km(anchor, GeoPoint(lat=lat, lng=lng)) if (lat or lng) else float("inf")
+        scored.append((dist, a))
+
+    scored.sort(key=lambda x: x[0])
+
+    result = list(day_act_names)
+    for _, act in scored:
+        if len(result) >= target_count:
+            break
+        result.append(act["name"])
+    return result
+
+
+def _geo_sort_activities(
+    names: list[str],
+    act_idx: dict[str, dict],
+    hotel_lat: float,
+    hotel_lng: float,
+) -> list[str]:
+    """Re-order activities by nearest-neighbor chain starting from the hotel.
+
+    Produces the most geographically efficient routing for the ScheduleEngine.
+    Activities without valid coordinates are appended at the end in original order.
+    """
+    if len(names) <= 1:
+        return names
+
+    remaining   = list(names)
+    ordered:    list[str] = []
+    curr_lat    = hotel_lat
+    curr_lng    = hotel_lng
+
+    while remaining:
+        best_name: Optional[str] = None
+        best_dist = float("inf")
+
+        for name in remaining:
+            a = act_idx.get(name)
+            if not a:
+                continue
+            lat = float(a.get("lat") or a.get("latitude") or 0)
+            lng = float(a.get("lng") or a.get("longitude") or 0)
+            if not (lat or lng):
+                continue
+            dist = haversine_km(GeoPoint(lat=curr_lat, lng=curr_lng), GeoPoint(lat=lat, lng=lng))
+            if dist < best_dist:
+                best_dist = dist
+                best_name = name
+
+        if best_name is None:
+            ordered.extend(remaining)
+            break
+
+        remaining.remove(best_name)
+        ordered.append(best_name)
+        a        = act_idx[best_name]
+        curr_lat = float(a.get("lat") or a.get("latitude") or 0)
+        curr_lng = float(a.get("lng") or a.get("longitude") or 0)
+
+    return ordered
+
+
+def _repick_meals(
+    day_plan: dict,
+    day_act_names: list[str],
+    act_idx: dict[str, dict],
+    available_rests: list[dict],
+) -> dict:
+    """Re-pick meal venues nearest to the updated activity cluster centroid.
+
+    Only replaces meal slots that were already filled in the original plan.
+    Keeps the slot empty (None) if the LLM didn't pick one to begin with.
+    """
+    if not available_rests or not day_act_names:
+        return day_plan
+
+    coords = []
+    for name in day_act_names:
+        a = act_idx.get(name)
+        if a:
+            lat = float(a.get("lat") or a.get("latitude") or 0)
+            lng = float(a.get("lng") or a.get("longitude") or 0)
+            if lat or lng:
+                coords.append((lat, lng))
+
+    if not coords:
+        return day_plan
+
+    clat   = sum(c[0] for c in coords) / len(coords)
+    clng   = sum(c[1] for c in coords) / len(coords)
+    anchor = GeoPoint(lat=clat, lng=clng)
+
+    def _dist(r: dict) -> float:
+        lat = float(r.get("lat") or r.get("latitude") or 0)
+        lng = float(r.get("lng") or r.get("longitude") or 0)
+        return haversine_km(anchor, GeoPoint(lat=lat, lng=lng)) if (lat or lng) else float("inf")
+
+    sorted_rests = sorted(available_rests, key=_dist)
+    used: set[str] = set()
+
+    def _pick(prefer_cafe: bool = False) -> Optional[str]:
+        for r in sorted_rests:
+            name = r.get("name", "")
+            if not name or name in used:
+                continue
+            if prefer_cafe:
+                cats = str(r.get("categories") or r.get("types") or "").lower()
+                if not any(k in cats for k in ("café", "cafe", "coffee", "bakery", "patisserie", "breakfast")):
+                    continue
+            used.add(name)
+            return name
+        if prefer_cafe:
+            for r in sorted_rests:
+                name = r.get("name", "")
+                if name and name not in used:
+                    used.add(name)
+                    return name
+        return None
+
+    updated = {**day_plan}
+    if day_plan.get("lunch_restaurant"):
+        new = _pick()
+        if new:
+            updated["lunch_restaurant"] = new
+    if day_plan.get("dinner_restaurant"):
+        new = _pick()
+        if new:
+            updated["dinner_restaurant"] = new
+    if day_plan.get("breakfast_place"):
+        new = _pick(prefer_cafe=True)
+        if new:
+            updated["breakfast_place"] = new
+    return updated
+
+
+def _search_activity(name: str, destination: str) -> dict:
+    """Look up an activity by name via Google Maps; returns a stub with unknown cost on failure."""
+    try:
+        results = search_places(f"{name} in {destination}")
+        if results:
+            match = next((r for r in results if name.lower() in r.get("name", "").lower()), results[0])
+            return match
+    except Exception:
+        pass
+    return {
+        "name": name,
+        "lat": 0, "lng": 0,
+        "avg_duration_minutes": 120,
+        "price": 0,
+        "opening_time": "09:00",
+        "closing_time": "21:00",
+        "food_available": False,
+        "categories": "attraction",
+        "rating": 4.0,
+        "requires_booking": False,
+        "operating_days": "Daily",
+    }
 
 
 def _missing_prerequisites(results: dict) -> list[str]:
