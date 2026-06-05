@@ -98,11 +98,9 @@ The dev server needs `langgraph-cli`, whose backend (`langgraph-api`) is best ke
 **its own virtualenv** — installing it alongside the main app would otherwise force
 `protobuf>=6` and clash with the Gemini SDK (`protobuf<6`).
 
-```bash
-python3.12 -m venv .lgenv
-.lgenv/bin/pip install -r requirements-server.txt
-.lgenv/bin/langgraph dev --allow-blocking          # http://127.0.0.1:2024
-```
+python -m venv .lgenv
+.lgenv\Scripts\pip install -r requirements-server.txt
+.lgenv\Scripts\langgraph dev --allow-blocking
 
 > pip may print a `protobuf` dependency-conflict warning while resolving — it's harmless
 > here, since this server env is separate from the Gemini CLI env (`tavenv`).

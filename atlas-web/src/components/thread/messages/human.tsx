@@ -7,7 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { BranchSwitcher, CommandBar } from "./shared";
 import { MultimodalPreview } from "@/components/thread/MultimodalPreview";
 import { isBase64ContentBlock } from "@/lib/multimodal-utils";
-
+import { motion } from "framer-motion";
 function EditableContent({
   value,
   setValue,
@@ -74,6 +74,17 @@ export function HumanMessage({
   };
 
   return (
+    <motion.div
+    initial={{ opacity: 0, y: 15, scale: 0.95, transformOrigin: "bottom right" }}
+    animate={{ opacity: 1, y: 0, scale: 1 }}
+    transition={{ type: "spring", stiffness: 260, damping: 20 }}
+    className={cn(
+      "group ml-auto flex items-center gap-2",
+      isEditing && "w-full max-w-xl",
+    )}
+  >
+
+  
     <div
       className={cn(
         "group ml-auto flex items-center gap-2",
@@ -147,5 +158,6 @@ export function HumanMessage({
         </div>
       </div>
     </div>
+    </motion.div>
   );
 }
