@@ -58,10 +58,10 @@ class TravelAdjustments(BaseModel):
 class FlightLeg(BaseModel):
     """A single leg of a connecting-flight route."""
 
-    from_city: str = Field(description="Origin city for this leg (from `route[i].from`)")
-    to_city: str = Field(description="Destination city for this leg (from `route[i].to`)")
+    from_city: str | None = Field(default=None, description="Origin city for this leg (from `route[i].from`)")
+    to_city: str | None = Field(default=None, description="Destination city for this leg (from `route[i].to`)")
     airline: str | None = Field(default=None, description="Operating airline for this leg")
-    flight_number: str = Field(description="Flight number for this leg (from `route[i].flight`)")
+    flight_number: str | None = Field(default=None, description="Flight number for this leg (from `route[i].flight`)")
 
 
 class FlightPick(BaseModel):
@@ -70,7 +70,7 @@ class FlightPick(BaseModel):
     label: str = Field(description="Flight number(s) from the payload, e.g. 'DL1' or 'AA123 + BA456'")
     airline: str | None = Field(default=None, description="Primary airline name from the payload")
     price: float = Field(description="Total flight price in USD from the payload")
-    description: str = Field(description="One short line explaining why this flight is recommended")
+    description: str | None = Field(default=None, description="One short line explaining why this flight is recommended")
     duration_minutes: int | None = Field(
         default=None,
         description=(
@@ -131,7 +131,7 @@ class HotelPick(BaseModel):
     """A curated hotel option highlighted to the traveller."""
 
     name: str = Field(description="Hotel name from the payload")
-    stars: int | None = Field(default=None, description="Hotel star rating from the payload, if known")
+    stars: float | None = Field(default=None, description="Hotel star rating from the payload, if known")
     price_per_night: float = Field(description="Nightly rate in USD from the payload")
     description: str = Field(description="One short line explaining why this hotel is recommended")
 

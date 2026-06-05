@@ -48,6 +48,7 @@ import {
   ArtifactTitle,
   useArtifactContext,
 } from "./artifact";
+import { AgentSelector } from "./agent-selector";
 
 /* ─────────────────────────────────────────
    Ambient background: animated ocean orbs
@@ -55,7 +56,6 @@ import {
 function OceanBackground() {
   return (
     <div className="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
-      {/* Large slow orb — top left */}
       <motion.div
         className="absolute -top-40 -left-40 h-[600px] w-[600px] rounded-full"
         style={{
@@ -66,7 +66,6 @@ function OceanBackground() {
         animate={{ x: [0, 40, 0], y: [0, 30, 0], scale: [1, 1.08, 1] }}
         transition={{ duration: 18, repeat: Infinity, ease: "easeInOut" }}
       />
-      {/* Mid cyan orb — bottom right */}
       <motion.div
         className="absolute -bottom-32 -right-32 h-[500px] w-[500px] rounded-full"
         style={{
@@ -75,14 +74,8 @@ function OceanBackground() {
           filter: "blur(50px)",
         }}
         animate={{ x: [0, -30, 0], y: [0, -20, 0], scale: [1, 1.12, 1] }}
-        transition={{
-          duration: 22,
-          repeat: Infinity,
-          ease: "easeInOut",
-          delay: 3,
-        }}
+        transition={{ duration: 22, repeat: Infinity, ease: "easeInOut", delay: 3 }}
       />
-      {/* Small accent orb — top right */}
       <motion.div
         className="absolute top-20 right-1/3 h-[260px] w-[260px] rounded-full"
         style={{
@@ -91,20 +84,12 @@ function OceanBackground() {
           filter: "blur(40px)",
         }}
         animate={{ x: [0, 20, -10, 0], y: [0, -25, 10, 0] }}
-        transition={{
-          duration: 14,
-          repeat: Infinity,
-          ease: "easeInOut",
-          delay: 6,
-        }}
+        transition={{ duration: 14, repeat: Infinity, ease: "easeInOut", delay: 6 }}
       />
     </div>
   );
 }
 
-/* ─────────────────────────────────────────
-   Animated scan-line / grid texture overlay
-───────────────────────────────────────── */
 function GridOverlay() {
   return (
     <div
@@ -208,9 +193,6 @@ function OpenGitHubRepo() {
   );
 }
 
-/* ─────────────────────────────────────────
-   Glowing header logo + title
-───────────────────────────────────────── */
 function BrandLogo({ onClick }: { onClick?: () => void }) {
   return (
     <motion.button
@@ -222,32 +204,18 @@ function BrandLogo({ onClick }: { onClick?: () => void }) {
       <div className="relative">
         <div
           className="absolute inset-0 rounded-full opacity-0 blur-lg transition-opacity duration-300 group-hover:opacity-100"
-          style={{
-            background: "var(--glow-accent)",
-          }}
+          style={{ background: "var(--glow-accent)" }}
         />
-        <LangGraphLogoSVG width={30} height={30} className="relative z-10" />
+        <LangGraphLogoSVG width={60} height={60} className="relative z-10" />
       </div>
-      <span
-        className="text-xl font-semibold tracking-tight"
-        style={{ letterSpacing: "-0.02em" }}
-      >
+      <span className="text-xl font-semibold tracking-tight" style={{ letterSpacing: "-0.02em" }}>
         Agent Chat
       </span>
     </motion.button>
   );
 }
 
-/* ─────────────────────────────────────────
-   Panel toggle button
-───────────────────────────────────────── */
-function PanelToggleButton({
-  isOpen,
-  onToggle,
-}: {
-  isOpen: boolean;
-  onToggle: () => void;
-}) {
+function PanelToggleButton({ isOpen, onToggle }: { isOpen: boolean; onToggle: () => void }) {
   return (
     <motion.button
       onClick={onToggle}
@@ -261,11 +229,7 @@ function PanelToggleButton({
       whileHover={{ scale: 1.08 }}
       whileTap={{ scale: 0.92 }}
     >
-      {isOpen ? (
-        <PanelRightOpen className="size-4" />
-      ) : (
-        <PanelRightClose className="size-4" />
-      )}
+      {isOpen ? <PanelRightOpen className="size-4" /> : <PanelRightClose className="size-4" />}
     </motion.button>
   );
 }
@@ -349,17 +313,28 @@ export function Thread() {
     prevMessageLength.current = messages.length;
   }, [messages]);
 
+  /* ── Submit from text input ── */
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
-    if ((input.trim().length === 0 && contentBlocks.length === 0) || isLoading)
-      return;
+    if ((input.trim().length === 0 && contentBlocks.length === 0) || isLoading) return;
+    submitMessage(input);
+  };
+
+  /* ── Submit from agent selector form ── */
+  const handleAgentSubmit = (text: string) => {
+    if (!text.trim() || isLoading) return;
+    submitMessage(text);
+  };
+
+  /* ── Shared submit logic ── */
+  const submitMessage = (text: string) => {
     setFirstTokenReceived(false);
 
     const newHumanMessage: Message = {
       id: uuidv4(),
       type: "human",
       content: [
-        ...(input.trim().length > 0 ? [{ type: "text", text: input }] : []),
+        ...(text.trim().length > 0 ? [{ type: "text", text }] : []),
         ...contentBlocks,
       ] as Message["content"],
     };
@@ -390,9 +365,7 @@ export function Thread() {
     setContentBlocks([]);
   };
 
-  const handleRegenerate = (
-    parentCheckpoint: Checkpoint | null | undefined,
-  ) => {
+  const handleRegenerate = (parentCheckpoint: Checkpoint | null | undefined) => {
     prevMessageLength.current = prevMessageLength.current - 1;
     setFirstTokenReceived(false);
     stream.submit(undefined, {
@@ -410,11 +383,10 @@ export function Thread() {
 
   return (
     <div className="relative flex h-screen w-full overflow-hidden bg-[--background]">
-      {/* ── Ambient background effects ── */}
       <OceanBackground />
       <GridOverlay />
 
-      {/* ── Sidebar history panel ── */}
+      {/* ── Sidebar ── */}
       <div className="relative hidden lg:flex">
         <motion.div
           className="absolute z-20 h-full overflow-hidden border-r border-[--border] bg-[--sidebar]/90 backdrop-blur-xl"
@@ -427,7 +399,6 @@ export function Thread() {
               : { duration: 0 }
           }
         >
-          {/* Sidebar glow edge */}
           <div
             className="pointer-events-none absolute inset-y-0 right-0 w-px"
             style={{
@@ -441,7 +412,7 @@ export function Thread() {
         </motion.div>
       </div>
 
-      {/* ── Main content area ── */}
+      {/* ── Main content ── */}
       <div
         className={cn(
           "grid w-full grid-cols-[1fr_0fr] transition-all duration-500",
@@ -468,7 +439,7 @@ export function Thread() {
               : { duration: 0 }
           }
         >
-          {/* ── Header (chat not started) ── */}
+          {/* Header — pre-chat */}
           {!chatStarted && (
             <motion.div
               className="absolute top-0 left-0 z-10 flex w-full items-center justify-between gap-3 p-3 pl-4"
@@ -490,7 +461,7 @@ export function Thread() {
             </motion.div>
           )}
 
-          {/* ── Header (chat started) ── */}
+          {/* Header — in-chat */}
           {chatStarted && (
             <motion.div
               className="relative z-10 flex items-center justify-between gap-3 border-b border-[--border]/60 bg-[--background]/70 px-3 py-2 backdrop-blur-md"
@@ -533,12 +504,11 @@ export function Thread() {
                 </TooltipIconButton>
               </div>
 
-              {/* Gradient fade under header */}
               <div className="from-background/80 to-background/0 absolute inset-x-0 top-full h-6 bg-gradient-to-b" />
             </motion.div>
           )}
 
-          {/* ── Messages area ── */}
+          {/* Messages */}
           <StickToBottom className="relative flex-1 overflow-hidden">
             <StickyToBottomContent
               className={cn(
@@ -559,16 +529,10 @@ export function Thread() {
                         key={message.id || `${message.type}-${index}`}
                         initial={{ opacity: 0, y: 16 }}
                         animate={{ opacity: 1, y: 0 }}
-                        transition={{
-                          duration: 0.3,
-                          ease: [0.25, 0.46, 0.45, 0.94],
-                        }}
+                        transition={{ duration: 0.3, ease: [0.25, 0.46, 0.45, 0.94] }}
                       >
                         {message.type === "human" ? (
-                          <HumanMessage
-                            message={message}
-                            isLoading={isLoading}
-                          />
+                          <HumanMessage message={message} isLoading={isLoading} />
                         ) : (
                           <AssistantMessage
                             message={message}
@@ -592,43 +556,61 @@ export function Thread() {
                     </motion.div>
                   )}
                   {isLoading && !firstTokenReceived && (
-                    <motion.div
-                      key="loading"
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                    >
+                    <motion.div key="loading" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
                       <AssistantMessageLoading />
                     </motion.div>
                   )}
                 </AnimatePresence>
               }
               footer={
-                <div className="sticky bottom-0 flex flex-col items-center gap-6 bg-gradient-to-t from-[--background] via-[--background]/95 to-transparent pt-4 pb-4">
-                  {/* ── Welcome hero (before first message) ── */}
+                <div className="sticky bottom-0 flex flex-col items-center gap-4 bg-gradient-to-t from-[--background] via-[--background]/95 to-transparent pt-4 pb-4">
+
+                  {/* ── Welcome hero ── */}
                   {!chatStarted && (
                     <motion.div
-                      className="flex flex-col items-center gap-3 text-center"
+                      className="flex flex-col items-center gap-2 text-center"
                       initial={{ opacity: 0, scale: 0.95 }}
                       animate={{ opacity: 1, scale: 1 }}
                       transition={{ duration: 0.5, ease: "easeOut" }}
                     >
-                      <div className="relative">
+                      <div className="relative mb-1">
                         <div
                           className="absolute inset-0 scale-150 rounded-full blur-2xl"
                           style={{ background: "var(--glow-accent)" }}
                         />
-                        <LangGraphLogoSVG className="relative z-10 h-10 flex-shrink-0" />
+                        <LangGraphLogoSVG width={200} height={200} className="relative z-10 flex-shrink-0" />
                       </div>
-                      <h1
-                        className="text-3xl font-semibold tracking-tight"
-                        style={{ letterSpacing: "-0.03em" }}
-                      >
-                        Agent Chat
+                      <h1 className="text-3xl font-semibold tracking-tight" style={{ letterSpacing: "-0.03em" }}>
+                        Navigation AI
                       </h1>
                       <p className="text-sm text-[--muted-foreground]">
-                        Powered by LangGraph · Start a conversation below
+                        Choose an agent or type a freeform question below
                       </p>
                     </motion.div>
+                  )}
+
+                  {/* ── Agent Selector (pre-chat only) ── */}
+                  <AnimatePresence>
+                    {!chatStarted && (
+                      <motion.div
+                        className="w-full"
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -6 }}
+                        transition={{ duration: 0.35, delay: 0.1 }}
+                      >
+                        <AgentSelector onSubmit={handleAgentSubmit} />
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+
+                  {/* Divider between agent selector and text input */}
+                  {!chatStarted && (
+                    <div className="flex w-full max-w-3xl items-center gap-3">
+                      <div className="h-px flex-1 bg-[--border]" />
+                      <span className="text-xs text-[--muted-foreground]">Or type freely</span>
+                      <div className="h-px flex-1 bg-[--border]" />
+                    </div>
                   )}
 
                   <ScrollToBottom className="animate-in fade-in-0 zoom-in-95 absolute bottom-full left-1/2 mb-4 -translate-x-1/2" />
@@ -649,7 +631,6 @@ export function Thread() {
                           : "border-[--border] shadow-[0_4px_24px_oklch(0.3_0.1_255_/_0.1)] hover:border-[--ring]/50 hover:shadow-[0_4px_32px_oklch(0.3_0.12_250_/_0.12)]",
                     )}
                   >
-                    {/* Top cyan accent line */}
                     <div
                       className="absolute inset-x-4 top-0 h-px rounded-full opacity-60"
                       style={{
@@ -662,10 +643,7 @@ export function Thread() {
                       onSubmit={handleSubmit}
                       className="mx-auto grid max-w-3xl grid-rows-[1fr_auto] gap-2"
                     >
-                      <ContentBlocksPreview
-                        blocks={contentBlocks}
-                        onRemove={removeBlock}
-                      />
+                      <ContentBlocksPreview blocks={contentBlocks} onRemove={removeBlock} />
                       <textarea
                         value={input}
                         onChange={(e) => setInput(e.target.value)}
@@ -683,7 +661,8 @@ export function Thread() {
                             form?.requestSubmit();
                           }
                         }}
-                        placeholder="Type your message..."
+                        placeholder="Type a question..."
+                        dir="auto"
                         className={cn(
                           "field-sizing-content resize-none border-none bg-transparent",
                           "p-4 pb-0 text-[--foreground] shadow-none ring-0 outline-none",
@@ -693,7 +672,6 @@ export function Thread() {
                       />
 
                       <div className="flex items-center gap-4 p-3 pt-2">
-                        {/* Hide Tool Calls toggle */}
                         <div className="flex items-center space-x-2">
                           <Switch
                             id="render-tool-calls"
@@ -708,7 +686,6 @@ export function Thread() {
                           </Label>
                         </div>
 
-                        {/* Upload */}
                         <Label
                           htmlFor="file-input"
                           className="flex cursor-pointer items-center gap-1.5 text-xs text-[--muted-foreground] transition-colors hover:text-[--foreground]"
@@ -725,13 +702,8 @@ export function Thread() {
                           className="hidden"
                         />
 
-                        {/* Send / Cancel */}
                         {stream.isLoading ? (
-                          <motion.div
-                            className="ml-auto"
-                            whileHover={{ scale: 1.04 }}
-                            whileTap={{ scale: 0.96 }}
-                          >
+                          <motion.div className="ml-auto" whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.96 }}>
                             <Button
                               key="stop"
                               onClick={() => stream.stop()}
@@ -747,11 +719,7 @@ export function Thread() {
                             </Button>
                           </motion.div>
                         ) : (
-                          <motion.div
-                            className="ml-auto"
-                            whileHover={{ scale: 1.05 }}
-                            whileTap={{ scale: 0.95 }}
-                          >
+                          <motion.div className="ml-auto" whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
                             <Button
                               type="submit"
                               className={cn(
@@ -784,7 +752,6 @@ export function Thread() {
         {/* ── Artifact panel ── */}
         <div className="relative flex flex-col border-l border-[--border]/60">
           <div className="absolute inset-0 flex min-w-[30vw] flex-col bg-[--card]/60 backdrop-blur-sm">
-            {/* Artifact header */}
             <div className="grid grid-cols-[1fr_auto] items-center border-b border-[--border]/60 bg-[--card]/80 px-4 py-3 backdrop-blur-md">
               <ArtifactTitle className="truncate overflow-hidden text-sm font-medium text-[--foreground]" />
               <motion.button
