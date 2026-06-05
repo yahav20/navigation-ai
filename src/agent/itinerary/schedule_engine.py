@@ -429,10 +429,11 @@ class DayScheduleBuilder:
             act_pt              = GeoPoint(act.lat, act.lng, act.name)
             mode, t_min, t_cost = transit_plan(location, act_pt)
 
-            # FIX: separate transit_end from act_start so the transit slot
-            # only reflects actual travel time, not waiting for opening.
-            transit_end = cursor + timedelta(minutes=t_min)
-            act_start   = transit_end
+            # transit_start defaults to now; bumped to `free` in the blocked-window path
+            # so the transit slot shows only actual travel time, not waiting.
+            transit_start = cursor
+            transit_end   = cursor + timedelta(minutes=t_min)
+            act_start     = transit_end
 
             # Respect opening time (silent wait — not shown as "transit")
             opening = _pt(self._date, act.opening_time)
@@ -453,13 +454,15 @@ class DayScheduleBuilder:
             if act_end > closing:
                 continue
 
-            # Blocked window? Try shifting the whole block
+            # Blocked window? Shift the whole block past the obstruction.
             if _overlaps(cursor, act_end, blocked):
                 free = _next_free(cursor, t_min + act.duration_minutes, blocked, departure_anchor)
                 if free is None:
                     continue
-                transit_end = free + timedelta(minutes=t_min)
-                act_start   = transit_end
+                # Transit starts AFTER the blocked window clears, not at cursor.
+                transit_start = free
+                transit_end   = free + timedelta(minutes=t_min)
+                act_start     = transit_end
                 if act_start < opening:
                     act_start = opening
                 act_end = act_start + timedelta(minutes=act.duration_minutes)
@@ -469,7 +472,7 @@ class DayScheduleBuilder:
             # — Insert transit slot (actual travel time only) —
             if t_min > 0:
                 self._push(TimeSlot(
-                    start=cursor, end=transit_end,
+                    start=transit_start, end=transit_end,
                     slot_type="transport",
                     name=f"Transit to {act.name}",
                     description=f"{mode} · {haversine_km(location, act_pt):.1f} km",
