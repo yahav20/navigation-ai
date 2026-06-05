@@ -27,7 +27,11 @@ import {
   Send,
 } from "lucide-react";
 import { useQueryState, parseAsBoolean } from "nuqs";
-import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
+import {
+  StickToBottom,
+  useStickToBottomContext,
+  type StickToBottomContext,
+} from "use-stick-to-bottom";
 import ThreadHistory from "./history";
 import { toast } from "sonner";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
@@ -270,6 +274,9 @@ export function Thread() {
   const isLoading = stream.isLoading;
 
   const lastError = useRef<string | undefined>(undefined);
+  // Captures the stick-to-bottom context so submit handlers (which live outside
+  // the StickToBottom provider) can force a scroll-to-bottom on send.
+  const stickToBottomRef = useRef<StickToBottomContext | null>(null);
   const { theme, setTheme } = useTheme();
 
   const setThreadId = (id: string | null) => {
@@ -363,6 +370,11 @@ export function Thread() {
 
     setInput("");
     setContentBlocks([]);
+
+    // Snap to the bottom on send (even if the user had scrolled up) and re-engage
+    // the auto-follow lock so the streaming reply keeps scrolling into view. rAF
+    // waits for the optimistic human message to render first.
+    requestAnimationFrame(() => stickToBottomRef.current?.scrollToBottom());
   };
 
   const handleRegenerate = (parentCheckpoint: Checkpoint | null | undefined) => {
@@ -509,7 +521,10 @@ export function Thread() {
           )}
 
           {/* Messages */}
-          <StickToBottom className="relative flex-1 overflow-hidden">
+          <StickToBottom
+            className="relative flex-1 overflow-hidden"
+            contextRef={stickToBottomRef}
+          >
             <StickyToBottomContent
               className={cn(
                 "absolute inset-0 overflow-y-scroll px-4",
