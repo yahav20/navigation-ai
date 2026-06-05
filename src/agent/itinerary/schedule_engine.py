@@ -469,6 +469,32 @@ class DayScheduleBuilder:
                 if act_end > departure_anchor or act_end > closing:
                     continue
 
+            # — Gap-lunch guard ─────────────────────────────────────────────────
+            # When an opening-time wait or blocked window pushes act_start past 14:00
+            # and we're still in the lunch window (cursor < 14:00), inject lunch now
+            # rather than leaving a hours-long hungry gap in the schedule.
+            if not self._had_lunch and cursor.hour < 14 and act_start.hour >= 14:
+                gap_limit = min(act_start, _pt(self._date, "14:00"))
+                if pinned_lunch and meal_idx.get(pinned_lunch):
+                    cursor, location = self._insert_pinned_meal(
+                        pinned_lunch, "lunch", meal_idx,
+                        cursor, gap_limit, location, blocked)
+                    meal_cands = [c for c in meal_cands if c.name != pinned_lunch]
+                elif not (pinned_lunch and pinned_lunch in meal_idx):
+                    cursor, location = self._inject_meal(
+                        cursor, gap_limit, location,
+                        meal_cands, None, pinned_dinner, meal_idx)
+                if cursor >= departure_anchor:
+                    break
+                # Re-derive transit from updated position after the meal.
+                mode, t_min, t_cost = transit_plan(location, act_pt)
+                transit_start = cursor
+                transit_end   = cursor + timedelta(minutes=t_min)
+                act_start     = max(transit_end, opening)
+                act_end       = act_start + timedelta(minutes=act.duration_minutes)
+                if act_end > departure_anchor or act_end > closing:
+                    continue
+
             # — Insert transit slot (actual travel time only) —
             if t_min > 0:
                 self._push(TimeSlot(

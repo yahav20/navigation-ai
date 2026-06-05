@@ -35,8 +35,7 @@ from typing import Optional
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-from agent.core.models import DayUpdateInstruction
-from agent.itinerary.schemas import ExecutionPlan, PlanStep
+from agent.itinerary.schemas import DayUpdateInstruction, ExecutionPlan, PlanStep
 from agent.core.state import AgentState
 
 # ── Safety limits ──────────────────────────────────────────────────────────

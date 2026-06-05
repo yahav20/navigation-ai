@@ -191,55 +191,6 @@ class TravelPlan(BaseModel):
     lowest_total_estimate: float | None
 
 
-class DayUpdateInstruction(BaseModel):
-    """Structured instruction extracted from a user request to modify their built itinerary."""
-
-    update_type: Literal[
-        "exclude_activity",
-        "replace_activity",
-        "add_activity",
-        "exclude_restaurant",
-        "replace_restaurant",
-        "global_preference",
-    ] = Field(description="The type of change the user is requesting.")
-
-    scope: Literal["single_day", "any_day", "all_days"] = Field(
-        description=(
-            "single_day: user named a specific day. "
-            "any_day: user doesn't care which day. "
-            "all_days: change applies to every day (e.g. 'no breakfast every day')."
-        )
-    )
-
-    day: int | None = Field(
-        default=None,
-        description="Day number (1, 2, 3…) when scope is single_day. Null otherwise.",
-    )
-
-    target_name: str | None = Field(
-        default=None,
-        description="Name of the activity or restaurant to remove / replace. Null if not applicable.",
-    )
-
-    replacement_name: str | None = Field(
-        default=None,
-        description="Explicit name the user wants added in place of the target, or just added. Null if not specified.",
-    )
-
-    preference_hint: str | None = Field(
-        default=None,
-        description="Any extra user context ('I like football', 'something cheaper', 'outdoor').",
-    )
-
-    excluded_slot_types: list[str] = Field(
-        default_factory=list,
-        description=(
-            "Slot types to remove from ALL days. "
-            "Use ['breakfast'] for 'no breakfast', ['meal'] for all meals, etc. "
-            "Only populated for global_preference scope."
-        ),
-    )
-
 
 class IntentClassification(BaseModel):
     """Classify the user's primary intent to route them to the correct agent."""

@@ -410,12 +410,21 @@ def handle_build_day(
     if not isinstance(day_plan, dict):
         day_plan = {"activities": list(day_plan) if isinstance(day_plan, list) else []}
 
-    # Deduplicate: exclude activities already scheduled on previous days
+    # Deduplicate: exclude activities already scheduled on previous days.
+    # Also exclude meal venues already used — prevents the same restaurant from
+    # appearing in the backup pool and being picked again via generic injection.
     used              = _used_activities(results, current_plan_keys)
+    used_meals        = _used_meal_venues(results, current_plan_keys)
     available_acts    = [a for a in all_activities  if a.get("name") not in used]
-    available_rests   = [r for r in all_restaurants if r.get("name") not in used]
+    available_rests   = [r for r in all_restaurants
+                         if r.get("name") not in used and r.get("name") not in used_meals]
     day_act_names     = [n for n in day_plan.get("activities", []) if n not in used]
     day_plan_filtered = {**day_plan, "activities": day_act_names}
+
+    # Also nullify pinned meal slots that point to already-used venues.
+    for meal_key in ("breakfast_place", "coffee_place", "lunch_restaurant", "dinner_restaurant"):
+        if day_plan_filtered.get(meal_key) in used_meals:
+            day_plan_filtered = {**day_plan_filtered, meal_key: None}
 
     candidates = resolve_candidates(available_acts, day_plan_filtered, available_rests)
 
@@ -1409,6 +1418,28 @@ def _used_activities(results: dict, current_plan_keys: set) -> set:
         for slot in day_data.get("slots", []):
             if slot.get("slot_type") == "activity" and slot.get("name"):
                 used.add(slot["name"])
+    return used
+
+
+_GENERIC_MEAL_NAMES = frozenset({
+    "Morning Coffee & Pastry", "Lunch", "Dinner", "Snack / coffee break",
+})
+
+
+def _used_meal_venues(results: dict, current_plan_keys: set) -> set:
+    """Collect named restaurant/venue names already used in meal slots on prior days."""
+    used: set[str] = set()
+    for key, wrapped in results.items():
+        if key not in current_plan_keys:
+            continue
+        day_data = _inner_data(wrapped)
+        if not isinstance(day_data, dict):
+            continue
+        for slot in day_data.get("slots", []):
+            if slot.get("slot_type") == "meal":
+                name = slot.get("name", "")
+                if name and name not in _GENERIC_MEAL_NAMES:
+                    used.add(name)
     return used
 
 
