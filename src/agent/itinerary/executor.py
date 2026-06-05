@@ -18,8 +18,8 @@ as a plan step.
 from __future__ import annotations
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage
 
+from agent.core.llm import silent
 from agent.itinerary.schemas import ExecutionPlan
 from agent.itinerary.step_handlers import (
     handle_fetch_activities,
@@ -36,7 +36,7 @@ from agent.core.state import AgentState
 
 class ItineraryExecutorNode:
     def __init__(self, llm: BaseChatModel) -> None:
-        self.llm = llm
+        self.llm = silent(llm)
 
     def __call__(self, state: AgentState) -> dict:
         plan_state = state.get("itinerary_plan", {})
@@ -154,5 +154,5 @@ def _state_update(current_index, plan_state, results, history,
             "step_results":      results,
             "execution_history": history,
         },
-        "messages": [AIMessage(content="\n".join(log_lines), name="executor_log")],
+        "progress_log": ["\n".join(log_lines)],
     }

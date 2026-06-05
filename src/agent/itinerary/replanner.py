@@ -30,8 +30,9 @@ import json
 from typing import Optional
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 
+from agent.core.llm import silent
 from agent.core.state import AgentState
 from agent.itinerary.formatter import _generate_fallback_markdown
 from agent.itinerary.step_handlers import _drop_stale_budget, handle_verify_budget
@@ -245,7 +246,7 @@ def _strip_json_fences(s: str) -> str:
 
 class ItineraryReplannerNode:
     def __init__(self, llm: BaseChatModel) -> None:
-        self.llm = llm
+        self.llm = silent(llm)
 
     def __call__(self, state: AgentState) -> dict:
         plan_state    = state.get("itinerary_plan", {})
@@ -284,13 +285,10 @@ class ItineraryReplannerNode:
                     "itinerary_feasible":      False,
                     "replanner_action":        "done",
                     "itinerary_fallback_reason": hard_reason,
-                    "messages": [AIMessage(
-                        content=(
-                            f"❌ **REPLANNER → DONE (max replans={MAX_REPLANS} reached)**\n"
-                            f"*Last error:* `{step_type}` — {error_msg}"
-                        ),
-                        name="replanner_log",
-                    )],
+                    "progress_log": [
+                        f"❌ **REPLANNER → DONE (max replans={MAX_REPLANS} reached)**\n"
+                        f"*Last error:* `{step_type}` — {error_msg}"
+                    ],
                 }
 
             # Soft replan
@@ -311,16 +309,13 @@ class ItineraryReplannerNode:
                     "replan_context": replan_ctx,
                     "replan_count":   replan_count,  # Planner increments on its side
                 },
-                "messages": [AIMessage(
-                    content=(
-                        f"🔄 **REPLANNER → REPLAN** "
-                        f"(attempt {replan_count}/{MAX_REPLANS})\n"
-                        f"*Failed step:* `{step_type}`\n"
-                        f"*Error:* {error_msg}\n"
-                        f"*Hint:* {replan_hint}"
-                    ),
-                    name="replanner_log",
-                )],
+                "progress_log": [
+                    f"🔄 **REPLANNER → REPLAN** "
+                    f"(attempt {replan_count}/{MAX_REPLANS})\n"
+                    f"*Failed step:* `{step_type}`\n"
+                    f"*Error:* {error_msg}\n"
+                    f"*Hint:* {replan_hint}"
+                ],
             }
 
         # ── B. Per-step critic for fetch results ───────────────────────────
@@ -341,13 +336,10 @@ class ItineraryReplannerNode:
                         "itinerary_feasible":       False,
                         "replanner_action":         "done",
                         "itinerary_fallback_reason": hard_reason,
-                        "messages": [AIMessage(
-                            content=(
-                                f"❌ **REPLANNER → DONE (max replans={MAX_REPLANS} reached)**\n"
-                                f"*Critic:* `{step_type}` — {verdict['verdict']}"
-                            ),
-                            name="replanner_log",
-                        )],
+                        "progress_log": [
+                            f"❌ **REPLANNER → DONE (max replans={MAX_REPLANS} reached)**\n"
+                            f"*Critic:* `{step_type}` — {verdict['verdict']}"
+                        ],
                     }
                 replan_ctx = _build_replan_context(
                     error_code="CRITIC_REJECT",
@@ -366,16 +358,13 @@ class ItineraryReplannerNode:
                         "replan_context": replan_ctx,
                         "replan_count":   replan_count,
                     },
-                    "messages": [AIMessage(
-                        content=(
-                            f"🔄 **REPLANNER → REPLAN** (critic reject, "
-                            f"attempt {replan_count}/{MAX_REPLANS})\n"
-                            f"*Step:* `{step_type}`\n"
-                            f"*Verdict:* {verdict['verdict']}\n"
-                            f"*Hint:* {verdict.get('replan_hint', '')}"
-                        ),
-                        name="replanner_log",
-                    )],
+                    "progress_log": [
+                        f"🔄 **REPLANNER → REPLAN** (critic reject, "
+                        f"attempt {replan_count}/{MAX_REPLANS})\n"
+                        f"*Step:* `{step_type}`\n"
+                        f"*Verdict:* {verdict['verdict']}\n"
+                        f"*Hint:* {verdict.get('replan_hint', '')}"
+                    ],
                 }
 
         # ── C. More steps remain — keep going ─────────────────────────────
@@ -455,13 +444,10 @@ class ItineraryReplannerNode:
                                 # Drop stale day schedules so executor rebuilds them
                                 "step_results": results_for_replan,
                             },
-                            "messages": [AIMessage(
-                                content=(
-                                    f"🔄 **REPLANNER → REPLAN** (LLM quality reject)\n"
-                                    f"*Reason:* {reason}"
-                                ),
-                                name="replanner_log",
-                            )],
+                            "progress_log": [
+                                f"🔄 **REPLANNER → REPLAN** (LLM quality reject)\n"
+                                f"*Reason:* {reason}"
+                            ],
                         }
                     # Out of replans — fall through to fallback markdown
                     content = ""
@@ -486,7 +472,7 @@ class ItineraryReplannerNode:
             },
             "itinerary_feasible": True,
             "replanner_action":   "done",
-            "messages": [AIMessage(content="✅ **Itinerary complete.**", name="replanner_log")],
+            "progress_log": ["✅ **Itinerary complete.**"],
         }
 
     # ── Per-step critic ────────────────────────────────────────────────────

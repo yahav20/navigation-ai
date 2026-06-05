@@ -1,8 +1,8 @@
 """Replanner node — reviews execution results and decides to continue or finish."""
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage
 from pydantic import BaseModel, Field
 
+from agent.core.llm import silent
 from agent.core.state import AgentState
 from agent.advisor.planner import AdvisorPlan, PlannedToolCall, _step_to_args
 from agent.advisor.executor import _is_empty, format_tool_result
@@ -88,9 +88,9 @@ class AdvisorReplannerNode:
     """Review execution progress and update the plan or signal completion."""
 
     def __init__(self, extraction_model: BaseChatModel) -> None:
-        self.pruner = extraction_model.with_structured_output(
+        self.pruner = silent(extraction_model.with_structured_output(
             _RemainingPlan, method="function_calling"
-        )
+        ))
 
     def __call__(self, state: AgentState) -> dict:
         render_node("advisor_replanner")
@@ -123,7 +123,7 @@ class AdvisorReplannerNode:
                 render_node_status(f"[Replanner] Plan complete. Proceeding to formatter.")
             return {
                 "advisor_plan": [],
-                "messages": [AIMessage(content=build_data_collected(past_results))],
+                "advisor_data_collected": build_data_collected(past_results),
                 "advisor_replan_count": replan_count + 1,
             }
 
@@ -173,7 +173,7 @@ class AdvisorReplannerNode:
             render_node_status(f"[Replanner] Sufficient data collected. Proceeding to formatter.")
             return {
                 "advisor_plan": [],
-                "messages": [AIMessage(content=build_data_collected(past_results))],
+                "advisor_data_collected": build_data_collected(past_results),
                 "advisor_replan_count": replan_count + 1,
             }
 

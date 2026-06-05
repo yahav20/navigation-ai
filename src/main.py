@@ -169,7 +169,14 @@ def _run_turn(
             break
 
         # ── HITL: show the question and collect the user's choice ──────
-        if isinstance(pending_interrupt, dict) and "options" in pending_interrupt:
+        if isinstance(pending_interrupt, dict) and pending_interrupt.get("action_requests"):
+            # Agent Inbox HITLRequest schema (e.g. save_plan), shared with
+            # agent-chat-ui. The CLI resumes with a plain "yes"/"no" string,
+            # which the node's _parse_decision handles.
+            action = pending_interrupt["action_requests"][0]
+            ui.render_agent_message("Atlas", action.get("description") or "Continue? (yes/no)")
+            user_response = ui.ask_user(prompt_session, state=current_state)
+        elif isinstance(pending_interrupt, dict) and "options" in pending_interrupt:
             # Structured interrupt: render the question then show arrow-key picker.
             question = pending_interrupt.get("question", "")
             if question:

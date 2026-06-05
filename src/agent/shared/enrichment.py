@@ -5,6 +5,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import ToolMessage
 from langchain_core.runnables import Runnable
 
+from agent.core.llm import silent
 from agent.core.models import RefusalDetection, UserPreferences
 from agent.core.state import AgentState
 from providers import SQLiteDataProvider
@@ -99,7 +100,7 @@ def _detect_refusals(state: AgentState, extraction_model: BaseChatModel, asked: 
     last_user = [m for m in state["messages"] if getattr(m, "type", "") == "human"]
     if not last_user:
         return None
-    return extraction_model.with_structured_output(RefusalDetection).invoke([
+    return silent(extraction_model.with_structured_output(RefusalDetection)).invoke([
         {
             "role": "system",
             "content": (
@@ -360,7 +361,7 @@ def _extract_general_preferences(
     raw_content: str = last_user_message.content
     normalised_content = _normalise_typos(raw_content)
 
-    extracted: UserPreferences = extraction_model.with_structured_output(UserPreferences).invoke([
+    extracted: UserPreferences = silent(extraction_model.with_structured_output(UserPreferences)).invoke([
         {
             "role": "system",
             "content": (

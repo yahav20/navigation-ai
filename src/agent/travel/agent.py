@@ -10,6 +10,7 @@ from typing import Any
 from langchain_core.messages import AIMessage
 from langchain_core.runnables import Runnable
 
+from agent.core.llm import silent
 from agent.core.models import TravelPlan, TravelPlanCuration
 from agent.core.state import AgentState
 from tools.dependencies import data_provider
@@ -454,7 +455,7 @@ class TravelAgentNode:
 
     def __init__(self, response_model: Runnable) -> None:
         """Wrap the response model with structured output for curation."""
-        self.curation_model = response_model.with_structured_output(TravelPlanCuration)
+        self.curation_model = silent(response_model.with_structured_output(TravelPlanCuration))
 
     def __call__(self, state: AgentState) -> dict:
         """Return either `travel_plan` (success) or a fallback `AIMessage` (no data)."""

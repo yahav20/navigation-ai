@@ -3,6 +3,7 @@ from datetime import date
 
 from langchain_core.language_models import BaseChatModel
 
+from agent.core.llm import silent
 from agent.core.models import TravelMetadata
 from agent.core.state import AgentState
 
@@ -28,7 +29,7 @@ class MetadataNode:
             and not getattr(msg, "tool_calls", None)
         ][-6:]
 
-        extractor = self.extraction_model.with_structured_output(TravelMetadata)
+        extractor = silent(self.extraction_model.with_structured_output(TravelMetadata))
 
         current_trip_days = state.get("trip_days")
         existing_summary = state.get("summary", "")
