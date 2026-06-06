@@ -14,6 +14,8 @@ from __future__ import annotations
 from typing import Optional
 from langchain_core.tools import tool, ToolException
 
+from agent.shared.pricing import activity_group_price, flight_group_price, hotel_group_price
+from agent.shared.travelers import compute_default_rooms
 from providers.flights import search_flights_with_fallback
 from providers.xotelo import xotelo_list_hotels
 from security import validate_city, validate_positive_number
@@ -105,10 +107,16 @@ def calculate_trip_cost(
     trip_days: int,
     estimated_activities_budget: float,
     estimated_meals_budget_per_day: float,
+    num_adults: int = 1,
+    num_children: int = 0,
+    num_rooms: int = 1,
 ) -> dict:
     """
     Calculate total estimated trip cost and verify against the user's budget.
-    Returns a breakdown by category plus a grand total.
+    Returns a per-person breakdown plus a group total scaled by the party size.
+
+    num_adults / num_children drive flight and activity/meal group costs.
+    num_rooms drives the hotel group cost (billed per room, not per person).
     """
     try:
         validate_positive_number(flight_price)
@@ -119,6 +127,7 @@ def calculate_trip_cost(
         hotel_total = hotel_price_per_night * trip_days
         meals_total = estimated_meals_budget_per_day * trip_days
 
+        # Per-person solo total (backwards-compatible)
         total = (
             flight_price
             + return_flight_price
@@ -126,13 +135,33 @@ def calculate_trip_cost(
             + estimated_activities_budget
             + meals_total
         )
+
+        # Group totals via shared pricing formulas
+        g_outbound   = flight_group_price(flight_price,        num_adults, num_children)
+        g_return     = flight_group_price(return_flight_price, num_adults, num_children)
+        g_hotel      = hotel_group_price(hotel_price_per_night, num_rooms, trip_days)
+        g_activities = activity_group_price(estimated_activities_budget, num_adults, num_children)
+        g_meals      = activity_group_price(meals_total,                  num_adults, num_children)
+        group_total  = g_outbound + g_return + g_hotel + g_activities + g_meals
+
         return {
+            # Per-person fields (unchanged for backward-compatibility)
             "outbound_flight":  round(flight_price, 2),
             "return_flight":    round(return_flight_price, 2),
             "hotel_total":      round(hotel_total, 2),
             "activities_total": round(estimated_activities_budget, 2),
             "meals_total":      round(meals_total, 2),
             "grand_total":      round(total, 2),
+            # Group fields
+            "group_outbound_flight":  round(g_outbound,   2),
+            "group_return_flight":    round(g_return,     2),
+            "group_hotel_total":      round(g_hotel,      2),
+            "group_activities_total": round(g_activities, 2),
+            "group_meals_total":      round(g_meals,      2),
+            "group_grand_total":      round(group_total,  2),
+            "num_adults":   num_adults,
+            "num_children": num_children,
+            "num_rooms":    num_rooms,
         }
     except Exception as e:
         raise ToolException(f"calculate_trip_cost failed: {e}")

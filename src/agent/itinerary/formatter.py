@@ -22,6 +22,8 @@ import json
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from agent.core.state import AgentState
+from agent.shared.pricing import activity_group_price, flight_group_price, hotel_group_price, group_label
+from agent.shared.travelers import compute_default_rooms
 
 REASON_HUMANIZE_SYSTEM = """You are a friendly travel assistant.
 
@@ -60,7 +62,7 @@ class ItineraryFormatterNode:
         results   = plan_state.get("step_results", {})
         budget    = float(state.get("total_budget") or 0)
         mode      = state.get("itinerary_mode", "standalone")
-        budget_md = _budget_section_md(results, budget, mode)
+        budget_md = _budget_section_md(results, budget, mode, state)
         if budget_md:
             content = content + "\n" + budget_md
 
@@ -90,17 +92,33 @@ class ItineraryFormatterNode:
         travel_plan  = state.get("travel_plan") or {}
         hotels       = travel_plan.get("hotels", [])
 
+        num_adults   = int(state.get("num_adults")   or 1)
+        num_children = int(state.get("num_children") or 0)
+        num_rooms    = int(state.get("num_rooms")    or compute_default_rooms(num_adults, num_children))
+        is_group     = num_adults + num_children > 1
+        glabel       = group_label(num_adults, num_children)
+
         lines = ["## 🛫 Flights & Accommodation", ""]
 
         # ── Outbound ──────────────────────────────────────────────────────
         if outbound_raw:
-            lines.append(_fmt_flight_line("✈️ **Outbound**", outbound_raw, origin, destination))
+            ob_line = _fmt_flight_line("✈️ **Outbound**", outbound_raw, origin, destination)
+            if is_group:
+                ob_price = float(outbound_raw.get("price", 0) or 0)
+                ob_group = flight_group_price(ob_price, num_adults, num_children)
+                ob_line += f" | 👥 **${ob_group:.0f} for {glabel}**"
+            lines.append(ob_line)
         elif origin and destination:
             lines.append(f"✈️ **Outbound:** {origin} → {destination}")
 
         # ── Return ────────────────────────────────────────────────────────
         if return_raw:
-            lines.append(_fmt_flight_line("🔙 **Return**", return_raw, destination, origin))
+            ret_line = _fmt_flight_line("🔙 **Return**", return_raw, destination, origin)
+            if is_group:
+                ret_price = float(return_raw.get("price", 0) or return_raw.get("total_price", 0) or 0)
+                ret_group = flight_group_price(ret_price, num_adults, num_children)
+                ret_line += f" | 👥 **${ret_group:.0f} for {glabel}**"
+            lines.append(ret_line)
         elif destination and origin:
             lines.append(f"🔙 **Return:** {destination} → {origin} *(details not confirmed)*")
 
@@ -109,10 +127,15 @@ class ItineraryFormatterNode:
             h0       = hotels[0]
             name     = h0.get("name", "Hotel")
             stars    = h0.get("stars")
-            price    = h0.get("price_per_night", 0)
+            price    = float(h0.get("price_per_night", 0) or 0)
             star_str = f" — {stars:.0f}★" if stars else ""
+            hotel_line = f"🏨 **Hotel:** {name}{star_str} | **${price:.0f}/night**"
+            if is_group and price:
+                trip_days = state.get("trip_days", 0)
+                h_group   = hotel_group_price(price, num_rooms, int(trip_days))
+                hotel_line += f" | 👥 **${h_group:.0f} for {num_rooms} room{'s' if num_rooms > 1 else ''} × {trip_days} nights**"
             lines.append("")
-            lines.append(f"🏨 **Hotel:** {name}{star_str} | **${float(price):.0f}/night**")
+            lines.append(hotel_line)
 
         return "\n\n".join(lines)
 
@@ -145,17 +168,30 @@ class ItineraryFormatterNode:
         price_hotel = float(stored_prices.get("avg_hotel_per_night", 0) or 0)
         hotel_total = price_hotel * trip_days if trip_days else price_hotel
 
+        num_adults   = int(state.get("num_adults")   or 1)
+        num_children = int(state.get("num_children") or 0)
+        num_rooms    = int(state.get("num_rooms")    or compute_default_rooms(num_adults, num_children))
+        is_group     = num_adults + num_children > 1
+        glabel       = group_label(num_adults, num_children)
+
+        # Group flight and hotel costs
+        g_flight_total = (flight_group_price(price_out, num_adults, num_children)
+                          + flight_group_price(price_ret, num_adults, num_children))
+        g_hotel_total  = hotel_group_price(price_hotel, num_rooms, trip_days) if trip_days else 0.0
+        group_suffix_flights = f" | 👥 **~${g_flight_total:.0f} for {glabel}**" if is_group else ""
+        group_suffix_hotel   = (f" | 👥 **~${g_hotel_total:.0f} for {num_rooms} room{'s' if num_rooms > 1 else ''} × {trip_days} nights**"
+                                if is_group and price_hotel else "")
+
         if is_min and critic_action == "min_travel":
-            # Read the min grand_total from verify_budget_0 data
             b_data    = _unwrap_result(results.get(budget_key, {}))
-            min_total = float(b_data.get("grand_total", 0)) if isinstance(b_data, dict) else 0.0
+            min_total = float(b_data.get("group_grand_total") or b_data.get("grand_total", 0)) if isinstance(b_data, dict) else 0.0
 
             lines = [
                 "## 💡 Approximate Travel Cost *(no booking confirmed)*",
                 "",
-                f"✈️ **Flights** ({route}): cheapest available **~${price_out + price_ret:.0f}**",
+                f"✈️ **Flights** ({route}): cheapest available **~${price_out + price_ret:.0f}**{group_suffix_flights}",
                 "",
-                f"🏨 **Hotel** ({destination}): cheapest available **~${price_hotel:.0f}/night**",
+                f"🏨 **Hotel** ({destination}): cheapest available **~${price_hotel:.0f}/night**{group_suffix_hotel}",
                 "",
                 "> *Prices shown are the lowest currently available — actual rates may vary.*",
                 "",
@@ -173,11 +209,11 @@ class ItineraryFormatterNode:
             lines = [
                 "## 💡 Approximate Travel Cost *(minimum available — no booking confirmed)*",
                 "",
-                f"✈️ **Flights** ({route}): **~${price_out + price_ret:.0f}** *(minimum available)*",
+                f"✈️ **Flights** ({route}): **~${price_out + price_ret:.0f}** *(minimum available)*{group_suffix_flights}",
                 "",
                 f"🏨 **Hotel** ({destination}): **~${price_hotel:.0f}/night**"
                 + (f" (~${hotel_total:.0f} for {trip_days} nights)" if trip_days else "")
-                + " *(minimum available)*",
+                + f" *(minimum available)*{group_suffix_hotel}",
                 "",
                 "> *Prices reflect the cheapest currently available options. Actual booking rates may vary.*",
             ]
@@ -188,10 +224,12 @@ class ItineraryFormatterNode:
             "## 💡 Approximate Travel Cost *(no booking confirmed)*",
             "",
             f"✈️ **Flights** ({route}): **~${price_out + price_ret:.0f}**"
-            + (f" *(~${price_out:.0f} outbound + ~${price_ret:.0f} return)*" if price_out and price_ret else ""),
+            + (f" *(~${price_out:.0f} outbound + ~${price_ret:.0f} return)*" if price_out and price_ret else "")
+            + group_suffix_flights,
             "",
             f"🏨 **Hotel** ({destination}): **~${price_hotel:.0f}/night**"
-            + (f" (~${hotel_total:.0f} for {trip_days} nights)" if trip_days else ""),
+            + (f" (~${hotel_total:.0f} for {trip_days} nights)" if trip_days else "")
+            + group_suffix_hotel,
             "",
             "> *Market averages for planning purposes only. Actual prices may vary.*",
         ]
@@ -207,7 +245,8 @@ class ItineraryFormatterNode:
         budget_key  = next((k for k in results if k.startswith("verify_budget")), None)
         if budget_key:
             data        = results[budget_key].get("data") or {}
-            grand_total = float(data.get("grand_total", 0))
+            # Prefer the group total; fall back to solo grand_total
+            grand_total = float(data.get("group_grand_total") or data.get("grand_total", 0))
         overage = grand_total - budget
         banner = (
             f"> ⚠️ **Over Budget Notice:** This itinerary costs approximately "
@@ -265,8 +304,16 @@ class ItineraryFormatterNode:
         return gist
 
 
-def _generate_fallback_markdown(results: dict, trip_days: int, budget: float, mode: str = "standalone") -> str:
+def _generate_fallback_markdown(
+    results: dict, trip_days: int, budget: float, mode: str = "standalone",
+    state: dict | None = None,
+) -> str:
     """Plain-text itinerary renderer — used when the LLM quality review fails."""
+    num_adults   = int((state or {}).get("num_adults")   or 1)
+    num_children = int((state or {}).get("num_children") or 0)
+    is_group     = num_adults + num_children > 1
+    glabel       = group_label(num_adults, num_children) if is_group else ""
+
     lines = ["# ✈️ Your Trip Itinerary\n"]
 
     hotel_name = None
@@ -292,21 +339,38 @@ def _generate_fallback_markdown(results: dict, trip_days: int, budget: float, mo
             continue
         day_data = _unwrap_result(results[key])
         lines.append(f"\n## 📅 Day {d} — {day_data.get('theme', '')}")
-        lines.append("\n| Time | Activity | Duration | Est. Cost |")
-        lines.append("|------|----------|----------|-----------|")
+        if is_group:
+            lines.append(f"\n| Time | Activity | Duration | Per Person | Group ({glabel}) |")
+            lines.append("|------|----------|----------|-----------|----------------|")
+        else:
+            lines.append("\n| Time | Activity | Duration | Est. Cost |")
+            lines.append("|------|----------|----------|-----------|")
         for slot in day_data.get("slots", []):
             icon = {"activity": "🎯", "meal": "🍽️", "transport": "🚕",
                     "rest": "😴", "checkin": "🏨"}.get(slot.get("slot_type", ""), "•")
-            lines.append(
-                f"| {slot.get('time', '')} | {icon} {slot.get('name', '')} | "
-                f"{slot.get('duration_minutes', '')} min | ${slot.get('estimated_cost', 0):.0f} |"
-            )
-        lines.append(f"\n**Day total: ${day_data.get('day_cost', 0):.0f}**")
+            cost = float(slot.get("estimated_cost", 0))
+            if is_group:
+                group_cost = activity_group_price(cost, num_adults, num_children)
+                lines.append(
+                    f"| {slot.get('time', '')} | {icon} {slot.get('name', '')} | "
+                    f"{slot.get('duration_minutes', '')} min | ${cost:.0f} | ${group_cost:.0f} |"
+                )
+            else:
+                lines.append(
+                    f"| {slot.get('time', '')} | {icon} {slot.get('name', '')} | "
+                    f"{slot.get('duration_minutes', '')} min | ${cost:.0f} |"
+                )
+        day_cost = float(day_data.get("day_cost", 0))
+        if is_group:
+            day_group = activity_group_price(day_cost, num_adults, num_children)
+            lines.append(f"\n**Day total: ${day_cost:.0f} pp | ${day_group:.0f} for {glabel}**")
+        else:
+            lines.append(f"\n**Day total: ${day_cost:.0f}**")
 
     return "\n".join(lines)
 
 
-def _budget_section_md(results: dict, budget: float, mode: str) -> str:
+def _budget_section_md(results: dict, budget: float, mode: str, state: dict | None = None) -> str:
     """Deterministic budget summary section — appended after the LLM day-schedule markdown."""
     budget_key = next((k for k in results if k.startswith("verify_budget")), None)
     if not budget_key:
@@ -315,48 +379,86 @@ def _budget_section_md(results: dict, budget: float, mode: str) -> str:
     if not isinstance(b, dict) or b.get("grand_total") is None:
         return ""
 
-    # Determine if this is a min-price calculation or avg-price (for standalone labels)
     avg_p  = b.get("avg_prices") or {}
     is_min = "minimum" in str(avg_p.get("note", "")).lower()
 
+    # Group sizing — read from state if provided, else fall back to what calculate_trip_cost stored
+    num_adults   = int((state or {}).get("num_adults")   or b.get("num_adults",   1))
+    num_children = int((state or {}).get("num_children") or b.get("num_children", 0))
+    num_rooms    = int((state or {}).get("num_rooms")    or b.get("num_rooms",    1))
+    is_group     = num_adults + num_children > 1
+    glabel       = group_label(num_adults, num_children)
+
+    has_group = is_group and b.get("group_grand_total") is not None
+
     lines: list[str] = ["\n\n---------------------------------------------------------------------------------------\n"]
     lines.append("## 💰 Budget Summary\n")
-    lines.append("| Category | Cost |")
-    lines.append("|----------|------|")
+
+    if has_group:
+        lines.append(f"| Category | Per Person | Group ({glabel}) |")
+        lines.append("|----------|-----------|----------------|")
+    else:
+        lines.append("| Category | Cost |")
+        lines.append("|----------|------|")
+
+    def _row(label: str, solo: float, group_val: float | None = None) -> str:
+        if has_group and group_val is not None:
+            return f"| {label} | ${solo:.0f} | ${group_val:.0f} |"
+        return f"| {label} | ${solo:.0f} |"
 
     if mode == "with_travel_data":
         ob_price  = float(b.get("outbound_flight", 0) or 0)
         ret_price = float(b.get("return_flight",   0) or 0)
         if ob_price:
-            lines.append(f"| Outbound Flight | ${ob_price:.0f} |")
+            lines.append(_row("Outbound Flight", ob_price, b.get("group_outbound_flight")))
         if ret_price:
-            lines.append(f"| Return Flight | ${ret_price:.0f} |")
+            lines.append(_row("Return Flight", ret_price, b.get("group_return_flight")))
         hotel_label_prefix = ""
         hotel_suffix       = ""
     else:
-        # Standalone: show flight estimate row with appropriate label
         out = float(avg_p.get("avg_flight_price", 0) or 0)
         ret = float(avg_p.get("avg_return_flight_price", 0) or 0)
         if out or ret:
             flight_label = "Flights (minimum available)" if is_min else "~ Flights (estimated)"
-            lines.append(f"| {flight_label} | ${out + ret:.0f} |")
+            g_flights = (float(b.get("group_outbound_flight", 0) or 0)
+                         + float(b.get("group_return_flight", 0) or 0))
+            lines.append(_row(flight_label, out + ret, g_flights if has_group else None))
         hotel_label_prefix = "" if is_min else "~ "
         hotel_suffix       = " (minimum available)" if is_min else " (estimated)"
 
+    # Remaining per-category rows (skip group_ keys and metadata)
+    _skip = {"grand_total", "group_grand_total", "avg_prices",
+             "outbound_flight", "return_flight",
+             "group_outbound_flight", "group_return_flight",
+             "num_adults", "num_children", "num_rooms"}
     for cat, val in b.items():
-        if cat in ("grand_total", "avg_prices", "outbound_flight", "return_flight"):
+        if cat in _skip:
             continue
         if not isinstance(val, (int, float)):
+            continue
+        # Skip group_ counterparts — they're paired with their solo row below
+        if cat.startswith("group_"):
             continue
         label = cat.replace("_", " ").title()
         if "hotel" in cat.lower():
             label = f"{hotel_label_prefix}{label}{hotel_suffix}"
-        lines.append(f"| {label} | ${float(val):.0f} |")
+            if is_group and num_rooms > 1:
+                label += f" ({num_rooms} rooms)"
+        group_key = f"group_{cat}"
+        group_val = float(b[group_key]) if group_key in b and has_group else None
+        lines.append(_row(label, float(val), group_val))
 
-    grand = float(b.get("grand_total", 0))
-    lines.append(f"\n**Grand Total: ${grand:.0f}**")
+    grand       = float(b.get("grand_total", 0))
+    group_grand = float(b.get("group_grand_total", grand))
+
+    if has_group:
+        lines.append(f"\n**Grand Total: ${grand:.0f} pp | ${group_grand:.0f} for {glabel}**")
+    else:
+        lines.append(f"\n**Grand Total: ${grand:.0f}**")
+
     if budget:
-        remaining = budget - grand
+        compare = group_grand if has_group else grand
+        remaining = budget - compare
         emoji = "✅" if remaining >= 0 else "⚠️"
         lines.append(f"\n{emoji} Budget remaining: ${remaining:.0f}")
 
