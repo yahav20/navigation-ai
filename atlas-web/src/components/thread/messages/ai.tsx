@@ -14,6 +14,8 @@ import { isAgentInboxInterruptSchema } from "@/lib/agent-inbox-interrupt";
 import { ThreadView } from "../agent-inbox";
 import { useQueryState, parseAsBoolean } from "nuqs";
 import { GenericInterruptView } from "./generic-interrupt";
+import { getQuestionOptionsInterrupt } from "@/lib/question-options-interrupt";
+import { QuestionOptionsInterruptView } from "./question-options-interrupt";
 import { useArtifact } from "../artifact";
 
 function CustomComponent({
@@ -84,15 +86,22 @@ function Interrupt({
     : (((interrupt as { value?: unknown } | undefined)?.value ??
         interrupt) as Record<string, any>);
 
+  const showInterrupt = isLastMessage || hasNoAIOrToolMessages;
+  const isAgentInbox = isAgentInboxInterruptSchema(interrupt);
+  const questionOptions = isAgentInbox
+    ? null
+    : getQuestionOptionsInterrupt(interrupt);
+
   return (
     <>
-      {isAgentInboxInterruptSchema(interrupt) &&
-        (isLastMessage || hasNoAIOrToolMessages) && (
-          <ThreadView interrupt={interrupt} />
-        )}
+      {isAgentInbox && showInterrupt && <ThreadView interrupt={interrupt} />}
+      {questionOptions && showInterrupt && (
+        <QuestionOptionsInterruptView interrupt={questionOptions} />
+      )}
       {interrupt &&
-      !isAgentInboxInterruptSchema(interrupt) &&
-      (isLastMessage || hasNoAIOrToolMessages) ? (
+      !isAgentInbox &&
+      !questionOptions &&
+      showInterrupt ? (
         <GenericInterruptView interrupt={fallbackValue} />
       ) : null}
     </>
@@ -119,7 +128,10 @@ export function AssistantMessage({
   const lastMessage = thread.messages.length > 0
   ? thread.messages[thread.messages.length - 1]
   : undefined;
-const isLastMessage = lastMessage?.id === message?.id;
+// `message === undefined` is the dedicated standalone interrupt bubble rendered
+// by the thread when no real AssistantMessage will host the interrupt (e.g. the
+// graph interrupted right after a human turn) — always treat it as the last.
+const isLastMessage = message === undefined || lastMessage?.id === message?.id;
   const hasNoAIOrToolMessages = !thread.messages.find(
     (m) => m.type === "ai" || m.type === "tool",
   );

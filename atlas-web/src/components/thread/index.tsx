@@ -353,6 +353,7 @@ export function Thread() {
     stream.submit(
       { messages: [...toolMessages, newHumanMessage], context },
       {
+        config: { recursion_limit: 100 },
         streamMode: ["values"],
         streamSubgraphs: true,
         streamResumable: true,
@@ -382,6 +383,7 @@ export function Thread() {
     setFirstTokenReceived(false);
     stream.submit(undefined, {
       checkpoint: parentCheckpoint,
+      config: { recursion_limit: 100 },
       streamMode: ["values"],
       streamSubgraphs: true,
       streamResumable: true,
@@ -557,7 +559,13 @@ export function Thread() {
                         )}
                       </motion.div>
                     ))}
-                  {hasNoAIOrToolMessages && !!stream.interrupt && (
+                  {/* Render a standalone interrupt bubble when no AssistantMessage
+                      will host it: either there are no AI/tool messages yet, or the
+                      graph interrupted right after a human turn (last message is human,
+                      e.g. plan_check's HITL after the user supplies trip details). */}
+                  {(hasNoAIOrToolMessages ||
+                    messages[messages.length - 1]?.type === "human") &&
+                    !!stream.interrupt && (
                     <motion.div
                       key="interrupt-msg"
                       initial={{ opacity: 0, y: 16 }}
