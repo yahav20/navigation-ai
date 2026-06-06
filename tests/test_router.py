@@ -367,6 +367,40 @@ TESTS: list[TestCase] = [
             note="Interest without explicit 'show me flights/book' → advisor (or new_travel_plan)",
         ),
     ]),
+
+    # F-f: short follow-up replies that answer a previous AI question must NOT be out_of_scope
+    TestCase("F11", "F", "Short temporal reply answering AI's question → NOT out_of_scope", [
+        TurnSpec(
+            "This month",
+            expected_intent="new_travel_plan",
+            acceptable_intents=["advisor", "update_travel_plan"],
+            setup_state={
+                "destination_city": "Paris",
+                "current_city": "Tel Aviv",
+                "total_budget": 2000.0,
+                "trip_days": 2,
+                "prior_messages": [
+                    ("ai", "I'd love to help you plan your trip! Could you let me know which month you're thinking of starting your adventure?"),
+                ],
+            },
+            note="'This month' is a reply to AI's question about travel dates — must NOT be out_of_scope",
+        ),
+    ]),
+    TestCase("F12", "F", "Short 'yes' reply answering AI's question in active trip → NOT out_of_scope", [
+        TurnSpec(
+            "Yes",
+            expected_intent="new_travel_plan",
+            acceptable_intents=["advisor", "update_travel_plan", "build_itinerary"],
+            setup_state={
+                "destination_city": "Paris",
+                "current_city": "Tel Aviv",
+                "prior_messages": [
+                    ("ai", "Would you like me to search for flights from Tel Aviv to Paris?"),
+                ],
+            },
+            note="'Yes' as confirmation in active trip context — must NOT be out_of_scope",
+        ),
+    ]),
 ]
 
 
@@ -388,11 +422,29 @@ def detect_intent(graph, message: str, setup_state: dict | None = None) -> str:
     Stream the graph and capture the router's intent classification.
     Breaks as soon as the router update arrives — sub-agents are never run.
     Returns 'other' when the security gate blocks the message before routing.
+
+    setup_state may include a 'prior_messages' key with a list of
+    (role, content) tuples to inject before the user message, simulating
+    a multi-turn conversation (e.g. a prior AI question that the user is answering).
     """
+    from langchain_core.messages import AIMessage, HumanMessage
+
     config = {"configurable": {"thread_id": str(uuid.uuid4())}}
-    initial_state: dict = {"messages": [("user", message)], "step_count": 0}
+    prior_messages = []
+    extra_state: dict = {}
     if setup_state:
-        initial_state.update(setup_state)
+        extra_state = {k: v for k, v in setup_state.items() if k != "prior_messages"}
+        for role, content in setup_state.get("prior_messages", []):
+            if role == "ai":
+                prior_messages.append(AIMessage(content=content))
+            else:
+                prior_messages.append(HumanMessage(content=content))
+
+    initial_state: dict = {
+        "messages": prior_messages + [("user", message)],
+        "step_count": 0,
+    }
+    initial_state.update(extra_state)
 
     for update in graph.stream(initial_state, config, stream_mode="updates"):
         if "router" in update:

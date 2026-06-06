@@ -32,6 +32,27 @@ class RouterNode:
         else:
             trip_status = "NO ACTIVE TRIP (Start from scratch)"
 
+        # Include recent conversation history so the router can interpret short follow-up
+        # replies (e.g. "This month", "Yes", "Two weeks") in context.
+        recent_messages = messages[-6:] if len(messages) > 6 else messages
+        conversation_history = ""
+        for msg in recent_messages[:-1]:  # everything except the last (user) message
+            role = getattr(msg, "type", "unknown")
+            if role == "human":
+                role_label = "User"
+            elif role == "ai":
+                role_label = "Assistant"
+            else:
+                continue
+            conversation_history += f"{role_label}: {msg.content}\n"
+
+        history_section = (
+            f"\n        Recent conversation (for context only — classify based on user's intent):\n"
+            f"        {conversation_history.strip()}\n"
+            if conversation_history.strip()
+            else ""
+        )
+
         prompt = f"""
         Analyze the user's latest message and classify their core intent.
 
@@ -40,7 +61,7 @@ class RouterNode:
         - Destination: {state.get("destination_city", "None")}
         - Budget: {state.get("total_budget", "None")}
         - Days: {state.get("trip_days", "None")}
-
+        {history_section}
         INTENT DEFINITIONS & DIFFERENCES (when in doubt, use 'advisor'):
         1. 'advisor': The DEFAULT for all travel-related queries. Use for: destination ideas,
            comparing destinations, activities in a city, city overviews, budget exploration,
@@ -48,6 +69,8 @@ class RouterNode:
            visa requirements ("do I need a visa for Japan?"), travel safety ("is Rio safe?"),
            packing questions ("what should I pack for Tokyo?"), local customs and etiquette,
            greetings ("hello", "hi", "thanks"), and capability questions ("what can you do?").
+           Also use for SHORT FOLLOW-UP REPLIES that answer the assistant's previous question
+           about travel details (e.g. "This month", "Next week", "Two weeks", "Yes", "No").
         2. 'new_travel_plan': User commits to a SPECIFIC destination and wants flights/hotels/costs.
            ("I want to fly to Rome — show me flights", "Let's book a trip to Madrid").
            ONLY use when the user is ready to START PLANNING a specific trip, not just exploring.
@@ -57,6 +80,7 @@ class RouterNode:
            "give me ideas for a trip", or "can you help me plan my trip?" → 'advisor', NOT here.
         4. 'update_travel_plan': Changing an existing confirmed plan's parameters (budget, dates, destination).
         5. 'out_of_scope': ONLY for queries with zero travel relevance (coding, math, recipes, sports).
+           Do NOT use out_of_scope for short replies that answer the assistant's travel-related question.
 
         TRANSITION RULE (critical): If the system is in ACTIVE ADVISOR FLOW and the user
         says something like "plan this trip", "let's go", "book this", "sounds good let's do it",
