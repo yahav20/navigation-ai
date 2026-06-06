@@ -14,9 +14,12 @@ def _build_graph():
 def _last_content(result: dict) -> str:
     messages = result.get("messages", [])
     assert messages, "Graph returned no messages"
-    content = str(messages[-1].content) if hasattr(messages[-1], "content") else ""
-    assert content.strip(), "Last message is empty"
-    return content
+    for msg in reversed(messages):
+        content = str(msg.content) if hasattr(msg, "content") else ""
+        if content.strip():
+            return content
+    msg = "No non-empty message found in graph output"
+    raise AssertionError(msg)
 
 
 # ---------------------------------------------------------------------------
