@@ -60,7 +60,10 @@ def run_agent(session_id: str = "default") -> None:
 def _interactive_loop(conn: sqlite3.Connection, session_id: str) -> None:
     checkpointer = SqliteSaver(conn=conn, serde=JsonPlusSerializer())
     graph = build_graph(provider=CHOSEN_PROVIDER, checkpointer=checkpointer)
-    config = {"configurable": {"thread_id": session_id}}
+    # recursion_limit raised from the default 25: the itinerary plan-and-execute
+    # loop spends ~2 super-steps per plan step (executor → replanner), so a
+    # multi-day trip or a critic budget-replan cycle easily exceeds 25.
+    config = {"configurable": {"thread_id": session_id}, "recursion_limit": 100}
 
     saved = graph.get_state(config).values
     resuming = bool(saved)
