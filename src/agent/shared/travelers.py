@@ -39,21 +39,29 @@ def apply_traveler_updates(
     """
     updates: dict = {}
 
-    cur_adults = state.get("num_adults", 1)
-    cur_children = state.get("num_children", 0)
-    cur_rooms = state.get("num_rooms", compute_default_rooms(cur_adults, cur_children))
+    # Keep track of whether each field is actually in state vs. just defaulted.
+    # This matters for the "1 adult" case: new_adults=1 equals the default (1)
+    # but the field is still None in state, so enrichment would ask again.
+    state_adults   = state.get("num_adults")    # None = never explicitly set
+    state_children = state.get("num_children")  # None = never explicitly set
+    cur_adults   = state_adults   if state_adults   is not None else 1
+    cur_children = state_children if state_children is not None else 0
+    cur_rooms    = state.get("num_rooms", compute_default_rooms(cur_adults, cur_children))
 
     people_changed = False
-    if new_adults is not None and new_adults != cur_adults:
+    # Update adults if: (a) never set in state yet (even if value == default 1),
+    # or (b) value actually changes from what's already stored.
+    if new_adults is not None and (state_adults is None or new_adults != cur_adults):
         updates["num_adults"] = max(0, new_adults)
         cur_adults = updates["num_adults"]
         people_changed = True
         # Seed children to 0 the first time adults are explicitly provided so
         # the field is always a concrete int once the group size is known.
-        if state.get("num_children") is None and new_children is None:
+        if state_children is None and new_children is None:
             updates["num_children"] = 0
             cur_children = 0
-    if new_children is not None and new_children != cur_children:
+    # Same "never set vs default" logic for children.
+    if new_children is not None and (state_children is None or new_children != cur_children):
         updates["num_children"] = max(0, new_children)
         cur_children = updates["num_children"]
         people_changed = True

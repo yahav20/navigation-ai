@@ -225,7 +225,9 @@ class TravelPlan(BaseModel):
     total_budget: float | None
     weather: dict[str, str]
     best_time: dict[str, Any]
-    lowest_total_estimate: float | None
+    lowest_total_estimate: float | None   # cheapest option for 1 adult (per-adult baseline)
+    lowest_group_estimate: float | None = None  # cheapest option for the whole group
+    travelers_label: str | None = None          # e.g. "2 adults, 1 child"
 
 
 class IntentClassification(BaseModel):
