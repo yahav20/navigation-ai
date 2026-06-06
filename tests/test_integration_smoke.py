@@ -18,7 +18,8 @@ def _last_content(result: dict) -> str:
         content = str(msg.content) if hasattr(msg, "content") else ""
         if content.strip():
             return content
-    raise AssertionError("No non-empty message found in graph output")
+    msg = "No non-empty message found in graph output"
+    raise AssertionError(msg)
 
 
 # ---------------------------------------------------------------------------
