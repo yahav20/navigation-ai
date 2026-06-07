@@ -101,18 +101,20 @@ def render_node_status(msg: str) -> None:
     console.print(Text(f"  {msg.strip()}", style="dim"))
 
 
-def _state_html(state: tuple[str, str, str, str, str]) -> HTML:
+def _state_html(state: tuple[str, ...]) -> HTML:
     def fmt(v: str) -> str:
         s = str(v)
         return "—" if s in {"", "None"} else s
 
-    origin, destination, budget, trip_days, trip_start = state
+    origin, destination, budget, trip_days, trip_start, travelers, rooms = state
     fields = [
         ("origin", fmt(origin)),
         ("destination", fmt(destination)),
         ("budget", fmt(budget)),
         ("trip days", fmt(trip_days)),
         ("est. start", fmt(trip_start)),
+        ("travelers", fmt(travelers)),
+        ("rooms", fmt(rooms)),
     ]
     parts = ["<state.corner>  ╰─ </state.corner>"]
     for i, (label, value) in enumerate(fields):
@@ -146,9 +148,9 @@ class ThinkingDisplay:
     """Live spinner + state line that types out updated values."""
 
     _SECONDS_PER_CHAR = 0.04
-    _FIELD_COUNT = 5
+    _FIELD_COUNT = 7
 
-    def __init__(self, state: tuple[str, str, str, str, str]) -> None:
+    def __init__(self, state: tuple[str, ...]) -> None:
         self._state = tuple(state)
         self._changed_at: list[float] = [float("-inf")] * self._FIELD_COUNT
         self._spinner = Spinner(
@@ -157,7 +159,7 @@ class ThinkingDisplay:
             style="bright_magenta",
         )
 
-    def update(self, new_state: tuple[str, str, str, str, str]) -> None:
+    def update(self, new_state: tuple[str, ...]) -> None:
         new_state = tuple(new_state)
         now = time.monotonic()
         for i in range(self._FIELD_COUNT):
@@ -180,6 +182,8 @@ class ThinkingDisplay:
             ("budget", fmt(self._state[2])),
             ("trip days", fmt(self._state[3])),
             ("est. start", fmt(self._state[4])),
+            ("travelers", fmt(self._state[5])),
+            ("rooms", fmt(self._state[6])),
         ]
         line = Text("  ╰─ ", style="bright_magenta")
         for i, (label, value) in enumerate(fields):
@@ -199,7 +203,7 @@ class ThinkingDisplay:
 
 
 @contextmanager
-def thinking(state: tuple[str, str, str, str, str]):
+def thinking(state: tuple[str, ...]):
     """Show a spinner and the live state line while the agent works."""
     display = ThinkingDisplay(state)
     with Live(display, console=console, refresh_per_second=20, transient=True):
@@ -212,7 +216,7 @@ def make_prompt_session() -> PromptSession:
 
 def ask_user(
     session: PromptSession,
-    state: tuple[str, str, str, str, str] | None = None,
+    state: tuple[str, ...] | None = None,
 ) -> str | None:
     """Prompt the user. Renders [input row, state row] directly inline.
 
@@ -268,7 +272,7 @@ def ask_user(
 
 def ask_choice(
     options: list[tuple[str, str]],
-    state: tuple[str, str, str, str, str] | None = None,
+    state: tuple[str, ...] | None = None,
 ) -> str | None:
     """Render an arrow-key selection widget.
 

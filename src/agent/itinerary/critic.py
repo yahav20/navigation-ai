@@ -33,7 +33,6 @@ from __future__ import annotations
 import json
 from typing import Optional
 
-from langchain_core.messages import AIMessage
 from langgraph.types import interrupt
 
 from agent.itinerary.step_handlers import handle_verify_budget, _extract_activity_costs
@@ -174,15 +173,12 @@ class ItineraryCriticNode:
                 "critic_attempts": 1,
                 "critic_action":   "replan_cheaper",
                 "itinerary_plan":  updated_plan,
-                "messages": [AIMessage(
-                    content=(
-                        f"🔍 **CRITIC → REPLAN** Budget exceeded by **${overage:.0f}** "
-                        f"(total: ${grand_total:.0f}, budget: ${budget:.0f}). "
-                        f"Overage (${overage:.0f}) ≤ activity costs (${total_activity_cost:.0f}) "
-                        "— rebuilding with cheaper activities."
-                    ),
-                    name="critic_log",
-                )],
+                "progress_log": [
+                    f"🔍 **CRITIC → REPLAN** Budget exceeded by **${overage:.0f}** "
+                    f"(total: ${grand_total:.0f}, budget: ${budget:.0f}). "
+                    f"Overage (${overage:.0f}) ≤ activity costs (${total_activity_cost:.0f}) "
+                    "— rebuilding with cheaper activities."
+                ],
             }
 
         # ── Step 2: Overage too large for activities (or step-1 replan failed) ──
@@ -215,14 +211,11 @@ class ItineraryCriticNode:
                 "critic_action":             "fetch_min_prices",
                 "use_min_prices_for_budget": True,
                 "itinerary_plan":            updated_plan,
-                "messages": [AIMessage(
-                    content=(
-                        f"💡 **CRITIC → FETCH MIN PRICES** Overage (${overage:.0f}) exceeds "
-                        f"activity costs — dispatching fetch_min_prices step to re-verify budget "
-                        "against cheapest available options."
-                    ),
-                    name="critic_log",
-                )],
+                "progress_log": [
+                    f"💡 **CRITIC → FETCH MIN PRICES** Overage (${overage:.0f}) exceeds "
+                    f"activity costs — dispatching fetch_min_prices step to re-verify budget "
+                    "against cheapest available options."
+                ],
             }
 
         # Already used min prices but still over budget → HITL
@@ -256,14 +249,11 @@ class ItineraryCriticNode:
             "critic_action":         "switch_travel",
             "switch_travel_triggered": True,
             "itinerary_plan":        updated_plan,
-            "messages": [AIMessage(
-                content=(
-                    f"🔄 **CRITIC → SWITCH TRAVEL** Overage (${overage:.0f}) exceeds "
-                    "activity costs — dispatching switch_travel_options step to select "
-                    "the cheapest available flight + hotel, then rebuilding the schedule."
-                ),
-                name="critic_log",
-            )],
+            "progress_log": [
+                f"🔄 **CRITIC → SWITCH TRAVEL** Overage (${overage:.0f}) exceeds "
+                "activity costs — dispatching switch_travel_options step to select "
+                "the cheapest available flight + hotel, then rebuilding the schedule."
+            ],
         }
 
     # ── HITL ──────────────────────────────────────────────────────────────
@@ -308,10 +298,9 @@ class ItineraryCriticNode:
                 "critic_attempts": 0,
                 "trip_days":       new_days,
                 "itinerary_plan":  updated_plan,
-                "messages": [AIMessage(
-                    content=f"📅 **CRITIC → REDUCE DAY** Rebuilding as a {new_days}-day itinerary.",
-                    name="critic_log",
-                )],
+                "progress_log": [
+                    f"📅 **CRITIC → REDUCE DAY** Rebuilding as a {new_days}-day itinerary."
+                ],
             }
 
         if choice == "adjust_prefs":
@@ -347,10 +336,9 @@ class ItineraryCriticNode:
                 "critic_attempts":           0,
                 "critic_adjustment_request": adjustment_text,
                 "itinerary_plan":            updated_plan,
-                "messages": [AIMessage(
-                    content=f"⚙️ **CRITIC → ADJUST PREFS** Rebuilding with user preferences: '{adjustment_text}'.",
-                    name="critic_log",
-                )],
+                "progress_log": [
+                    f"⚙️ **CRITIC → ADJUST PREFS** Rebuilding with user preferences: '{adjustment_text}'."
+                ],
             }
 
         return {"critic_action": "abort"}

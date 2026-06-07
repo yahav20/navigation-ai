@@ -22,8 +22,8 @@ import uuid
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "src"))
 
-from agent.graph import build_graph
-from config.setting import CHOSEN_PROVIDER
+from agent.core.graph import build_graph
+from config.config import CHOSEN_PROVIDER
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 

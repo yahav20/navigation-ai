@@ -4,6 +4,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage
 from pydantic import BaseModel, Field
 
+from agent.core.llm import silent
 from agent.core.state import AgentState
 from providers.flights import search_flights_with_fallback
 from tools.dependencies import data_provider
@@ -69,7 +70,7 @@ Candidates:
 {candidate_lines}
 """
 
-        picker = self.extraction_model.with_structured_output(AlternativeDestinations)
+        picker = silent(self.extraction_model.with_structured_output(AlternativeDestinations))
         try:
             result: AlternativeDestinations = picker.invoke(prompt)
             shortlist = [s.model_dump() for s in result.suggestions]

@@ -40,11 +40,13 @@ def test_fetch_hotels_valid_city():
     assert len(result) > 0
     assert "name" in result[0]
     assert "price_per_night" in result[0]
+    assert "price_min" in result[0]
+    assert "price_max" in result[0]
     assert "stars" in result[0]
     assert "amenities" in result[0]
     
 def test_fetch_hotels_no_hotels():
-    result = fetch_hotels.invoke({"city": "Hawaii"})
+    result = fetch_hotels.invoke({"city": "Zxqrvkland"})
     assert isinstance(result, list)
     assert len(result) == 0
     

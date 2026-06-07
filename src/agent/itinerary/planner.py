@@ -33,8 +33,9 @@ import math
 from typing import Optional
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 
+from agent.core.llm import silent
 from agent.itinerary.schemas import DayUpdateInstruction, ExecutionPlan, PlanStep
 from agent.core.state import AgentState
 
@@ -590,7 +591,7 @@ class ItineraryPlannerNode:
             },
             "itinerary_feasible":       True,
             "itinerary_fallback_reason": None,
-            "messages": [AIMessage(content=plan_md.strip(), name="planner_log")],
+            "progress_log": [plan_md.strip()],
         }
         result.update(extra_state)
         return result

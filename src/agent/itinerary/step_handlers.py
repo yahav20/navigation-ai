@@ -29,6 +29,7 @@ from agent.itinerary.itinerary_tools import (
 from agent.itinerary.schedule_engine import DayConfig, DayScheduleBuilder, haversine_km, GeoPoint
 from agent.itinerary.activity_selector import select_activities_per_day, resolve_candidates
 from agent.itinerary.schemas import PlanStep
+from agent.shared.travelers import compute_default_rooms
 from tools.activities import fetch_attractions, fetch_restaurants
 from tools.weather import get_average_weather
 from providers.google_maps import search_places
@@ -885,6 +886,11 @@ def handle_verify_budget(
                     "note": "estimated fallback",
                 }
 
+    # Extract group size from state; defaults keep backward-compatibility.
+    num_adults   = int((state or {}).get("num_adults")   or 1)
+    num_children = int((state or {}).get("num_children") or 0)
+    num_rooms    = int((state or {}).get("num_rooms")    or compute_default_rooms(num_adults, num_children))
+
     try:
         data = calculate_trip_cost.invoke({
             "flight_price":                   flight_price,
@@ -893,6 +899,9 @@ def handle_verify_budget(
             "trip_days":                      trip_days,
             "estimated_activities_budget":    activities_cost,
             "estimated_meals_budget_per_day": meal_per_day,
+            "num_adults":                     num_adults,
+            "num_children":                   num_children,
+            "num_rooms":                      num_rooms,
         })
     except Exception as exc:
         return _wrap_result(
@@ -903,10 +912,13 @@ def handle_verify_budget(
             trace=_minimal_trace("verify_budget", {}, str(exc), ""),
         )
 
-    grand_total = float(data.get("grand_total", 0))
-    over_budget = bool(budget) and grand_total > budget * 1.05
+    grand_total       = float(data.get("grand_total", 0))
+    group_grand_total = float(data.get("group_grand_total", grand_total))
+    # Budget is the group's total budget — compare against the group cost.
+    over_budget = bool(budget) and group_grand_total > budget * 1.05
     observation = (
-        f"Grand total: ${grand_total:.0f} | Budget: ${budget or 'flexible'} | "
+        f"Grand total (solo): ${grand_total:.0f} | Group total: ${group_grand_total:.0f} | "
+        f"Budget: ${budget or 'flexible'} | "
         + ("⚠️ OVER BUDGET" if over_budget else "✅ Within budget")
     )
 
@@ -917,15 +929,16 @@ def handle_verify_budget(
         data["avg_prices"] = avg_prices
 
     if over_budget:
-        overage = grand_total - budget
+        overage = group_grand_total - budget
         replan_hint = (
-            f"Budget exceeded by ${overage:.0f}. "
+            f"Group budget exceeded by ${overage:.0f} "
+            f"(group total ${group_grand_total:.0f} vs budget ${budget:.0f}). "
             "Options: cheaper activities, reduce trip_days by 1-2."
         )
         return _wrap_result(
             status="over_budget",
             data=data,
-            error=f"Budget exceeded by ${overage:.0f}.",
+            error=f"Group budget exceeded by ${overage:.0f}.",
             replan_hint=replan_hint,
             trace=_minimal_trace("verify_budget",
                                  {"trip_days": trip_days, "budget": budget},

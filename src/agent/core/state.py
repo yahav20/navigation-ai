@@ -1,4 +1,5 @@
 """Typed state shared across nodes of the travel-agent graph."""
+import operator
 from typing import Annotated, NotRequired, TypedDict
 
 from langgraph.graph.message import add_messages
@@ -11,6 +12,10 @@ class AgentState(TypedDict):
     """
 
     messages: Annotated[list, add_messages]
+    # Internal, non-UI trace accumulated by reasoning nodes (planner/executor/
+    # observer). Kept out of `messages` so the chat UI never renders it; visible
+    # in LangSmith / state inspection. `operator.add` appends across steps.
+    progress_log: Annotated[list, operator.add]
     current_city: str
     destination_city: str
     total_budget: float
@@ -21,7 +26,11 @@ class AgentState(TypedDict):
     enrichment_asked_fields: list  # field keys already requested from the user
     budget_optional: bool          # True when user explicitly declined to provide a budget
     trip_days: int                 # number of trip days; defaults to 3 if user skips after being asked
+    num_adults: NotRequired[int]   # travelling adults; defaults to 1 if user skips after being asked
+    num_children: NotRequired[int] # travelling children; defaults to 0
+    num_rooms: NotRequired[int]    # hotel rooms; auto-derived from group size unless the user sets it explicitly
     summary: str                   # rolling conversation summary maintained by summary_node
+    last_summarized_index: NotRequired[int]  # watermark: count of messages already folded into `summary`
     alternative_destinations: list # populated when fetch_flights returns no results for the route
     trip_start: NotRequired[str]             # approximate trip start as YYYY-MM-DD or YYYY-MM
     flight_options: NotRequired[list[dict]]  # deterministic outbound flight results
@@ -53,4 +62,5 @@ class AgentState(TypedDict):
     advisor_last_tool_results: list    # [{tool_name, args, result}] accumulated within the current turn
     advisor_shown_cities: list         # accumulates every city name presented to the user across advisor turns
     advisor_replan_count: int          # number of replan cycles completed in the current turn
+    advisor_data_collected: NotRequired[str]  # DATA COLLECTED block passed to the advisor formatter (kept out of `messages`)
     advisor_out_of_scope: NotRequired[bool]  # True when planner detects a non-travel question

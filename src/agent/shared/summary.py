@@ -1,10 +1,12 @@
 """Conversation summary node for the travel agent."""
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import RemoveMessage
 
+from agent.core.llm import silent
 from agent.core.state import AgentState
 
-MIN_MESSAGES_TO_SUMMARIZE = 3
+# A full exchange (the user's message + the agent's reply) is the smallest unit
+# worth folding into memory. Fewer new messages than this and we wait.
+MIN_MESSAGES_TO_SUMMARIZE = 2
 
 
 class SummaryNode:
@@ -15,11 +17,25 @@ class SummaryNode:
         self.extraction_model = extraction_model
 
     def __call__(self, state: AgentState) -> dict:
-        """Summarize the current state and prune the message history."""
+        """Fold only the messages added since the last summary into memory.
+
+        We track a watermark (`last_summarized_index`) rather than pruning the
+        transcript: the full history stays in state (so the chat UI never
+        collapses), but each turn the LLM only sees the *new* cycle — the
+        rolling `summary` string carries everything older. This restores the
+        old per-cycle scope without the destructive RemoveMessage pruning.
+        """
         messages = state.get("messages", [])
         existing_summary = state.get("summary", "")
 
-        if len(messages) < MIN_MESSAGES_TO_SUMMARIZE:
+        # How many messages are already captured in `summary`. Clamp in case the
+        # history shrank since (e.g. a RemoveMessage emitted by another node).
+        start = min(state.get("last_summarized_index", 0), len(messages))
+        new_messages = messages[start:]
+
+        # Only summarize once a fresh exchange has accumulated. When we skip we
+        # leave the watermark untouched so these messages are folded in later.
+        if len(new_messages) < MIN_MESSAGES_TO_SUMMARIZE:
             return {}
 
         summary_prompt = f"""
@@ -48,31 +64,17 @@ class SummaryNode:
             Return ONLY the updated summary text.
             """
 
-        response = self.extraction_model.invoke([
+        response = silent(self.extraction_model).invoke([
             {"role": "system", "content": summary_prompt},
-            *messages,
+            *new_messages,
         ])
 
-        new_summary = response.content
-
-        messages_to_keep_ids = set()
-
-        for m in reversed(messages):
-            if m.type == "human":
-                messages_to_keep_ids.add(m.id)
-                break
-
-        if messages:
-            messages_to_keep_ids.add(messages[-1].id)
-
-        delete_commands = [
-            RemoveMessage(id=m.id)
-            for m in messages
-            if m.id is not None and m.id not in messages_to_keep_ids
-        ]
-
+        # Advance the watermark to the full history length: everything up to here
+        # is now reflected in `summary`. We deliberately do NOT prune the stored
+        # messages — that would erase them from any client rendering live graph
+        # state (e.g. agent-chat-ui) and collapse the visible conversation.
         return {
-            "summary": new_summary,
-            "messages": delete_commands,
+            "summary": response.content,
+            "last_summarized_index": len(messages),
             "is_adjustment": False,
         }

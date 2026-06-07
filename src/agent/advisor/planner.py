@@ -4,6 +4,7 @@ from typing import Literal
 from langchain_core.language_models import BaseChatModel
 from pydantic import BaseModel, Field
 
+from agent.core.llm import silent
 from agent.core.state import AgentState
 from ui import render_node, render_node_status
 
@@ -38,7 +39,7 @@ def _is_followup(extraction_model: BaseChatModel, summary: str, new_question: st
     """Return True only if the new question clearly continues the previous topic."""
     if not summary:
         return False
-    result: _RelevanceCheck = extraction_model.with_structured_output(_RelevanceCheck).invoke([
+    result: _RelevanceCheck = silent(extraction_model.with_structured_output(_RelevanceCheck)).invoke([
         {"role": "system", "content": _RELEVANCE_PROMPT},
         {"role": "user", "content": f"Previous conversation summary:\n{summary}\n\nNew question: {new_question}"},
     ])
@@ -80,7 +81,12 @@ Return is_travel_related=False ONLY when the question has zero travel connection
 
 def _is_travel_related(extraction_model: BaseChatModel, question: str) -> bool:
     """Return False only when the question is clearly unrelated to travel."""
-    result: _TravelRelevance = extraction_model.with_structured_output(_TravelRelevance).invoke([
+    # silent(): keep this classifier's structured-output tokens off the chat
+    # stream, otherwise `{"is_travel_related": ...}` flashes in the UI before the
+    # real answer (matches the other silenced calls in this file).
+    result: _TravelRelevance = silent(
+        extraction_model.with_structured_output(_TravelRelevance)
+    ).invoke([
         {"role": "system", "content": _TRAVEL_RELEVANCE_PROMPT},
         {"role": "user", "content": question},
     ])
@@ -496,7 +502,7 @@ class AdvisorPlannerNode:
     """Generate an ordered tool-call plan from the user's advisory question."""
 
     def __init__(self, extraction_model: BaseChatModel) -> None:
-        self.planner = extraction_model.with_structured_output(AdvisorPlan, method="function_calling")
+        self.planner = silent(extraction_model.with_structured_output(AdvisorPlan, method="function_calling"))
         self.extraction_model = extraction_model
 
     def __call__(self, state: AgentState) -> dict:

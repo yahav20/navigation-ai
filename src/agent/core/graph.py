@@ -19,6 +19,7 @@ from agent.shared.enrichment import EnrichmentNode
 from agent.shared.general_chat import GeneralChatNode
 from agent.shared.metadata import MetadataNode
 from agent.shared.router import RouterNode
+from agent.shared.save_plan import SavePlanPromptNode
 from agent.shared.security_gate import security_gate_node
 from agent.shared.summary import SummaryNode
 from agent.travel.adjustments import AdjustmentsNode
@@ -57,16 +58,8 @@ def _out_of_scope_node(state: AgentState) -> dict:
     )]}
 
 
-def build_graph(
-    provider: str = "google",
-    checkpointer: BaseCheckpointSaver | None = None,
-) -> CompiledStateGraph:
-    """Build the graph using the specified model provider ('google' or 'groq').
-
-    If no `checkpointer` is supplied, falls back to an in-memory saver so the
-    graph still works for tests and one-shot invocations. Persistent runs
-    should pass a durable checkpointer (e.g. `SqliteSaver`).
-    """
+def _assemble_builder(provider: str = "google") -> StateGraph:
+    """Assemble the travel-agent StateGraph (nodes + edges), uncompiled."""
     # 1. Create nodes for the travel planning path
     response_model, extraction_model = get_models(provider)
     # travel_agent + formatter are the user-facing generation nodes; on OpenAI
@@ -83,6 +76,8 @@ def build_graph(
     alternative_destination_node = AlternativeDestinationNode(extraction_model)
     formatter_alternative = FormatterAlternativeNode(extraction_model)
     router_node = RouterNode(extraction_model)
+    # save_plan_prompt HITL disabled for now — not wired into the graph below.
+    # save_plan_prompt_node = SavePlanPromptNode()
 
     #   -Itinerary
     plan_check_node           = PlanCheckNode()
@@ -111,6 +106,8 @@ def build_graph(
     builder.add_node("flight_search", flight_search_node)
     builder.add_node("travel_agent", travel_agent_node)
     builder.add_node("formatter", formatter)
+    # save_plan_prompt HITL disabled for now (see edges below); node not registered.
+    # builder.add_node("save_plan_prompt", save_plan_prompt_node)
     builder.add_node("alternative_destination", alternative_destination_node)
     builder.add_node("formatter_alternative", formatter_alternative)
     builder.add_node("summary", summary_node)
@@ -189,6 +186,8 @@ def build_graph(
     )
     builder.add_edge("alternative_destination", "formatter_alternative")
     builder.add_edge("formatter_alternative", "summary")
+    # save_plan_prompt HITL disabled for now — formatter goes straight to summary.
+    # To re-enable, restore: formatter -> save_plan_prompt -> summary.
     builder.add_edge("formatter", "summary")
 
     # -----   -Itinerary (Plan & Execute + Replanner) -----
@@ -246,6 +245,33 @@ def build_graph(
     builder.add_conditional_edges("advisor_replanner", _after_advisor_replan)
     builder.add_edge("advisor_formatter", "summary")
 
+    return builder
+
+
+def build_graph(
+    provider: str = "google",
+    checkpointer: BaseCheckpointSaver | None = None,
+) -> CompiledStateGraph:
+    """Compile the travel-agent graph for the CLI and tests.
+
+    If no `checkpointer` is supplied, falls back to an in-memory saver so the
+    graph still works for tests and one-shot invocations. Persistent runs
+    should pass a durable checkpointer (e.g. `SqliteSaver`).
+    """
+    builder = _assemble_builder(provider)
     if checkpointer is None:
         checkpointer = MemorySaver(serde=JsonPlusSerializer())
     return builder.compile(checkpointer=checkpointer)
+
+
+def make_graph() -> CompiledStateGraph:
+    """Graph factory for the LangGraph API server (``langgraph dev`` / Platform).
+
+    Referenced by ``langgraph.json``. Compiled WITHOUT a checkpointer — the
+    server supplies its own persistence layer (threads/checkpoints), so a
+    custom saver here would be ignored or conflict. Use ``build_graph`` for the
+    CLI and tests instead.
+    """
+    from config.config import CHOSEN_PROVIDER
+
+    return _assemble_builder(CHOSEN_PROVIDER).compile()
