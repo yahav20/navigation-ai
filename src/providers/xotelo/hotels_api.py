@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import requests
+from providers.http_client import get as _http_get
 
 _XOTELO_BASE = "https://data.xotelo.com/api"
 _TIMEOUT = 20
@@ -18,7 +19,7 @@ def xotelo_list_hotels(location_key: str, limit: int = 10, sort: str = "populari
     Returns: List of hotel dicts with name, rating, address, price_ranges, key
     """
     try:
-        r = requests.get(
+        r = _http_get(
             f"{_XOTELO_BASE}/list",
             params={
                 "location_key": location_key,
@@ -47,7 +48,7 @@ def xotelo_get_rates(hotel_key: str, check_in: str, check_out: str, currency: st
     Returns: List of rate dicts with OTA, price_per_night, availability
     """
     try:
-        r = requests.get(
+        r = _http_get(
             f"{_XOTELO_BASE}/rates",
             params={
                 "hotel_key": hotel_key,
@@ -114,28 +115,26 @@ def _normalize_hotels(hotels: list) -> list[dict]:
         p_min = price_range.get("minimum") or price_range.get("min")
         p_max = price_range.get("maximum") or price_range.get("max")
 
-        if p_min is not None and p_max is not None:
-            avg_price = round((float(p_min) + float(p_max)) / 2, 2)
-        elif p_min is not None:
-            avg_price = round(float(p_min), 2)
-        elif p_max is not None:
-            avg_price = round(float(p_max), 2)
-        else:
-            # No price range from API — derive fixed estimate from star rating
-            stars = normalize_rating(review.get("rating"))
-            avg_price = _stars_to_price_estimate(stars)
+        stars = normalize_rating(review.get("rating"))
+        estimate = _stars_to_price_estimate(stars)
+
+        price_min = round(float(p_min), 2) if p_min is not None else estimate
+        price_max = round(float(p_max), 2) if p_max is not None else None
 
         normalized = {
             "name": name,
             "hotel_key": hotel.get("key"),
-            "stars": normalize_rating(review.get("rating")),
+            "stars": stars,
             "review_count": review.get("review_count"),
             "address": hotel.get("address"),
-            "lat": geo.get("lat"),
-            "lng": geo.get("lng"),
-            "price_per_night": avg_price,
+            "lat": geo.get("lat") or geo.get("latitude"),
+            "lng": geo.get("lng") or geo.get("longitude"),
+            "price_min": price_min,
+            "price_max": price_max,
+            "price_per_night": price_min,
             "currency": price_range.get("currency", "USD"),
-            "tripadvisor_url": hotel.get("url"),
+            "image_urls": hotel.get("image"),
+            "booking_url": hotel.get("url"),
         }
         results.append(normalized)
 

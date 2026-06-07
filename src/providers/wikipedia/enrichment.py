@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import requests
+from providers.http_client import get as _http_get
 
 _WIKIPEDIA_BASE = "https://en.wikipedia.org/api/rest_v1"
 _WIKIDATA_BASE = "https://www.wikidata.org/w/api.php"
@@ -27,7 +28,7 @@ def fetch_wiki_summary(title: str) -> dict | None:
         return _wiki_cache[key]
 
     try:
-        r = requests.get(
+        r = _http_get(
             f"{_WIKIPEDIA_BASE}/page/summary/{title}",
             timeout=_TIMEOUT,
         )
@@ -66,7 +67,7 @@ def fetch_wikidata_id(wikipedia_title: str) -> str | None:
         return _wikidata_cache[key]
 
     try:
-        r = requests.get(
+        r = _http_get(
             _WIKIDATA_BASE,
             params={
                 "action": "query",
@@ -103,7 +104,7 @@ def fetch_wikidata_info(qid: str) -> dict | None:
         return None
 
     try:
-        r = requests.get(
+        r = _http_get(
             f"{_WIKIDATA_BASE}",
             params={
                 "action": "wbgetentities",

@@ -5,6 +5,7 @@ import os
 from typing import Any
 
 import requests
+from providers.http_client import get as _http_get
 
 _BASE = "https://maps.googleapis.com/maps/api"
 _TIMEOUT = 15
@@ -33,7 +34,7 @@ def geocode_city(city: str) -> tuple[float, float] | None:
         return None
 
     try:
-        r = requests.get(
+        r = _http_get(
             f"{_BASE}/geocode/json",
             params={"address": city, "key": api_key},
             timeout=_TIMEOUT,
