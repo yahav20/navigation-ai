@@ -50,15 +50,10 @@ class MetadataNode:
 
                 Today's date is {today_iso}.
 
-                IMPORTANT — current_city and destination_city must be CITIES, not countries.
-                If the user names a country, resolve it to the primary departure/arrival city:
-                  "Israel" / "Israeli" → "Tel Aviv"
-                  "France" → "Paris"
-                  "UK" / "England" / "Britain" → "London"
-                  "USA" / "United States" / "America" → "New York City" (or whatever city they imply)
-                  "Japan" → "Tokyo"
-                  "Germany" → "Berlin"
-                  "Netherlands" / "Holland" → "Amsterdam"
+                For current_city and destination_city, extract the place the user
+                actually named — a city OR a country — verbatim. Do NOT resolve a
+                country to a city yourself; a later step handles that. For example,
+                if the user says "start in Israel", return current_city "Israel".
 
                 CONVERSATION MEMORY (from previous turns):
                 {existing_summary or "No previous context."}
