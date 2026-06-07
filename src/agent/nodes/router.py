@@ -97,13 +97,15 @@ class RouterNode:
         # Exception: if we were in an advisor flow, keep it as advisor
         final_intent = classification.intent
 
-        # Guardrail 0: Preserve build_itinerary intent across enrichment turns.
-        # EnrichmentNode may ask follow-up questions (destination, days, etc.) before
-        # setting enrichment_complete=True. Keep build_itinerary so the graph stays
-        # on the itinerary path and eventually reaches plan_check.
-        if (state.get("intent") == "build_itinerary"
-                and not state.get("enrichment_complete", False)):
-            final_intent = "build_itinerary"
+        # Guardrail 0: Preserve build_itinerary / new_travel_plan intent across enrichment turns.
+        # EnrichmentNode may ask follow-up questions (month, days, etc.) before setting
+        # enrichment_complete=True. Short replies answering those questions must not
+        # accidentally re-route to advisor or out_of_scope.
+        if not state.get("enrichment_complete", False):
+            if state.get("intent") == "build_itinerary":
+                final_intent = "build_itinerary"
+            elif state.get("intent") == "new_travel_plan":
+                final_intent = "new_travel_plan"
 
         # Guardrail 1: Both high-level planning and micro-planning require a destination.
         # If the user asks for a plan or itinerary but we don't have a destination, route to advisor.

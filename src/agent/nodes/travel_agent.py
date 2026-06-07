@@ -450,13 +450,20 @@ class TravelAgentNode:
             text = _NO_HOTELS_ADJUSTMENT if is_adjustment else _NO_HOTELS_NEW
             return {"messages": [AIMessage(content=text, name="travel_agent")]}
 
+        # Strip raw flight arrays (already summarised in pairings) and trim
+        # costs.options to 5 entries to keep the prompt under model TPM limits.
+        llm_payload = {k: v for k, v in payload.items() if k not in ("flights", "return_flights")}
+        costs = llm_payload.get("costs") or {}
+        if isinstance(costs.get("options"), list):
+            llm_payload["costs"] = {**costs, "options": costs["options"][:5]}
+
         curation: TravelPlanCuration = self.curation_model.invoke([
             {"role": "system", "content": _CURATION_PROMPT},
             {
                 "role": "user",
                 "content": (
                     "<travel_payload>\n"
-                    f"{json.dumps(payload, indent=2, sort_keys=True)}\n"
+                    f"{json.dumps(llm_payload, indent=2, sort_keys=True)}\n"
                     "</travel_payload>"
                 ),
             },

@@ -70,7 +70,7 @@ class FlightPick(BaseModel):
     label: str = Field(description="Flight number(s) from the payload, e.g. 'DL1' or 'AA123 + BA456'")
     airline: str | None = Field(default=None, description="Primary airline name from the payload")
     price: float = Field(description="Total flight price in USD from the payload")
-    description: str = Field(description="One short line explaining why this flight is recommended")
+    description: str | None = Field(default=None, description="One short line explaining why this flight is recommended")
     duration_minutes: int | None = Field(
         default=None,
         description=(
@@ -131,7 +131,7 @@ class HotelPick(BaseModel):
     """A curated hotel option highlighted to the traveller."""
 
     name: str = Field(description="Hotel name from the payload")
-    stars: int | None = Field(default=None, description="Hotel star rating from the payload, if known")
+    stars: float | None = Field(default=None, description="Hotel star rating from the payload, if known")
     price_per_night: float = Field(description="Nightly rate in USD from the payload")
     description: str = Field(description="One short line explaining why this hotel is recommended")
 
