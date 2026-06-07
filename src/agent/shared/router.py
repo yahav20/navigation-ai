@@ -55,7 +55,9 @@ class RouterNode:
         3. 'build_itinerary': ONLY when user EXPLICITLY asks for a day-by-day schedule.
            ("Build a 3-day itinerary for Rome", "plan my days in Paris", "replan for $700").
            "How should I split my time?" or "how many days per city?" → 'advisor', NOT here.
-        4. 'update_travel_plan': Changing an existing confirmed plan's parameters (budget, dates, destination).
+        4. 'update_travel_plan': Changing an existing confirmed plan's parameters — budget, dates,
+           destination, number of travellers (adults/children), or number of hotel rooms
+           ("make it 2 rooms", "add a room", "2 more adults are joining").
         5. 'out_of_scope': ONLY for queries with zero travel relevance (coding, math, recipes, sports).
 
         TRANSITION RULE (critical): If the system is in ACTIVE ADVISOR FLOW and the user

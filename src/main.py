@@ -36,6 +36,16 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _fmt_travelers(adults, children) -> str:
+    """Compact travellers label for the state line, e.g. '2A·1C' (or 'None')."""
+    if adults is None:
+        return "None"
+    label = f"{adults}A"
+    if children:
+        label += f"·{children}C"
+    return label
+
+
 def _restrict_db_permissions(path: Path) -> None:
     """Restrict DB file to current user only (Windows via icacls, Unix via chmod)."""
     import os, platform
@@ -70,12 +80,14 @@ def _interactive_loop(conn: sqlite3.Connection, session_id: str) -> None:
     ui.render_banner(CHOSEN_PROVIDER, session_id, CHECKPOINT_DB, resuming)
 
     prompt_session = ui.make_prompt_session()
-    current_state: tuple[str, str, str, str, str] = (
+    current_state: tuple[str, ...] = (
         saved.get("current_city", "None") if saved else "None",
         saved.get("destination_city", "None") if saved else "None",
         saved.get("total_budget", "None") if saved else "None",
         saved.get("trip_days", "None") if saved else "None",
         saved.get("trip_start", "None") if saved else "None",
+        _fmt_travelers(saved.get("num_adults"), saved.get("num_children") or 0) if saved else "None",
+        saved.get("num_rooms", "None") if saved else "None",
     )
     turn_count = 0
 
@@ -114,10 +126,10 @@ def _run_turn(
     graph,
     config: dict,
     user_input: str,
-    current_state: tuple[str, str, str, str, str],
+    current_state: tuple[str, ...],
     session_id: str = "unknown",
     prompt_session=None,
-) -> tuple[str, str, str, str, str]:
+) -> tuple[str, ...]:
     """Run one user turn, including any HITL interrupt-resume cycles."""
     _SELF_REPORTING_NODES = {"advisor_planner", "advisor_executor", "advisor_replanner"}
 
@@ -160,6 +172,8 @@ def _run_turn(
                     data.get("total_budget", "None"),
                     data.get("trip_days", "None"),
                     data.get("trip_start", "None"),
+                    _fmt_travelers(data.get("num_adults"), data.get("num_children") or 0),
+                    data.get("num_rooms", "None"),
                 )
                 display.update(current_state)
 

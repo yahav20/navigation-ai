@@ -22,6 +22,39 @@ class TravelMetadata(BaseModel):
             "timing is mentioned."
         ),
     )
+    num_adults: int | None = Field(
+        default=None,
+        description=(
+            "Absolute number of travelling ADULTS. Resolve relative phrases against the "
+            "current adult count in state (e.g. current 2, '2 more adults joined' -> 4). "
+            "An unqualified 'people'/'travellers' count means adults unless children are "
+            "named. Return null if the user says nothing about how many adults."
+        ),
+    )
+    num_children: int | None = Field(
+        default=None,
+        description=(
+            "Absolute number of travelling CHILDREN/kids. Resolve relative phrases against "
+            "the current child count in state (e.g. current 1, 'one more kid' -> 2). "
+            "Return null if the user says nothing about children."
+        ),
+    )
+    num_rooms: int | None = Field(
+        default=None,
+        description=(
+            "Explicit absolute hotel-room TOTAL, ONLY when the user names a specific number "
+            "of rooms (e.g. 'book 3 rooms', 'we need 2 rooms'). Do NOT infer or calculate "
+            "from the number of people. Return null otherwise."
+        ),
+    )
+    num_rooms_delta: int | None = Field(
+        default=None,
+        description=(
+            "Relative room change: +1 for 'add a room'/'one more room', -1 for "
+            "'remove a room'/'one less room'. Return null when the user gives an absolute "
+            "room total or says nothing about rooms."
+        ),
+    )
 
 
 class UserPreferences(BaseModel):
@@ -49,11 +82,15 @@ class RefusalDetection(BaseModel):
 class TravelAdjustments(BaseModel):
     """Detect if the user explicitly wants to adjust their existing travel parameters."""
 
-    is_adjustment: bool = Field(default=False, description="True ONLY if the user is explicitly changing their destination, origin, budget, or trip days.")
+    is_adjustment: bool = Field(default=False, description="True ONLY if the user is explicitly changing their destination, origin, budget, trip days, number of travellers (adults/children), or number of hotel rooms.")
     new_destination: str | None = Field(default=None, description="The new destination city, if updated.")
     new_origin: str | None = Field(default=None, description="The new origin city, if updated.")
     new_budget: float | None = Field(default=None, description="The new total budget, if updated.")
     new_trip_days: int | None = Field(default=None, description="The new trip duration in days, if updated.")
+    new_num_adults: int | None = Field(default=None, description="The new ABSOLUTE number of adults. Resolve relative phrases against the current adult count (e.g. current 2, '2 more adults' -> 4). Null if unchanged.")
+    new_num_children: int | None = Field(default=None, description="The new ABSOLUTE number of children. Resolve relative phrases against the current child count. Null if unchanged.")
+    new_num_rooms: int | None = Field(default=None, description="Explicit absolute hotel-room TOTAL, ONLY when the user names a specific number of rooms (e.g. 'make it 3 rooms'). Do NOT calculate from the number of people. Null otherwise.")
+    rooms_delta: int | None = Field(default=None, description="Relative room change: +1 for 'add a room', -1 for 'remove a room'. Null when the user gives an absolute total or says nothing about rooms.")
 
 class FlightLeg(BaseModel):
     """A single leg of a connecting-flight route."""
@@ -188,7 +225,9 @@ class TravelPlan(BaseModel):
     total_budget: float | None
     weather: dict[str, str]
     best_time: dict[str, Any]
-    lowest_total_estimate: float | None
+    lowest_total_estimate: float | None   # cheapest option for 1 adult (per-adult baseline)
+    lowest_group_estimate: float | None = None  # cheapest option for the whole group
+    travelers_label: str | None = None          # e.g. "2 adults, 1 child"
 
 
 class IntentClassification(BaseModel):
@@ -214,7 +253,8 @@ class IntentClassification(BaseModel):
             "- 'new_travel_plan': ONLY when the user commits to a SPECIFIC destination and wants to CHECK "
             "or BOOK flights, hotels, or costs. (e.g. 'I want to fly to Rome', 'show me hotels in Madrid', "
             "'let\\'s plan a trip to Tokyo'). Do NOT use just because a city is mentioned.\n"
-            "- 'update_travel_plan': Changing parameters (budget, days, destination) of an ALREADY-PLANNED trip.\n"
+            "- 'update_travel_plan': Changing parameters (budget, days, destination, number of "
+            "travellers (adults/children), or number of hotel rooms) of an ALREADY-PLANNED trip.\n"
             "- 'build_itinerary': ONLY when user EXPLICITLY requests a day-by-day SCHEDULE. "
             "Trigger phrases: 'build an itinerary', 'plan my days', 'day-by-day schedule', 'replan'. "
             "Questions like 'how should I split my time', 'what should I do in Paris for 3 days', "
