@@ -97,7 +97,23 @@ class AdjustmentsNode:
         # state resets — are what force the re-search; the transcript stays
         # intact. (Same policy the summary node documents.)
         update_reasons = ", ".join(summary_parts)
-        updates["summary"] = f"USER ADJUSTMENTS MADE: {update_reasons}. SYSTEM MUST SEARCH FOR NEW FLIGHTS AND HOTELS."
+
+        # Only reset travel data when destination/origin/budget changed — those
+        # require a new flight search. A trip_days-only change uses the same
+        # route and hotel, so existing flight and travel data remain valid.
+        needs_travel_reset = bool(
+            adjustment.new_destination
+            or adjustment.new_origin
+            or adjustment.new_budget is not None
+        )
+
+        if needs_travel_reset:
+            updates["summary"] = f"USER ADJUSTMENTS MADE: {update_reasons}. SYSTEM MUST SEARCH FOR NEW FLIGHTS AND HOTELS."
+            updates["flight_options"] = []
+            updates["has_flights"] = False
+            updates["travel_plan"] = {}
+        else:
+            updates["summary"] = f"USER ADJUSTMENTS MADE: {update_reasons}."
 
         # 2. Force re-enrichment
         updates["enrichment_complete"] = False
@@ -105,10 +121,7 @@ class AdjustmentsNode:
         # 3. Mark that this was an adjustment, not a brand new request
         updates["is_adjustment"] = True
         updates["alternative_destinations"] = []
-        updates["flight_options"] = []
-        updates["has_flights"] = False
-        updates["travel_plan"] = {}
-        updates["itinerary_plan"] = {}
+        updates["itinerary_plan"] = {}   # always clear — must rebuild with updated params
 
         # Fold in any traveller/room changes made in the same message.
         updates.update(traveler_updates)
