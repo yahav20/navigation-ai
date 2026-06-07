@@ -5,8 +5,10 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import ToolMessage
 from langchain_core.runnables import Runnable
 
+from agent.core.llm import silent
 from agent.core.models import RefusalDetection, UserPreferences
 from agent.core.state import AgentState
+from agent.shared.travelers import compute_default_rooms
 from providers import SQLiteDataProvider
 from tools import enrichment_tool_map, enrichment_tools
 
@@ -99,7 +101,7 @@ def _detect_refusals(state: AgentState, extraction_model: BaseChatModel, asked: 
     last_user = [m for m in state["messages"] if getattr(m, "type", "") == "human"]
     if not last_user:
         return None
-    return extraction_model.with_structured_output(RefusalDetection).invoke([
+    return silent(extraction_model.with_structured_output(RefusalDetection)).invoke([
         {
             "role": "system",
             "content": (
@@ -167,6 +169,14 @@ def _classify_optional_fields(
         else:
             missing_labels.append("approximate trip start (a month is fine, e.g. 'June')")
             missing_keys.add("trip_start")
+
+    if state.get("num_adults") is None:
+        if "num_adults" in asked:
+            extra["num_adults"] = 1
+            extra.setdefault("num_children", 0)
+        else:
+            missing_labels.append("number of travellers (how many adults and children)")
+            missing_keys.add("num_adults")
 
     return extra
 
@@ -360,7 +370,7 @@ def _extract_general_preferences(
     raw_content: str = last_user_message.content
     normalised_content = _normalise_typos(raw_content)
 
-    extracted: UserPreferences = extraction_model.with_structured_output(UserPreferences).invoke([
+    extracted: UserPreferences = silent(extraction_model.with_structured_output(UserPreferences)).invoke([
         {
             "role": "system",
             "content": (
@@ -466,4 +476,15 @@ class EnrichmentNode:
 
         pref_update = _extract_general_preferences(state, self.extraction_model)
 
-        return {**extra, **origin_update, **dest_update, **pref_update, "enrichment_complete": True}
+        # Seed a default hotel-room count once the group size is known (set by the
+        # user or defaulted just above) and the user hasn't fixed rooms explicitly.
+        room_update: dict = {}
+        final_adults = extra.get("num_adults", state.get("num_adults"))
+        if final_adults is not None and state.get("num_rooms") is None:
+            final_children = extra.get("num_children", state.get("num_children") or 0)
+            room_update["num_rooms"] = compute_default_rooms(final_adults, final_children)
+
+        return {
+            **extra, **origin_update, **dest_update, **pref_update, **room_update,
+            "enrichment_complete": True,
+        }

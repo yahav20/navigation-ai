@@ -27,7 +27,8 @@ TEMPLATE:
 **Trip Days:** {trip_days} days
 **Approximate Start:** {trip_start} (omit this line if trip_start is null)
 **Total Budget:** ${total_budget} (omit this line if total_budget is null)
-**Lowest Total Estimate:** ${lowest_total_estimate} (omit this line if lowest_total_estimate is null)
+**Lowest Estimate (if traveling solo):** ${lowest_total_estimate} (omit this line if lowest_total_estimate is null OR if travelers_label is "1 adult")
+**Group Total Estimate:** ${lowest_group_estimate} for {travelers_label} (omit this line if lowest_group_estimate is null)
 
 ---
 

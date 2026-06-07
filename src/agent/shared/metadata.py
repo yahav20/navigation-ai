@@ -3,8 +3,10 @@ from datetime import date
 
 from langchain_core.language_models import BaseChatModel
 
+from agent.core.llm import silent
 from agent.core.models import TravelMetadata
 from agent.core.state import AgentState
+from agent.shared.travelers import apply_traveler_updates
 
 
 class MetadataNode:
@@ -28,9 +30,11 @@ class MetadataNode:
             and not getattr(msg, "tool_calls", None)
         ][-6:]
 
-        extractor = self.extraction_model.with_structured_output(TravelMetadata)
+        extractor = silent(self.extraction_model.with_structured_output(TravelMetadata))
 
         current_trip_days = state.get("trip_days")
+        current_adults = state.get("num_adults")
+        current_children = state.get("num_children")
         existing_summary = state.get("summary", "")
         today_iso = date.today().isoformat()
 
@@ -41,19 +45,15 @@ class MetadataNode:
                 Extract travel metadata from the conversation.
                 Only fill a field if it is explicitly mentioned or very clear.
                 Do not guess. If a field is missing, return null.
-                Extract: current_city, destination_city, budget, trip_days, trip_start.
+                Extract: current_city, destination_city, budget, trip_days, trip_start,
+                num_adults, num_children, num_rooms, num_rooms_delta.
 
                 Today's date is {today_iso}.
 
-                IMPORTANT — current_city and destination_city must be CITIES, not countries.
-                If the user names a country, resolve it to the primary departure/arrival city:
-                  "Israel" / "Israeli" → "Tel Aviv"
-                  "France" → "Paris"
-                  "UK" / "England" / "Britain" → "London"
-                  "USA" / "United States" / "America" → "New York City" (or whatever city they imply)
-                  "Japan" → "Tokyo"
-                  "Germany" → "Berlin"
-                  "Netherlands" / "Holland" → "Amsterdam"
+                For current_city and destination_city, extract the place the user
+                actually named — a city OR a country — verbatim. Do NOT resolve a
+                country to a city yourself; a later step handles that. For example,
+                if the user says "start in Israel", return current_city "Israel".
 
                 CONVERSATION MEMORY (from previous turns):
                 {existing_summary or "No previous context."}
@@ -78,6 +78,26 @@ class MetadataNode:
                   -> YYYY-MM. Resolve relative phrases against today's date above.
                 - If the user says nothing about timing, return null.
                 Never invent a date when none was implied.
+
+                IMPORTANT — travellers (adults / children) resolution:
+                The current group in state is: {current_adults} adults, {current_children} children.
+                - Return ABSOLUTE counts. If the user gives an absolute number
+                  ("2 adults and 1 kid", "we're 4 people"), return that directly.
+                  An unqualified count of people/travellers means adults unless
+                  children are explicitly named.
+                - If the user says something relative ("2 more adults joined",
+                  "4 people are joining", "one fewer child"), compute the new
+                  absolute value from the current state value and return that.
+                  Example: current 2 adults, "4 more people joined" -> num_adults 6.
+                - Return null for adults/children the user did not mention.
+
+                IMPORTANT — hotel rooms resolution:
+                - Set num_rooms ONLY when the user names a specific room TOTAL
+                  ("book 3 rooms", "we need 2 rooms"). Never calculate rooms from
+                  the number of people — the system derives that itself.
+                - Set num_rooms_delta to +1 for "add a room"/"one more room" and -1
+                  for "remove a room"/"one less room".
+                - Return null for both when the user says nothing about rooms.
                 """,
             },
             *recent_messages,
@@ -124,5 +144,16 @@ class MetadataNode:
             updates["trip_start"] = metadata.trip_start
             if old_start is not None and metadata.trip_start != old_start:
                 _invalidate_flights()
+
+        # Travellers / rooms. Scoped first step: these intentionally do NOT
+        # invalidate flights or trigger a re-search — they only touch the new
+        # group-size and room fields (downstream cost effects come later).
+        updates.update(apply_traveler_updates(
+            state,
+            new_adults=metadata.num_adults,
+            new_children=metadata.num_children,
+            new_rooms_abs=metadata.num_rooms,
+            rooms_delta=metadata.num_rooms_delta,
+        ))
 
         return updates

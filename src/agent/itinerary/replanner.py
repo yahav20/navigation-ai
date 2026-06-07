@@ -30,11 +30,14 @@ import json
 from typing import Optional
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 
+from agent.core.llm import silent
 from agent.core.state import AgentState
 from agent.itinerary.formatter import _generate_fallback_markdown
 from agent.itinerary.step_handlers import _drop_stale_budget, handle_verify_budget
+from agent.shared.pricing import activity_group_price, group_label
+from agent.shared.travelers import compute_default_rooms
 
 MAX_REPLANS = 3   # must match planner.py
 
@@ -62,12 +65,21 @@ MARKDOWN FORMAT (output this if the plan is acceptable):
 # ✈️ Your [N]-Day [Destination] Itinerary
 
 ## 📅 Day 1 — [fill in the actual theme from the data]
+
+If GROUP_COMPOSITION is present and the group has more than 1 person, use this table header:
+| Time | Activity | Duration | Per Person | Group Cost |
+|------|----------|----------|-----------|------------|
+| HH:MM | [icon] [Actual name from data] | X min | $Y pp | $Z group |
+
+Otherwise use:
 | Time | Activity | Duration | Cost |
 |------|----------|----------|------|
 | HH:MM | [icon] [Actual name from data] | X min | $Y |
 
+The GROUP_COST for an activity = estimated_cost × (adults + children).
+The per-person cost is the estimated_cost from the data.
 *(Render EVERY slot from the data for this day. Never skip rows.)*
-**Day total: $[actual day_cost from data]**
+**Day total: $[actual day_cost from data] pp** (add " | $[group_day_total] for [group_label]" when group > 1)
 
 [Repeat ## 📅 Day N section for every day in the trip]
 
@@ -150,16 +162,23 @@ def _build_summary(
     travel_plan: Optional[dict] = None,
     origin: str = "",
     destination: str = "",
+    num_adults: int = 1,
+    num_children: int = 0,
 ) -> str:
     """
     Build a compact, LLM-readable summary of the execution results.
     Avoids sending large raw JSON blobs that cause the LLM to truncate output.
     """
+    is_group = num_adults + num_children > 1
+    glabel   = group_label(num_adults, num_children)
+
     lines = [
         f"TRIP: {trip_days} days | Destination: {destination} | Origin: {origin} | "
         f"Budget: ${budget or 'flexible'} | Mode: {mode}",
-        "",
     ]
+    if is_group:
+        lines.append(f"GROUP_COMPOSITION: {glabel} ({num_adults} adults, {num_children} children)")
+    lines.append("")
 
     # ── Day schedules (most important — render every slot compactly) ────────
     for d in range(1, trip_days + 1):
@@ -176,16 +195,24 @@ def _build_summary(
         if not isinstance(inner, dict):
             continue
         theme    = inner.get("theme", f"Day {d}")
-        day_cost = inner.get("day_cost", 0)
-        lines.append(f"DAY {d} — {theme} | day_cost: ${day_cost:.0f}")
+        day_cost = float(inner.get("day_cost", 0))
+        if is_group:
+            day_group = activity_group_price(day_cost, num_adults, num_children)
+            lines.append(f"DAY {d} — {theme} | day_cost: ${day_cost:.0f} pp / ${day_group:.0f} group")
+        else:
+            lines.append(f"DAY {d} — {theme} | day_cost: ${day_cost:.0f}")
         for slot in inner.get("slots", []):
             t    = slot.get("time", "")
             et   = slot.get("end_time", "")
             dur  = slot.get("duration_minutes", 0)
             stype = slot.get("slot_type", "")
             name = slot.get("name", "")
-            cost = slot.get("estimated_cost", 0)
-            lines.append(f"  {t}-{et} ({dur}min) [{stype}] {name} ${cost:.0f}")
+            cost = float(slot.get("estimated_cost", 0))
+            if is_group:
+                gcost = activity_group_price(cost, num_adults, num_children)
+                lines.append(f"  {t}-{et} ({dur}min) [{stype}] {name} ${cost:.0f} pp / ${gcost:.0f} group")
+            else:
+                lines.append(f"  {t}-{et} ({dur}min) [{stype}] {name} ${cost:.0f}")
         lines.append("")
 
     # ── Weather (brief) ──────────────────────────────────────────────────────
@@ -245,7 +272,7 @@ def _strip_json_fences(s: str) -> str:
 
 class ItineraryReplannerNode:
     def __init__(self, llm: BaseChatModel) -> None:
-        self.llm = llm
+        self.llm = silent(llm)
 
     def __call__(self, state: AgentState) -> dict:
         plan_state    = state.get("itinerary_plan", {})
@@ -284,13 +311,10 @@ class ItineraryReplannerNode:
                     "itinerary_feasible":      False,
                     "replanner_action":        "done",
                     "itinerary_fallback_reason": hard_reason,
-                    "messages": [AIMessage(
-                        content=(
-                            f"❌ **REPLANNER → DONE (max replans={MAX_REPLANS} reached)**\n"
-                            f"*Last error:* `{step_type}` — {error_msg}"
-                        ),
-                        name="replanner_log",
-                    )],
+                    "progress_log": [
+                        f"❌ **REPLANNER → DONE (max replans={MAX_REPLANS} reached)**\n"
+                        f"*Last error:* `{step_type}` — {error_msg}"
+                    ],
                 }
 
             # Soft replan
@@ -311,16 +335,13 @@ class ItineraryReplannerNode:
                     "replan_context": replan_ctx,
                     "replan_count":   replan_count,  # Planner increments on its side
                 },
-                "messages": [AIMessage(
-                    content=(
-                        f"🔄 **REPLANNER → REPLAN** "
-                        f"(attempt {replan_count}/{MAX_REPLANS})\n"
-                        f"*Failed step:* `{step_type}`\n"
-                        f"*Error:* {error_msg}\n"
-                        f"*Hint:* {replan_hint}"
-                    ),
-                    name="replanner_log",
-                )],
+                "progress_log": [
+                    f"🔄 **REPLANNER → REPLAN** "
+                    f"(attempt {replan_count}/{MAX_REPLANS})\n"
+                    f"*Failed step:* `{step_type}`\n"
+                    f"*Error:* {error_msg}\n"
+                    f"*Hint:* {replan_hint}"
+                ],
             }
 
         # ── B. Per-step critic for fetch results ───────────────────────────
@@ -341,13 +362,10 @@ class ItineraryReplannerNode:
                         "itinerary_feasible":       False,
                         "replanner_action":         "done",
                         "itinerary_fallback_reason": hard_reason,
-                        "messages": [AIMessage(
-                            content=(
-                                f"❌ **REPLANNER → DONE (max replans={MAX_REPLANS} reached)**\n"
-                                f"*Critic:* `{step_type}` — {verdict['verdict']}"
-                            ),
-                            name="replanner_log",
-                        )],
+                        "progress_log": [
+                            f"❌ **REPLANNER → DONE (max replans={MAX_REPLANS} reached)**\n"
+                            f"*Critic:* `{step_type}` — {verdict['verdict']}"
+                        ],
                     }
                 replan_ctx = _build_replan_context(
                     error_code="CRITIC_REJECT",
@@ -366,16 +384,13 @@ class ItineraryReplannerNode:
                         "replan_context": replan_ctx,
                         "replan_count":   replan_count,
                     },
-                    "messages": [AIMessage(
-                        content=(
-                            f"🔄 **REPLANNER → REPLAN** (critic reject, "
-                            f"attempt {replan_count}/{MAX_REPLANS})\n"
-                            f"*Step:* `{step_type}`\n"
-                            f"*Verdict:* {verdict['verdict']}\n"
-                            f"*Hint:* {verdict.get('replan_hint', '')}"
-                        ),
-                        name="replanner_log",
-                    )],
+                    "progress_log": [
+                        f"🔄 **REPLANNER → REPLAN** (critic reject, "
+                        f"attempt {replan_count}/{MAX_REPLANS})\n"
+                        f"*Step:* `{step_type}`\n"
+                        f"*Verdict:* {verdict['verdict']}\n"
+                        f"*Hint:* {verdict.get('replan_hint', '')}"
+                    ],
                 }
 
         # ── C. More steps remain — keep going ─────────────────────────────
@@ -407,6 +422,8 @@ class ItineraryReplannerNode:
                 results, budget, trip_days,
                 mode=mode, travel_plan=travel_plan,
                 origin=origin, destination=destination,
+                num_adults=int(state.get("num_adults") or 1),
+                num_children=int(state.get("num_children") or 0),
             )
             output  = self.llm.invoke([
                 SystemMessage(content=REVIEW_SYSTEM),
@@ -455,13 +472,10 @@ class ItineraryReplannerNode:
                                 # Drop stale day schedules so executor rebuilds them
                                 "step_results": results_for_replan,
                             },
-                            "messages": [AIMessage(
-                                content=(
-                                    f"🔄 **REPLANNER → REPLAN** (LLM quality reject)\n"
-                                    f"*Reason:* {reason}"
-                                ),
-                                name="replanner_log",
-                            )],
+                            "progress_log": [
+                                f"🔄 **REPLANNER → REPLAN** (LLM quality reject)\n"
+                                f"*Reason:* {reason}"
+                            ],
                         }
                     # Out of replans — fall through to fallback markdown
                     content = ""
@@ -475,7 +489,7 @@ class ItineraryReplannerNode:
         if content:
             markdown = content
         else:
-            markdown = _generate_fallback_markdown(results_with_budget, trip_days, budget, mode)
+            markdown = _generate_fallback_markdown(results_with_budget, trip_days, budget, mode, state=state)
 
         return {
             "itinerary_plan": {
@@ -486,7 +500,7 @@ class ItineraryReplannerNode:
             },
             "itinerary_feasible": True,
             "replanner_action":   "done",
-            "messages": [AIMessage(content="✅ **Itinerary complete.**", name="replanner_log")],
+            "progress_log": ["✅ **Itinerary complete.**"],
         }
 
     # ── Per-step critic ────────────────────────────────────────────────────

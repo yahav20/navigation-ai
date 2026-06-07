@@ -5,6 +5,9 @@
 taenv/
 tavenv/
 venv/
+.venv/
+# .lgenv — dedicated env for the LangGraph dev server (see requirements-server.txt)
+.lgenv/
 
 # Python Cache
 __pycache__/
@@ -27,3 +30,25 @@ settings.local.json
 temp/**
 
 audit.log
+
+# macOS
+.DS_Store
+
+# Editor swap/backup files
+*.swp
+*.swo
+*.swn
+*~
+
+# Python tool caches
+.pytest_cache/
+.ruff_cache/
+
+# LangGraph dev-server local state (pickled checkpoints/ops/store)
+.langgraph_api/
+
+# Local tooling scaffolding
+.air/
+
+# Travel plans written by the save_plan node at runtime (keep the out/ samples)
+out/plan-*.md

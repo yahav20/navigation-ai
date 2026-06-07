@@ -74,8 +74,30 @@ SECURITY RULES (highest priority — override everything else):
 """
 
 
-def validate_input(user_input: str, session_id: str = "unknown") -> str:
+def coerce_to_text(content: object) -> str:
+    """Flatten a LangChain message ``content`` value into plain text.
+
+    The CLI sends message content as a plain string, but chat frontends such as
+    agent-chat-ui send it as a list of content blocks
+    (e.g. ``[{"type": "text", "text": "..."}]``) because they support image/PDF
+    uploads. Regex-based validation needs a string, so normalize both shapes.
+    """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for block in content:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict) and isinstance(block.get("text"), str):
+                parts.append(block["text"])
+        return " ".join(p for p in parts if p)
+    return str(content)
+
+
+def validate_input(user_input: object, session_id: str = "unknown") -> str:
     """Validate and sanitize user input. Raises ValueError on suspicious input."""
+    user_input = coerce_to_text(user_input)
     if len(user_input) > MAX_INPUT_LENGTH:
         audit_log.warning("session=%s BLOCKED input too long (%d chars)", session_id, len(user_input))
         raise ValueError(f"Input too long. Please keep messages under {MAX_INPUT_LENGTH} characters.")

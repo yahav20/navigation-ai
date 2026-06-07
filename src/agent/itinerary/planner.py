@@ -29,8 +29,9 @@ import json
 from typing import Optional
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 
+from agent.core.llm import silent
 from agent.itinerary.schemas import ExecutionPlan, PlanStep
 from agent.core.state import AgentState
 
@@ -319,7 +320,7 @@ def _default_plan(
 
 class ItineraryPlannerNode:
     def __init__(self, llm: BaseChatModel) -> None:
-        self.llm = llm.with_structured_output(ExecutionPlan, method="function_calling")
+        self.llm = silent(llm.with_structured_output(ExecutionPlan, method="function_calling"))
 
     def __call__(self, state: AgentState) -> dict:
         destination = state.get("destination_city", "")
@@ -344,13 +345,10 @@ class ItineraryPlannerNode:
             return {
                 "itinerary_feasible": False,
                 "itinerary_fallback_reason": reason,
-                "messages": [AIMessage(
-                    content=(
-                        f"❌ **MAX REPLANS REACHED** (`replan={replan_count}`). "
-                        "Passing to Formatter."
-                    ),
-                    name="planner_log",
-                )],
+                "progress_log": [
+                    f"❌ **MAX REPLANS REACHED** (`replan={replan_count}`). "
+                    "Passing to Formatter."
+                ],
             }
 
         # ── Context assembly ───────────────────────────────────────────────
@@ -434,7 +432,7 @@ class ItineraryPlannerNode:
             },
             "itinerary_feasible": True,
             "itinerary_fallback_reason": None,
-            "messages": [AIMessage(content=plan_md.strip(), name="planner_log")],
+            "progress_log": [plan_md.strip()],
         }
         result.update(state_updates)
         return result

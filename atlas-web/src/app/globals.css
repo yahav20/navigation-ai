@@ -1,0 +1,334 @@
+@import "tailwindcss";
+
+@plugin "tailwindcss-animate";
+
+/* Generate Tailwind utility classes used by Streamdown's components. */
+@source "../../node_modules/streamdown/dist/*.js";
+
+@custom-variant dark (&:is(.dark *));
+
+/* ============================================================
+   DEEP OCEAN THEME — Dark Navy / Cyan / Electric Teal
+   Light Mode: Ice-white + deep navy + electric cyan accents
+   Dark Mode:  Abyss navy + glowing teal + neon sky accents
+   ============================================================ */
+
+:root {
+  /* Base */
+  --background: oklch(0.975 0.008 240);           /* near-white with cool blue tint */
+  --foreground: oklch(0.12 0.045 255);            /* deep navy ink */
+
+  /* Cards & Surfaces */
+  --card: oklch(0.99 0.006 230);                  /* icy white */
+  --card-foreground: oklch(0.12 0.045 255);
+
+  --popover: oklch(0.99 0.006 230);
+  --popover-foreground: oklch(0.12 0.045 255);
+
+  /* Primary — deep royal navy */
+  --primary: oklch(0.25 0.12 265);
+  --primary-foreground: oklch(0.97 0.015 200);
+
+  /* Secondary — soft sky blue */
+  --secondary: oklch(0.92 0.035 225);
+  --secondary-foreground: oklch(0.2 0.09 260);
+
+  /* Muted — pale arctic */
+  --muted: oklch(0.93 0.025 230);
+  --muted-foreground: oklch(0.48 0.06 245);
+
+  /* Accent — electric cyan */
+  --accent: oklch(0.88 0.07 210);
+  --accent-foreground: oklch(0.15 0.1 255);
+
+  /* Destructive */
+  --destructive: oklch(0.577 0.245 27.325);
+  --destructive-foreground: oklch(0.577 0.245 27.325);
+
+  /* Borders & Inputs */
+  --border: oklch(0.85 0.04 225);
+  --input: oklch(0.88 0.03 228);
+  --ring: oklch(0.55 0.18 230);
+
+  /* Charts — ocean gradient palette */
+  --chart-1: oklch(0.55 0.22 240);   /* royal blue */
+  --chart-2: oklch(0.65 0.19 195);   /* teal */
+  --chart-3: oklch(0.72 0.14 210);   /* sky */
+  --chart-4: oklch(0.45 0.18 270);   /* indigo */
+  --chart-5: oklch(0.75 0.16 175);   /* aquamarine */
+
+  /* Radius */
+  --radius: 0.625rem;
+
+  /* Sidebar — glacial blue */
+  --sidebar: oklch(0.94 0.03 228);
+  --sidebar-foreground: oklch(0.15 0.07 255);
+  --sidebar-primary: oklch(0.28 0.14 260);
+  --sidebar-primary-foreground: oklch(0.97 0.015 200);
+  --sidebar-accent: oklch(0.87 0.06 215);
+  --sidebar-accent-foreground: oklch(0.18 0.09 255);
+  --sidebar-border: oklch(0.82 0.05 225);
+  --sidebar-ring: oklch(0.55 0.18 230);
+
+  /* ✨ Custom glow & gradient tokens */
+  --glow-primary: oklch(0.55 0.22 240 / 0.35);
+  --glow-accent: oklch(0.72 0.22 200 / 0.4);
+  --gradient-ocean: linear-gradient(135deg, oklch(0.28 0.14 265), oklch(0.45 0.2 220), oklch(0.6 0.2 195));
+  --gradient-ice: linear-gradient(180deg, oklch(0.99 0.01 220), oklch(0.92 0.04 230));
+  --gradient-glow: radial-gradient(ellipse at 60% 0%, oklch(0.72 0.18 210 / 0.18) 0%, transparent 70%);
+}
+
+.dark {
+  /* Base — deep abyss */
+  --background: oklch(0.1 0.03 258);             /* ultra-deep navy */
+  --foreground: oklch(0.93 0.025 210);           /* cool white */
+
+  /* Cards & Surfaces */
+  --card: oklch(0.14 0.04 258);                  /* dark navy panel */
+  --card-foreground: oklch(0.93 0.025 210);
+
+  --popover: oklch(0.13 0.04 260);
+  --popover-foreground: oklch(0.93 0.025 210);
+
+  /* Primary — glowing teal */
+  --primary: oklch(0.75 0.2 195);
+  --primary-foreground: oklch(0.1 0.04 260);
+
+  /* Secondary — dark navy panel */
+  --secondary: oklch(0.2 0.06 258);
+  --secondary-foreground: oklch(0.88 0.04 215);
+
+  /* Muted — sunken navy */
+  --muted: oklch(0.18 0.05 258);
+  --muted-foreground: oklch(0.6 0.08 230);
+
+  /* Accent — electric sky cyan */
+  --accent: oklch(0.28 0.1 250);
+  --accent-foreground: oklch(0.85 0.15 200);
+
+  /* Destructive */
+  --destructive: oklch(0.396 0.141 25.723);
+  --destructive-foreground: oklch(0.637 0.237 25.331);
+
+  /* Borders & Inputs */
+  --border: oklch(0.24 0.07 255);
+  --input: oklch(0.22 0.06 257);
+  --ring: oklch(0.65 0.2 205);
+
+  /* Charts — neon deep sea */
+  --chart-1: oklch(0.7 0.22 210);    /* neon cyan */
+  --chart-2: oklch(0.6 0.2 240);     /* electric blue */
+  --chart-3: oklch(0.78 0.15 185);   /* aqua glow */
+  --chart-4: oklch(0.55 0.22 270);   /* violet-blue */
+  --chart-5: oklch(0.65 0.18 160);   /* seafoam */
+
+  /* Sidebar — darker abyss */
+  --sidebar: oklch(0.12 0.04 258);
+  --sidebar-foreground: oklch(0.88 0.03 215);
+  --sidebar-primary: oklch(0.72 0.2 200);
+  --sidebar-primary-foreground: oklch(0.1 0.04 260);
+  --sidebar-accent: oklch(0.22 0.08 255);
+  --sidebar-accent-foreground: oklch(0.82 0.1 210);
+  --sidebar-border: oklch(0.22 0.06 258);
+  --sidebar-ring: oklch(0.62 0.2 208);
+
+  /* ✨ Custom glow & gradient tokens */
+  --glow-primary: oklch(0.72 0.22 200 / 0.45);
+  --glow-accent: oklch(0.65 0.22 215 / 0.5);
+  --gradient-ocean: linear-gradient(135deg, oklch(0.1 0.04 262), oklch(0.2 0.1 250), oklch(0.35 0.18 220));
+  --gradient-ice: linear-gradient(180deg, oklch(0.16 0.05 258), oklch(0.12 0.04 260));
+  --gradient-glow: radial-gradient(ellipse at 60% 0%, oklch(0.65 0.2 210 / 0.22) 0%, transparent 65%);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  /* ✨ Expose custom tokens to Tailwind */
+  --color-glow-primary: var(--glow-primary);
+  --color-glow-accent: var(--glow-accent);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    /* Subtle ocean glow emanating from top */
+    background-image: var(--gradient-glow);
+    background-attachment: fixed;
+  }
+
+  /* ✨ Scrollbar — styled to match the ocean theme */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: var(--muted);
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--ring);
+    border-radius: 9999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--primary);
+  }
+
+  /* ✨ Selection highlight */
+  ::selection {
+    background-color: oklch(0.6 0.2 210 / 0.3);
+    color: inherit;
+  }
+  .dark ::selection {
+    background-color: oklch(0.7 0.22 200 / 0.4);
+  }
+
+  :root {
+    --chart-1: 220 75% 55%;
+    --chart-2: 190 65% 45%;
+    --chart-3: 210 55% 38%;
+    --chart-4: 240 60% 62%;
+    --chart-5: 175 55% 50%;
+  }
+
+  .dark {
+    --chart-1: 205 80% 60%;
+    --chart-2: 225 70% 55%;
+    --chart-3: 185 65% 58%;
+    --chart-4: 255 65% 62%;
+    --chart-5: 165 60% 52%;
+  }
+}
+
+@layer utilities {
+  .shadow-inner-right {
+    box-shadow: inset -9px 0 6px -1px rgb(0 0 0 / 0.02);
+  }
+
+  .shadow-inner-left {
+    box-shadow: inset 9px 0 6px -1px rgb(0 0 0 / 0.02);
+  }
+
+  /* ✨ Ocean glow utilities */
+  .glow-primary {
+    box-shadow: 0 0 20px var(--glow-primary), 0 0 60px var(--glow-primary);
+  }
+
+  .glow-accent {
+    box-shadow: 0 0 16px var(--glow-accent), 0 0 40px var(--glow-accent);
+  }
+
+  .text-glow {
+    text-shadow: 0 0 20px var(--glow-accent), 0 0 40px var(--glow-primary);
+  }
+
+  /* ✨ Ocean gradient backgrounds */
+  .bg-ocean {
+    background: var(--gradient-ocean);
+  }
+
+  .bg-ice {
+    background: var(--gradient-ice);
+  }
+
+  /* ✨ Frosted glass — light */
+  .glass {
+    background: oklch(0.97 0.012 225 / 0.7);
+    backdrop-filter: blur(12px) saturate(1.4);
+    border: 1px solid oklch(0.8 0.05 220 / 0.4);
+  }
+
+  /* ✨ Frosted glass — dark */
+  .dark .glass {
+    background: oklch(0.14 0.05 258 / 0.65);
+    backdrop-filter: blur(14px) saturate(1.6);
+    border: 1px solid oklch(0.4 0.1 240 / 0.25);
+  }
+
+  /* ✨ Animated cyan underline for links */
+  .link-ocean {
+    position: relative;
+    color: var(--primary);
+    text-decoration: none;
+  }
+  .link-ocean::after {
+    content: "";
+    position: absolute;
+    bottom: -2px;
+    left: 0;
+    width: 0;
+    height: 1.5px;
+    background: var(--ring);
+    transition: width 0.3s ease;
+  }
+  .link-ocean:hover::after {
+    width: 100%;
+  }
+
+  /* ✨ Card with subtle depth */
+  .card-ocean {
+    background: var(--card);
+    border: 1px solid var(--border);
+    box-shadow:
+      0 1px 3px oklch(0.3 0.1 255 / 0.08),
+      0 6px 24px oklch(0.3 0.12 250 / 0.06),
+      inset 0 1px 0 oklch(1 0 0 / 0.06);
+    transition: box-shadow 0.25s ease, transform 0.2s ease;
+  }
+  .card-ocean:hover {
+    box-shadow:
+      0 2px 8px oklch(0.3 0.1 255 / 0.12),
+      0 16px 48px oklch(0.35 0.15 240 / 0.12),
+      inset 0 1px 0 oklch(1 0 0 / 0.08);
+    transform: translateY(-1px);
+  }
+  .dark .card-ocean {
+    box-shadow:
+      0 1px 3px oklch(0 0 0 / 0.3),
+      0 6px 24px oklch(0.5 0.18 230 / 0.08),
+      inset 0 1px 0 oklch(1 0 0 / 0.04);
+  }
+  .dark .card-ocean:hover {
+    box-shadow:
+      0 2px 8px oklch(0 0 0 / 0.4),
+      0 16px 48px oklch(0.55 0.2 215 / 0.16),
+      inset 0 1px 0 oklch(1 0 0 / 0.06);
+  }
+}

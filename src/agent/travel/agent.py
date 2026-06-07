@@ -10,8 +10,11 @@ from typing import Any
 from langchain_core.messages import AIMessage
 from langchain_core.runnables import Runnable
 
+from agent.core.llm import silent
 from agent.core.models import TravelPlan, TravelPlanCuration
 from agent.core.state import AgentState
+from agent.shared.pricing import flight_group_price, group_label, hotel_group_price
+from agent.shared.travelers import compute_default_rooms
 from tools.dependencies import data_provider
 from security import SECURITY_RULES
 
@@ -293,10 +296,13 @@ def _build_costs(
     budget: float | None,
     *,
     budget_optional: bool,
+    num_adults: int = 1,
+    num_children: int = 0,
+    num_rooms: int = 1,
 ) -> dict[str, Any]:
     options = []
     apply_budget = isinstance(budget, (int, float)) and not budget_optional
-    return_floor = _cheapest_flight_price(return_flights) or 0.0
+    return_floor_per_person = _cheapest_flight_price(return_flights) or 0.0
 
     for flight in flights:
         flight_cost = _flight_price(flight)
@@ -308,22 +314,39 @@ def _build_costs(
             if nightly_rate is None:
                 continue
 
-            hotel_total = nightly_rate * trip_days
-            total = flight_cost + return_floor + hotel_total
+            # Per-adult baseline (1 adult, solo — keeps existing behaviour intact)
+            hotel_solo  = nightly_rate * trip_days
+            total_solo  = flight_cost + return_floor_per_person + hotel_solo
+
+            # Group total using pricing formulas
+            hotel_group  = hotel_group_price(nightly_rate, num_rooms, trip_days)
+            group_out    = flight_group_price(flight_cost, num_adults, num_children)
+            group_ret    = flight_group_price(return_floor_per_person, num_adults, num_children)
+            total_group  = group_out + group_ret + hotel_group
+
             options.append({
                 "flight": _flight_label(flight),
                 "hotel": hotel.get("name", "hotel option"),
                 "breakdown": {
                     "flight_outbound": flight_cost,
-                    "flight_return": return_floor,
-                    "hotel_total": hotel_total,
+                    "flight_return": return_floor_per_person,
+                    "hotel_total": hotel_solo,
+                    "hotel_group_total": hotel_group,
                     "days": trip_days,
+                    "num_adults": num_adults,
+                    "num_children": num_children,
+                    "num_rooms": num_rooms,
                 },
-                "total_estimate": total,
+                "total_estimate": total_solo,
+                "group_total_estimate": total_group,
                 "currency": "USD",
-                "within_budget": total <= budget if apply_budget else None,
+                "within_budget": total_group <= budget if apply_budget else None,
             })
 
+    # Sort by solo cost (as before) so lowest_total_estimate is the true cheapest
+    # per-adult baseline. lowest_group_estimate then comes from the SAME option,
+    # making the two numbers directly comparable (group = solo + extra-adult flights).
+    # Budget filtering still uses the group cost (within_budget flag).
     options = sorted(options, key=lambda item: item["total_estimate"])
     affordable_options = [item for item in options if item["within_budget"] is True]
     visible_options = affordable_options if apply_budget else options
@@ -331,8 +354,9 @@ def _build_costs(
     return {
         "options": visible_options[:10],
         "lowest_total_estimate": visible_options[0]["total_estimate"] if visible_options else None,
+        "lowest_group_estimate": visible_options[0]["group_total_estimate"] if visible_options else None,
         "budget_applied": apply_budget,
-        "return_flight_floor": return_floor,
+        "return_flight_floor": return_floor_per_person,
     }
 
 
@@ -342,18 +366,24 @@ def _affordable_hotel_names(
     return_flights: list[dict],
     trip_days: int,
     budget: float,
+    *,
+    num_adults: int = 1,
+    num_children: int = 0,
+    num_rooms: int = 1,
 ) -> set[str]:
     flight_costs = [c for c in (_flight_price(f) for f in flights) if c is not None]
     if not flight_costs:
         return set()
     cheapest_outbound = min(flight_costs)
-    cheapest_return = _cheapest_flight_price(return_flights) or 0.0
+    cheapest_return   = _cheapest_flight_price(return_flights) or 0.0
+    group_out = flight_group_price(cheapest_outbound, num_adults, num_children)
+    group_ret = flight_group_price(cheapest_return, num_adults, num_children)
     names: set[str] = set()
     for hotel in hotels:
         nightly = _hotel_price(hotel)
         if nightly is None:
             continue
-        if cheapest_outbound + cheapest_return + nightly * trip_days <= budget:
+        if group_out + group_ret + hotel_group_price(nightly, num_rooms, trip_days) <= budget:
             names.add(hotel.get("name", ""))
     names.discard("")
     return names
@@ -366,10 +396,17 @@ def _filter_hotels_by_budget(
     trip_days: int,
     costs: dict[str, Any],
     budget: float | None,
+    *,
+    num_adults: int = 1,
+    num_children: int = 0,
+    num_rooms: int = 1,
 ) -> list[dict]:
     if not costs.get("budget_applied") or not isinstance(budget, (int, float)):
         return hotels
-    keep = _affordable_hotel_names(hotels, flights, return_flights, trip_days, float(budget))
+    keep = _affordable_hotel_names(
+        hotels, flights, return_flights, trip_days, float(budget),
+        num_adults=num_adults, num_children=num_children, num_rooms=num_rooms,
+    )
     return [hotel for hotel in hotels if hotel.get("name") in keep]
 
 
@@ -416,6 +453,10 @@ def build_travel_prompt_payload(state: AgentState) -> dict:
     budget = state.get("total_budget")
     budget_value = budget if isinstance(budget, (int, float)) else None
 
+    num_adults   = int(state.get("num_adults")   or 1)
+    num_children = int(state.get("num_children") or 0)
+    num_rooms    = int(state.get("num_rooms") or compute_default_rooms(num_adults, num_children))
+
     costs = _build_costs(
         flights,
         return_flights,
@@ -423,10 +464,38 @@ def build_travel_prompt_payload(state: AgentState) -> dict:
         trip_days,
         budget_value,
         budget_optional=bool(state.get("budget_optional", False)),
+        num_adults=num_adults,
+        num_children=num_children,
+        num_rooms=num_rooms,
     )
-    hotels = _filter_hotels_by_budget(hotels, flights, return_flights, trip_days, costs, budget_value)
+    hotels = _filter_hotels_by_budget(
+        hotels, flights, return_flights, trip_days, costs, budget_value,
+        num_adults=num_adults, num_children=num_children, num_rooms=num_rooms,
+    )
 
     pairings = _build_pairings(flights, return_flights, trip_days)
+
+    # Align estimates with the cheapest bookable pairing + cheapest hotel.
+    # _build_costs uses return_floor_per_person (global cheapest return) which
+    # may be from a different option than the cheapest displayed pairing, causing
+    # a small but visible gap between the shown flight prices and the estimate.
+    # Overriding here ensures: solo = cheapest_pairing.total_price + cheapest_hotel×days.
+    if pairings and hotels:
+        cheapest_p = min(pairings, key=lambda p: p["total_price"])
+        ob_p = _flight_price(cheapest_p["outbound"])
+        rb_p = _flight_price(cheapest_p["return_flight"])
+        hotel_nights = [_hotel_price(h) for h in hotels if _hotel_price(h) is not None]
+        if ob_p is not None and rb_p is not None and hotel_nights:
+            min_nightly = min(hotel_nights)
+            costs["lowest_total_estimate"] = round(
+                ob_p + rb_p + min_nightly * trip_days, 2
+            )
+            costs["lowest_group_estimate"] = round(
+                flight_group_price(ob_p, num_adults, num_children)
+                + flight_group_price(rb_p, num_adults, num_children)
+                + hotel_group_price(min_nightly, num_rooms, trip_days),
+                2,
+            )
 
     return {
         "origin": state.get("current_city"),
@@ -446,6 +515,10 @@ def build_travel_prompt_payload(state: AgentState) -> dict:
         "best_time": best_time,
         "costs": costs,
         "is_adjustment": bool(state.get("is_adjustment", False)),
+        "travelers_label": group_label(num_adults, num_children),
+        "num_adults": num_adults,
+        "num_children": num_children,
+        "num_rooms": num_rooms,
     }
 
 
@@ -454,7 +527,7 @@ class TravelAgentNode:
 
     def __init__(self, response_model: Runnable) -> None:
         """Wrap the response model with structured output for curation."""
-        self.curation_model = response_model.with_structured_output(TravelPlanCuration)
+        self.curation_model = silent(response_model.with_structured_output(TravelPlanCuration))
 
     def __call__(self, state: AgentState) -> dict:
         """Return either `travel_plan` (success) or a fallback `AIMessage` (no data)."""
@@ -572,6 +645,8 @@ class TravelAgentNode:
             weather=payload["weather"],
             best_time=payload["best_time"],
             lowest_total_estimate=payload["costs"].get("lowest_total_estimate"),
+            lowest_group_estimate=payload["costs"].get("lowest_group_estimate"),
+            travelers_label=payload.get("travelers_label"),
         )
 
         return {"travel_plan": plan.model_dump(),
