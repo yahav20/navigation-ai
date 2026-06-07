@@ -83,7 +83,7 @@ def _assemble_builder(provider: str = "google") -> StateGraph:
     plan_check_node           = PlanCheckNode()
     itinerary_planner_node    = ItineraryPlannerNode(response_model)
     itinerary_executor_node   = ItineraryExecutorNode(response_model)
-    itinerary_replanner_node  = ItineraryReplannerNode()
+    itinerary_replanner_node  = ItineraryReplannerNode(response_model)
     itinerary_critic_node     = ItineraryCriticNode()
     itinerary_formatter_node  = ItineraryFormatterNode(response_model)
 

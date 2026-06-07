@@ -203,7 +203,7 @@ def _build_summary(
                 gcost = activity_group_price(cost, num_adults, num_children)
                 lines.append(f"  {t}-{et} ({dur}min) [{stype}] {name} ${cost:.0f} pp / ${gcost:.0f} group")
             else:
-                lines.append(f"  {t}-{et} ({dur}min) [{stype}] {name} ${cost:.0f}"
+                lines.append(f"  {t}-{et} ({dur}min) [{stype}] {name} ${cost:.0f}")
         lines.append("")
 
     # ── Weather (brief) ──────────────────────────────────────────────────────
