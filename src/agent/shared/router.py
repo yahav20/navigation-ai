@@ -115,6 +115,19 @@ class RouterNode:
             if any(phrase in content_lower for phrase in day_change_phrases):
                 final_intent = "update_travel_plan"
 
+        # Guardrail 4c: hotel preference changes (stars/price) on an active trip must
+        # re-plan the travel options, not fall through to advisor.
+        if final_intent in ("advisor", "update_itinerary") and has_active_trip:
+            content_lower = last_msg.content.lower()
+            hotel_pref_phrases = [
+                "star hotel", "-star", "5 star", "4 star", "3 star",
+                "cheaper hotel", "less expensive hotel", "cheaper room",
+                "luxury hotel", "nicer hotel", "fancier hotel", "budget hotel",
+                "hotel under", "hotel below", "per night",
+            ]
+            if any(phrase in content_lower for phrase in hotel_pref_phrases):
+                final_intent = "update_travel_plan"
+
         # Guardrail 5: out_of_scope cannot be overridden by trip context
         if final_intent == "out_of_scope":
             return {"intent": "out_of_scope"}
