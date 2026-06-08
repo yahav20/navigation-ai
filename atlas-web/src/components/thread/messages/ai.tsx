@@ -6,6 +6,7 @@ import { getContentString } from "../utils";
 import { BranchSwitcher, CommandBar } from "./shared";
 import { MarkdownText } from "../markdown-text";
 import { LoadExternalComponent } from "@langchain/langgraph-sdk/react-ui";
+import ItineraryViewer from "../ItineraryViewer";
 import { cn } from "@/lib/utils";
 import { ToolCalls, ToolResult } from "./tool-calls";
 import { MessageContentComplex } from "@langchain/core/messages";
@@ -27,9 +28,21 @@ function CustomComponent({
 }) {
   const artifact = useArtifact();
   const { values } = useStreamContext();
-  const customComponents = values.ui?.filter(
-    (ui) => ui.metadata?.message_id === message.id,
-  );
+  const allUi = values.ui ?? [];
+
+  // Find the last AI message ID so we can attach orphaned UI messages to it
+  const lastAiMessageId = thread.messages
+    .filter((m) => m.type === "ai")
+    .at(-1)?.id;
+  const isLastAiMessage = message.id === lastAiMessageId;
+
+  // Match by message_id metadata (ideal), or attach ItineraryViewer to the
+  // last AI message as fallback (handles Python AIMessage ID mismatch)
+  const customComponents = allUi.filter((ui) => {
+    if (ui.metadata?.message_id === message.id) return true;
+    if (isLastAiMessage && ui.name === "ItineraryViewer") return true;
+    return false;
+  });
 
   if (!customComponents?.length) return null;
   return (
@@ -40,6 +53,7 @@ function CustomComponent({
           stream={thread as unknown as ReturnType<typeof useStream>}
           message={customComponent}
           meta={{ ui: customComponent, artifact }}
+          components={{ ItineraryViewer }}
         />
       ))}
     </Fragment>
@@ -128,10 +142,7 @@ export function AssistantMessage({
   const lastMessage = thread.messages.length > 0
   ? thread.messages[thread.messages.length - 1]
   : undefined;
-// `message === undefined` is the dedicated standalone interrupt bubble rendered
-// by the thread when no real AssistantMessage will host the interrupt (e.g. the
-// graph interrupted right after a human turn) — always treat it as the last.
-const isLastMessage = message === undefined || lastMessage?.id === message?.id;
+  const isLastMessage = message === undefined || lastMessage?.id === message?.id;
   const hasNoAIOrToolMessages = !thread.messages.find(
     (m) => m.type === "ai" || m.type === "tool",
   );

@@ -7,6 +7,7 @@ Renders the final output to the user.
 Success path:
   - Prepends a deterministic Flights & Accommodation section (mode-aware)
   - Then appends the LLM-generated day schedule from replanner's final_markdown
+  - *** NEW: also emits a UI message so ItineraryViewer renders in the frontend ***
 
 Failure path:
   - Renders a friendly error with suggestions
@@ -37,6 +38,151 @@ Rules:
 - One sentence, no more than ~25 words. No markdown, no quotes.
 """
 
+
+# ---------------------------------------------------------------------------
+# UI-message builder  (NEW)
+# ---------------------------------------------------------------------------
+
+def _build_ui_props(state: AgentState) -> dict:
+    """
+    Assemble the props dict that ItineraryViewer.tsx expects.
+    Called only on the success path.
+    """
+    mode        = state.get("itinerary_mode", "standalone")
+    destination = state.get("destination_city", "")
+    origin      = state.get("current_city", "")
+    trip_days   = int(state.get("trip_days") or 0)
+    plan_state  = state.get("itinerary_plan", {})
+    results     = plan_state.get("step_results", {})
+
+    # ── Flights ──────────────────────────────────────────────────────────────
+    flights: list[dict] = []
+
+    if mode == "with_travel_data":
+        ob = state.get("itinerary_selected_outbound_flight") or {}
+        ret = state.get("itinerary_selected_return_flight") or {}
+        if ob:
+            flights.append({
+                "direction":     "outbound",
+                "airline":       ob.get("airline", ""),
+                "flight_number": ob.get("flight_number", ""),
+                "route":         f"{origin} → {destination}",
+                "datetime":      _fmt_time(ob.get("departure_time", ""))
+                                 + (" · " + _fmt_time(ob.get("arrival_time", ""))
+                                    if ob.get("arrival_time") else ""),
+                "price":         f"${float(ob.get('price', 0) or 0):.0f}",
+            })
+        if ret:
+            flights.append({
+                "direction":     "return",
+                "airline":       ret.get("airline", ""),
+                "flight_number": ret.get("flight_number", ""),
+                "route":         f"{destination} → {origin}",
+                "datetime":      _fmt_time(ret.get("departure_time", ""))
+                                 + (" · " + _fmt_time(ret.get("arrival_time", ""))
+                                    if ret.get("arrival_time") else ""),
+                "price":         f"${float(ret.get('price', 0) or ret.get('total_price', 0) or 0):.0f}",
+            })
+    else:
+        # standalone — read from verify_budget avg_prices
+        budget_key = next((k for k in results if k.startswith("verify_budget")), None)
+        avg_p: dict = {}
+        if budget_key:
+            inner = _unwrap_result(results[budget_key])
+            avg_p = inner.get("avg_prices") or {}
+        p_out = float(avg_p.get("avg_flight_price", 0) or 0)
+        p_ret = float(avg_p.get("avg_return_flight_price", 0) or 0)
+        if p_out:
+            flights.append({
+                "direction": "outbound",
+                "route":     f"{origin} → {destination}",
+                "datetime":  "estimated",
+                "price":     f"~${p_out:.0f}",
+            })
+        if p_ret:
+            flights.append({
+                "direction": "return",
+                "route":     f"{destination} → {origin}",
+                "datetime":  "estimated",
+                "price":     f"~${p_ret:.0f}",
+            })
+
+    # ── Hotels ───────────────────────────────────────────────────────────────
+    hotels: list[dict] = []
+
+    if mode == "with_travel_data":
+        travel_plan = state.get("travel_plan") or {}
+        raw_hotels  = travel_plan.get("hotels", [])
+        if raw_hotels:
+            h0 = raw_hotels[0]
+            hotels.append({
+                "name":            h0.get("name", "Hotel"),
+                "address":         h0.get("address", ""),
+                "stars":           h0.get("stars"),
+                "price_per_night": f"${float(h0.get('price_per_night', 0) or 0):.0f}/night",
+                "nights":          trip_days,
+                "lat":             h0.get("lat"),
+                "lng":             h0.get("lng"),
+            })
+    else:
+        budget_key = next((k for k in results if k.startswith("verify_budget")), None)
+        avg_p_hotel: dict = {}
+        if budget_key:
+            inner = _unwrap_result(results[budget_key])
+            avg_p_hotel = inner.get("avg_prices") or {}
+        p_hotel = float(avg_p_hotel.get("avg_hotel_per_night", 0) or 0)
+        if p_hotel:
+            hotels.append({
+                "name":            f"Hotel in {destination}",
+                "price_per_night": f"~${p_hotel:.0f}/night",
+                "nights":          trip_days,
+            })
+
+    # ── Days ─────────────────────────────────────────────────────────────────
+    days: list[dict] = []
+
+    for d in range(1, trip_days + 1):
+        key = next(
+            (k for k in results
+             if k.startswith("build_day_schedule")
+             and isinstance(_unwrap_result(results[k]), dict)
+             and _unwrap_result(results[k]).get("day") == d),
+            None,
+        )
+        if not key:
+            continue
+        day_data = _unwrap_result(results[key])
+        raw_slots = day_data.get("slots", [])
+
+        # Enrich slots with lat/lng if available
+        slots = []
+        for s in raw_slots:
+            slot = dict(s)  # shallow copy
+            # lat/lng may already be present if schedule_engine was patched;
+            # otherwise they remain absent and the map uses bbox-only mode.
+            slots.append(slot)
+
+        theme = day_data.get("theme", "")
+        days.append({
+            "day":        d,
+            "label":      f"Day {d}" + (f" — {theme}" if theme else ""),
+            "center_lat": day_data.get("center_lat"),
+            "center_lng": day_data.get("center_lng"),
+            "slots":      slots,
+        })
+
+    return {
+        "destination": destination,
+        "origin":      origin,
+        "flights":     flights,
+        "hotels":      hotels,
+        "days":        days,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Node
+# ---------------------------------------------------------------------------
 
 class ItineraryFormatterNode:
     def __init__(self, llm: BaseChatModel | None = None) -> None:
@@ -69,9 +215,24 @@ class ItineraryFormatterNode:
         if critic_action == "ignore_budget":
             content = self._prepend_over_budget_banner(state, content)
 
-        return {"messages": [AIMessage(content=content)]}
+        # ── NEW: build the UI message for ItineraryViewer ─────────────────────
+        ai_message = AIMessage(content=content)
+        ui_props   = _build_ui_props(state)
+        ui_message = {
+            "type":     "ui",
+            "name":     "ItineraryViewer",
+            "props":    ui_props,
+            # tie this UI message to the AI message so CustomComponent finds it
+            "metadata": {"message_id": ai_message.id},
+        }
+
+        return {
+            "messages": [ai_message],
+            "ui":       [ui_message],
+        }
 
     # ── Travel header (flights + accommodation) ────────────────────────────
+    # (Everything below is UNCHANGED from the original formatter)
 
     def _build_travel_header(self, state: AgentState) -> str:
         mode        = state.get("itinerary_mode", "standalone")
@@ -146,8 +307,6 @@ class ItineraryFormatterNode:
         results       = plan_state.get("step_results", {})
         critic_action = state.get("critic_action", "pass")
 
-        # Read price data from verify_budget_0 — keys are always avg_* regardless of mode;
-        # the "note" field distinguishes average vs minimum prices.
         stored_prices: dict = {}
         budget_key = next((k for k in results if k.startswith("verify_budget")), None)
         if budget_key:
@@ -174,10 +333,10 @@ class ItineraryFormatterNode:
         is_group     = num_adults + num_children > 1
         glabel       = group_label(num_adults, num_children)
 
-        # Group flight and hotel costs
         g_flight_total = (flight_group_price(price_out, num_adults, num_children)
                           + flight_group_price(price_ret, num_adults, num_children))
         g_hotel_total  = hotel_group_price(price_hotel, num_rooms, trip_days) if trip_days else 0.0
+
         group_suffix_flights = f" | 👥 **~${g_flight_total:.0f} for {glabel}**" if is_group else ""
         group_suffix_hotel   = (f" | 👥 **~${g_hotel_total:.0f} for {num_rooms} room{'s' if num_rooms > 1 else ''} × {trip_days} nights**"
                                 if is_group and price_hotel else "")
@@ -219,7 +378,6 @@ class ItineraryFormatterNode:
             ]
             return "\n".join(lines)
 
-        # ── Default: show market averages ────────────────────────────────────
         lines = [
             "## 💡 Approximate Travel Cost *(no booking confirmed)*",
             "",
@@ -245,7 +403,6 @@ class ItineraryFormatterNode:
         budget_key  = next((k for k in results if k.startswith("verify_budget")), None)
         if budget_key:
             data        = results[budget_key].get("data") or {}
-            # Prefer the group total; fall back to solo grand_total
             grand_total = float(data.get("group_grand_total") or data.get("grand_total", 0))
         overage = grand_total - budget
         banner = (
@@ -303,6 +460,10 @@ class ItineraryFormatterNode:
             pass
         return gist
 
+
+# ---------------------------------------------------------------------------
+# Pure helpers  (unchanged from original)
+# ---------------------------------------------------------------------------
 
 def _generate_fallback_markdown(
     results: dict, trip_days: int, budget: float, mode: str = "standalone",
@@ -382,7 +543,6 @@ def _budget_section_md(results: dict, budget: float, mode: str, state: dict | No
     avg_p  = b.get("avg_prices") or {}
     is_min = "minimum" in str(avg_p.get("note", "")).lower()
 
-    # Group sizing — read from state if provided, else fall back to what calculate_trip_cost stored
     num_adults   = int((state or {}).get("num_adults")   or b.get("num_adults",   1))
     num_children = int((state or {}).get("num_children") or b.get("num_children", 0))
     num_rooms    = int((state or {}).get("num_rooms")    or b.get("num_rooms",    1))
@@ -426,7 +586,6 @@ def _budget_section_md(results: dict, budget: float, mode: str, state: dict | No
         hotel_label_prefix = "" if is_min else "~ "
         hotel_suffix       = " (minimum available)" if is_min else " (estimated)"
 
-    # Remaining per-category rows (skip group_ keys and metadata)
     _skip = {"grand_total", "group_grand_total", "avg_prices",
              "outbound_flight", "return_flight",
              "group_outbound_flight", "group_return_flight",
@@ -436,7 +595,6 @@ def _budget_section_md(results: dict, budget: float, mode: str, state: dict | No
             continue
         if not isinstance(val, (int, float)):
             continue
-        # Skip group_ counterparts — they're paired with their solo row below
         if cat.startswith("group_"):
             continue
         label = cat.replace("_", " ").title()
@@ -479,15 +637,14 @@ def _fmt_time(iso: str) -> str:
     if not iso:
         return ""
     try:
-        # Handle both "2026-06-07T19:40:00+03:00" and "19:40" plain strings
         if "T" in iso:
             date_part, time_part = iso.split("T", 1)
-            time_part = time_part[:5]               # HH:MM
+            time_part = time_part[:5]
             year, month, day = date_part.split("-")
             months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
             month_name = months[int(month) - 1]
             return f"{int(day)} {month_name}, {time_part}"
-        return iso[:5]  # already HH:MM
+        return iso[:5]
     except Exception:
         return iso
 

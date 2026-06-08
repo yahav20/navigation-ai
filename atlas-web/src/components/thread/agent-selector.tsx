@@ -100,9 +100,9 @@ function TripPlannerForm({
   const [month, setMonth] = useState("");
 
   // TODO: add when integration is available
-  // const [adults, setAdults] = useState("");
-  // const [children, setChildren] = useState("");
-  // const [rooms, setRooms] = useState("");
+  const [adults, setAdults] = useState("");
+  const [children, setChildren] = useState("");
+  const [rooms, setRooms] = useState("");
 
   const handleSubmit = () => {
     if (!origin || !destination || !days) return;
@@ -193,7 +193,7 @@ function TripPlannerForm({
       </div>
 
       {/* TODO: enable when hotel integration is available */}
-      {/* <div>
+      <div>
         <label className={labelCls}><Users className="inline size-3 mr-1 mb-0.5" />Adults</label>
         <input className={inputCls} type="number" min={1} placeholder="2" value={adults} onChange={(e) => setAdults(e.target.value)} dir="ltr" />
       </div>
@@ -204,7 +204,7 @@ function TripPlannerForm({
       <div>
         <label className={labelCls}><BedDouble className="inline size-3 mr-1 mb-0.5" />Rooms</label>
         <input className={inputCls} type="number" min={1} placeholder="1" value={rooms} onChange={(e) => setRooms(e.target.value)} dir="ltr" />
-      </div> */}
+      </div>
 
       <div className="col-span-2 flex justify-end pt-1">
         <FormSubmitButton
@@ -229,8 +229,8 @@ function FlightFinderForm({ onSubmit }: { onSubmit: (text: string) => void }) {
   const [days, setDays] = useState("");
 
   // TODO: enable when booking platform integration is available
-  // const [adults, setAdults] = useState("");
-  // const [children, setChildren] = useState("");
+  const [adults, setAdults] = useState("");
+  const [children, setChildren] = useState("");
 
   const handleSubmit = () => {
     if (!origin || !destination) return;
@@ -321,14 +321,14 @@ function FlightFinderForm({ onSubmit }: { onSubmit: (text: string) => void }) {
       </div>
 
       {/* TODO: enable when booking platform integration is available */}
-      {/* <div>
+      <div>
         <label className={labelCls}><Users className="inline size-3 mr-1 mb-0.5" />Adults</label>
         <input className={inputCls} type="number" min={1} placeholder="2" value={adults} onChange={(e) => setAdults(e.target.value)} dir="ltr"/>
       </div>
       <div>
         <label className={labelCls}><Baby className="inline size-3 mr-1 mb-0.5" />Children</label>
         <input className={inputCls} type="number" min={0} placeholder="0" value={children} onChange={(e) => setChildren(e.target.value)} dir="ltr"/>
-      </div> */}
+      </div>
 
       <div className="col-span-2 flex justify-end pt-1">
         <FormSubmitButton
