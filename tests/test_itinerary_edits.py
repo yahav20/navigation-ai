@@ -82,6 +82,7 @@ class TurnSpec:
     expected_adults: int | None      = None   # num_adults in state
     expected_budget: float | None    = None   # total_budget in state
     expected_rooms: int | None       = None   # num_rooms in state
+    expected_itinerary_mode: str | None = None  # itinerary_mode in state
     # Travel-plan (flights+hotels flow) assertions
     hotel_min_stars: int | None      = None   # travel_plan.hotels[0].stars >= v
     hotel_max_price: float | None    = None   # travel_plan.hotels[0].price_per_night <= v
@@ -365,6 +366,32 @@ TESTS: list[TestCase] = [
             ),
         ),
     ]),
+
+    TestCase("E10", "E", "Build schedule after a travel plan reuses it (no HITL re-ask)", [
+        TurnSpec(
+            "Plan a trip from Tel Aviv to Paris for 2 adults. Budget $5000, 3 days, in June.",
+            expected_destination="Paris",
+            expect_flights_preserved=True,          # travel plan + flights produced
+            note=(
+                "Turn 1: Full travel-planning flow — flights + hotels, NO itinerary yet. "
+                "Generous budget so the with_travel_data itinerary in Turn 2 is feasible "
+                "(real selected flights + hotel + group activity costs) and renders fully."
+            ),
+        ),
+        TurnSpec(
+            "Great, now build me the full day-by-day schedule.",
+            expected_itinerary_mode="with_travel_data",   # NOT standalone (would mean HITL re-ask)
+            expect_flights_preserved=True,                # existing travel data NOT wiped
+            response_must_contain=["Day 1"],
+            note=(
+                "Turn 2: build_itinerary with an existing travel_plan must reuse it. "
+                "Before the metadata trip_start fix, extract_metadata invalidated the plan "
+                "(month -> specific flight date) -> plan_check HITL -> harness answers 'no' "
+                "-> standalone. After the fix, plan_check finds the flights+hotels and goes "
+                "straight to with_travel_data."
+            ),
+        ),
+    ]),
 ]
 
 
@@ -518,6 +545,14 @@ def check_turn(
             f"num_rooms state is {spec.expected_rooms}",
             actual_rooms == spec.expected_rooms,
             f"Actual: {actual_rooms!r}",
+        ))
+
+    if spec.expected_itinerary_mode is not None:
+        actual_mode = state.get("itinerary_mode")
+        checks.append(Check(
+            f"itinerary_mode is '{spec.expected_itinerary_mode}'",
+            actual_mode == spec.expected_itinerary_mode,
+            f"Actual: {actual_mode!r}",
         ))
 
     # --- Travel-plan (flights + hotels) checks ---
