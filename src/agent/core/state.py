@@ -12,6 +12,7 @@ class AgentState(TypedDict):
     """
 
     messages: Annotated[list, add_messages]
+    ui: Annotated[list, operator.add]  
     # Internal, non-UI trace accumulated by reasoning nodes (planner/executor/
     # observer). Kept out of `messages` so the chat UI never renders it; visible
     # in LangSmith / state inspection. `operator.add` appends across steps.

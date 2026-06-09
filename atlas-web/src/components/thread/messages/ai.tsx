@@ -6,10 +6,10 @@ import { getContentString } from "../utils";
 import { BranchSwitcher, CommandBar } from "./shared";
 import { MarkdownText } from "../markdown-text";
 import { LoadExternalComponent } from "@langchain/langgraph-sdk/react-ui";
+import ItineraryViewer from "../ItineraryViewer";
 import { cn } from "@/lib/utils";
 import { ToolCalls, ToolResult } from "./tool-calls";
 import { MessageContentComplex } from "@langchain/core/messages";
-import { Fragment } from "react/jsx-runtime";
 import { isAgentInboxInterruptSchema } from "@/lib/agent-inbox-interrupt";
 import { ThreadView } from "../agent-inbox";
 import { useQueryState, parseAsBoolean } from "nuqs";
@@ -17,6 +17,7 @@ import { GenericInterruptView } from "./generic-interrupt";
 import { getQuestionOptionsInterrupt } from "@/lib/question-options-interrupt";
 import { QuestionOptionsInterruptView } from "./question-options-interrupt";
 import { useArtifact } from "../artifact";
+import { Fragment } from "react";
 
 function CustomComponent({
   message,
@@ -27,23 +28,81 @@ function CustomComponent({
 }) {
   const artifact = useArtifact();
   const { values } = useStreamContext();
-  const customComponents = values.ui?.filter(
-    (ui) => ui.metadata?.message_id === message.id,
-  );
+  const allUi = values.ui ?? [];
 
-  if (!customComponents?.length) return null;
+  // Find the last AI message ID so we can attach orphaned UI messages to it
+  const lastAiMessageId = thread.messages
+    .filter((m) => m.type === "ai")
+    .at(-1)?.id;
+  const isLastAiMessage = message.id === lastAiMessageId;
+
+  // Match by message_id metadata (ideal), or attach ItineraryViewer to the
+  // last AI message as fallback (handles Python AIMessage ID mismatch)
+  const customComponents = allUi.filter((ui) => {
+    if (ui.metadata?.message_id === message.id) return true;
+    if (isLastAiMessage && ui.name === "ItineraryViewer") return true;
+    return false;
+  });
+if (!customComponents?.length) return null;
+
   return (
+
     <Fragment key={message.id}>
-      {customComponents.map((customComponent) => (
+
+      {customComponents.map((customComponent, index) => (
+
         <LoadExternalComponent
-          key={customComponent.id}
+
+          // שימוש באינדקס כגיבוי למקרה ש-id לא קיים
+
+          key={customComponent.id ?? `custom-ui-${index}`} 
+
           stream={thread as unknown as ReturnType<typeof useStream>}
+
           message={customComponent}
+
           meta={{ ui: customComponent, artifact }}
+
+          components={{ ItineraryViewer }}
+
         />
+
       ))}
+
     </Fragment>
+
   );
+}
+
+/** Returns true when this message has an ItineraryViewer UI attached to it */
+function useHasItineraryViewer(message: Message | undefined): boolean {
+  const { values } = useStreamContext();
+  const allUi = values.ui ?? [];
+  if (!message) return false;
+  return allUi.some(
+    (ui) => ui.name === "ItineraryViewer" && ui.metadata?.message_id === message.id,
+  );
+}
+
+/** Reads the latest node activity from progress_log in stream values */
+function useAgentStatus(): { node: string; detail: string } | null {
+  const { values, isLoading } = useStreamContext();
+  if (!isLoading) return null;
+  const log: string[] = (values as any).progress_log ?? [];
+  if (!log.length) return null;
+
+  // Last entry — may contain "**Step N/M:** `step_type`" or a node rule like "advisor_executor"
+  const last = log[log.length - 1].trim();
+
+  // Try to extract bold node name from markdown rule: "**node_name**"
+  const nodeMatch = last.match(/\*\*([a-z_]+)\*\*/i);
+  // Try to extract step type from backtick: "`step_type`"
+  const stepMatch = last.match(/`([a-z_]+)`/i);
+
+  const node = nodeMatch?.[1] ?? "";
+  const detail = stepMatch?.[1] ?? last.replace(/\*\*/g, "").replace(/`/g, "").slice(0, 60);
+
+  return { node, detail };
 }
 
 function parseAnthropicStreamedToolCalls(
@@ -125,13 +184,12 @@ export function AssistantMessage({
   );
 
   const thread = useStreamContext();
+  const hasItineraryViewer = useHasItineraryViewer(message);
+  const agentStatus = useAgentStatus();
   const lastMessage = thread.messages.length > 0
   ? thread.messages[thread.messages.length - 1]
   : undefined;
-// `message === undefined` is the dedicated standalone interrupt bubble rendered
-// by the thread when no real AssistantMessage will host the interrupt (e.g. the
-// graph interrupted right after a human turn) — always treat it as the last.
-const isLastMessage = message === undefined || lastMessage?.id === message?.id;
+  const isLastMessage = message === undefined || lastMessage?.id === message?.id;
   const hasNoAIOrToolMessages = !thread.messages.find(
     (m) => m.type === "ai" || m.type === "tool",
   );
@@ -174,7 +232,7 @@ const isLastMessage = message === undefined || lastMessage?.id === message?.id;
           </>
         ) : (
           <>
-            {contentString.length > 0 && (
+            {contentString.length > 0 && !hasItineraryViewer && (
               <div className="py-1">
                 <MarkdownText>{contentString}</MarkdownText>
               </div>
@@ -232,12 +290,70 @@ const isLastMessage = message === undefined || lastMessage?.id === message?.id;
 }
 
 export function AssistantMessageLoading() {
+  const { values } = useStreamContext();
+  const log: string[] = (values as any).progress_log ?? [];
+
+  // Parse the latest node name and step detail from progress_log
+  let nodeName = "";
+  let stepDetail = "";
+
+  for (let i = log.length - 1; i >= 0; i--) {
+    const entry = log[i].trim();
+    const nodeMatch = entry.match(/\*\*([a-zA-Z_][a-zA-Z0-9_]*)\*\*/);
+    const stepMatch = entry.match(/`([a-z_]+)`/i);
+    if (!nodeName && nodeMatch) nodeName = nodeMatch[1];
+    if (!stepDetail && stepMatch) stepDetail = stepMatch[1];
+    if (nodeName && stepDetail) break;
+  }
+
+  // Map internal node names to friendly Hebrew/English labels
+  const NODE_LABELS: Record<string, string> = {
+    itinerary_executor:   "🗓️ Building itinerary",
+    itinerary_planner:    "🧠 Planning",
+    itinerary_replanner:  "🔄 Replanning",
+    itinerary_critic:     "🔍 Reviewing budget",
+    itinerary_formatter:  "✍️ Writing summary",
+    advisor_executor:     "🔎 Searching",
+    advisor_planner:      "🧠 Planning search",
+    advisor_formatter:    "✍️ Preparing answer",
+    travel_agent:         "✈️ Fetching travel data",
+    summary_node:         "📝 Summarising",
+    enrichment_node:      "💬 Gathering details",
+    intent_classifier:    "🤔 Understanding request",
+  };
+
+  const STEP_LABELS: Record<string, string> = {
+    fetch_weather:          "weather data",
+    fetch_activities:       "attractions & restaurants",
+    fetch_avg_prices:       "average prices",
+    fetch_min_prices:       "best prices",
+    build_day_schedule:     "day schedule",
+    switch_travel_options:  "travel options",
+    verify_budget:          "budget check",
+  };
+
+  const friendlyNode = nodeName ? (NODE_LABELS[nodeName] ?? nodeName.replace(/_/g, " ")) : "";
+  const friendlyStep = stepDetail ? (STEP_LABELS[stepDetail] ?? stepDetail.replace(/_/g, " ")) : "";
+
+  const hasStatus = !!(friendlyNode || friendlyStep);
+
   return (
-    <div className="mr-auto flex items-start gap-2">
+    <div className="mr-auto flex flex-col gap-2">
       <div className="bg-muted flex h-8 items-center gap-1 rounded-2xl px-4 py-2">
-        <div className="bg-foreground/50 h-1.5 w-1.5 animate-[pulse_1.5s_ease-in-out_infinite] rounded-full"></div>
-        <div className="bg-foreground/50 h-1.5 w-1.5 animate-[pulse_1.5s_ease-in-out_0.5s_infinite] rounded-full"></div>
-        <div className="bg-foreground/50 h-1.5 w-1.5 animate-[pulse_1.5s_ease-in-out_1s_infinite] rounded-full"></div>
+        <div className="bg-foreground/50 h-1.5 w-1.5 animate-[pulse_1.5s_ease-in-out_infinite] rounded-full" />
+        <div className="bg-foreground/50 h-1.5 w-1.5 animate-[pulse_1.5s_ease-in-out_0.5s_infinite] rounded-full" />
+        <div className="bg-foreground/50 h-1.5 w-1.5 animate-[pulse_1.5s_ease-in-out_1s_infinite] rounded-full" />
+        {hasStatus && (
+          <span className="ml-2 text-xs text-muted-foreground animate-pulse">
+            {friendlyNode}
+            {friendlyNode && friendlyStep && (
+              <span className="mx-1 opacity-40">·</span>
+            )}
+            {friendlyStep && (
+              <span className="opacity-70">{friendlyStep}</span>
+            )}
+          </span>
+        )}
       </div>
     </div>
   );
