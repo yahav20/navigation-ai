@@ -5,6 +5,7 @@ import os
 from typing import Any
 
 import requests
+from providers.http_client import get as _http_get
 
 _BASE = "https://maps.googleapis.com/maps/api"
 _TIMEOUT = 15
@@ -43,7 +44,7 @@ def search_places(query: str, location: tuple[float, float] | None = None, radiu
         params["radius"] = radius
 
     try:
-        r = requests.get(f"{_BASE}/place/textsearch/json", params=params, timeout=_TIMEOUT)
+        r = _http_get(f"{_BASE}/place/textsearch/json", params=params, timeout=_TIMEOUT)
         r.raise_for_status()
         data = r.json() or {}
     except (requests.RequestException, ValueError):
@@ -91,7 +92,7 @@ def search_nearby_places(
     }
 
     try:
-        r = requests.get(f"{_BASE}/place/nearbysearch/json", params=params, timeout=_TIMEOUT)
+        r = _http_get(f"{_BASE}/place/nearbysearch/json", params=params, timeout=_TIMEOUT)
         r.raise_for_status()
         data = r.json() or {}
     except (requests.RequestException, ValueError):
@@ -127,7 +128,7 @@ def get_place_details(place_id: str) -> dict | None:
     }
 
     try:
-        r = requests.get(f"{_BASE}/place/details/json", params=params, timeout=_TIMEOUT)
+        r = _http_get(f"{_BASE}/place/details/json", params=params, timeout=_TIMEOUT)
         r.raise_for_status()
         data = r.json() or {}
     except (requests.RequestException, ValueError):

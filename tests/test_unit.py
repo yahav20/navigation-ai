@@ -3,8 +3,8 @@ import json
 
 import pytest
 
-from agent.nodes.itinerary.planner import _completed_step_types, _validate_and_fix
-from agent.nodes.itinerary.schemas import ExecutionPlan, PlanStep
+from agent.itinerary.planner import _completed_step_types , _validate_and_fix
+from agent.itinerary.schemas import ExecutionPlan, PlanStep
 from security import validate_city, validate_input, validate_positive_number
 
 # ---------------------------------------------------------------------------

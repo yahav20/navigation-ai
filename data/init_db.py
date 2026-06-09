@@ -28,7 +28,8 @@ CREATE TABLE cities (
     country_id INTEGER NOT NULL REFERENCES countries(id),
     name       TEXT NOT NULL,
     lat        REAL NOT NULL,
-    lng        REAL NOT NULL
+    lng        REAL NOT NULL,
+    ta_key     TEXT
 );
 CREATE INDEX idx_cities_country_id ON cities(country_id);
 
@@ -152,6 +153,8 @@ CREATE TABLE api_hotels (
     rating          REAL,
     review_count    INTEGER,
     price_per_night REAL,
+    price_min       REAL,
+    price_max       REAL,
     currency        TEXT DEFAULT 'USD',
     latitude        REAL,
     longitude       REAL,
@@ -295,6 +298,15 @@ def resolve_city(conn: sqlite3.Connection, name: str, alpha2: str) -> int:
 
 def seed_travel(conn: sqlite3.Connection) -> None:
 
+    _TA_KEYS = {
+        "tel aviv":  "g293984",
+        "paris":     "g187147",
+        "london":    "g186338",
+        "tokyo":     "g298184",
+        "new york":  "g60763",
+        "berlin":    "g187323",
+        "amsterdam": "g188590",
+    }
     city_keys = {
         "tel aviv":  ("Tel Aviv",      "IL"),
         "paris":     ("Paris",         "FR"),
@@ -305,6 +317,10 @@ def seed_travel(conn: sqlite3.Connection) -> None:
         "amsterdam": ("Amsterdam",     "NL"),
     }
     ids = {key: resolve_city(conn, name, alpha2) for key, (name, alpha2) in city_keys.items()}
+
+    # Seed TripAdvisor location keys for the known cities
+    for key, ta_key in _TA_KEYS.items():
+        conn.execute("UPDATE cities SET ta_key = ? WHERE id = ?", (ta_key, ids[key]))
 
     flights = [
     ("tel aviv", "paris", "El Al", 350, "LY321", "2026-06-01 08:00:00", "2026-06-01 11:50:00", 290, "Available", 4.5),
@@ -644,8 +660,8 @@ def _sync_xotelo_hotels(conn: sqlite3.Connection, city_key: str, city_id: int, t
                 """
                 INSERT OR REPLACE INTO api_hotels
                 (city_id, api_source, tripadvisor_key, name, stars, rating, review_count,
-                 price_per_night, currency, latitude, longitude, address)
-                VALUES (?, 'xotelo', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 price_per_night, price_min, price_max, currency, latitude, longitude, address)
+                VALUES (?, 'xotelo', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     city_id,
@@ -654,7 +670,9 @@ def _sync_xotelo_hotels(conn: sqlite3.Connection, city_key: str, city_id: int, t
                     hotel.get("stars"),
                     hotel.get("stars"),
                     hotel.get("review_count"),
-                    hotel.get("price_per_night"),
+                    hotel.get("price_per_night") or hotel.get("price_min"),
+                    hotel.get("price_min"),
+                    hotel.get("price_max"),
                     hotel.get("currency", "USD"),
                     hotel.get("lat"),
                     hotel.get("lng"),
@@ -678,7 +696,7 @@ def _sync_xotelo_hotels(conn: sqlite3.Connection, city_key: str, city_id: int, t
 
 
 def _sync_google_attractions(conn: sqlite3.Connection, city_key: str, city_id: int, lat: float, lng: float) -> int:
-    from providers.google_maps.places_api import search_nearby_places
+    from providers.google_maps.places_api import get_place_details, search_nearby_places
     from providers.wikipedia.enrichment import fetch_wiki_summary
 
     try:
@@ -688,13 +706,29 @@ def _sync_google_attractions(conn: sqlite3.Connection, city_key: str, city_id: i
             wiki = fetch_wiki_summary(attr["name"])
             price_level = attr.get("price_level")
             price = _PRICE_LEVEL_TO_USD.get(price_level, 0.0) if price_level is not None else 0.0
+
+            # Enrich with Place Details (phone, website, hours)
+            phone = website = hours = None
+            pid = attr.get("place_id")
+            if pid:
+                try:
+                    details = get_place_details(pid)
+                    if details:
+                        phone = details.get("phone")
+                        website = details.get("website")
+                        raw_hours = details.get("hours")
+                        hours = json.dumps(raw_hours) if isinstance(raw_hours, list) else raw_hours
+                except Exception:
+                    pass
+
             conn.execute(
                 """
                 INSERT OR REPLACE INTO api_attractions
                 (city_id, place_id, name, rating, review_count, price, price_level,
                  latitude, longitude, address, types,
-                 wiki_title, wiki_description, wiki_url)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 wiki_title, wiki_description, wiki_url,
+                 phone, website, hours)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     city_id,
@@ -711,6 +745,9 @@ def _sync_google_attractions(conn: sqlite3.Connection, city_key: str, city_id: i
                     wiki.get("title") if wiki else None,
                     wiki.get("extract") if wiki else None,
                     wiki.get("url") if wiki else None,
+                    phone,
+                    website,
+                    hours,
                 ),
             )
             count += 1
@@ -730,7 +767,7 @@ def _sync_google_attractions(conn: sqlite3.Connection, city_key: str, city_id: i
 
 
 def _sync_google_restaurants(conn: sqlite3.Connection, city_key: str, city_id: int, lat: float, lng: float) -> int:
-    from providers.google_maps.places_api import search_nearby_places
+    from providers.google_maps.places_api import get_place_details, search_nearby_places
 
     try:
         restaurants = search_nearby_places((lat, lng), "restaurant", limit=15)
@@ -738,12 +775,27 @@ def _sync_google_restaurants(conn: sqlite3.Connection, city_key: str, city_id: i
         for rest in restaurants:
             price_level = rest.get("price_level")
             price = _PRICE_LEVEL_TO_USD.get(price_level, 0.0) if price_level is not None else 0.0
+
+            # Enrich with Place Details (phone, website, hours)
+            phone = website = hours = None
+            pid = rest.get("place_id")
+            if pid:
+                try:
+                    details = get_place_details(pid)
+                    if details:
+                        phone = details.get("phone")
+                        website = details.get("website")
+                        raw_hours = details.get("hours")
+                        hours = json.dumps(raw_hours) if isinstance(raw_hours, list) else raw_hours
+                except Exception:
+                    pass
+
             conn.execute(
                 """
                 INSERT OR REPLACE INTO api_restaurants
                 (city_id, place_id, name, rating, review_count, price, price_level,
-                 latitude, longitude, address)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 latitude, longitude, address, phone, website, hours)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     city_id,
@@ -756,6 +808,9 @@ def _sync_google_restaurants(conn: sqlite3.Connection, city_key: str, city_id: i
                     rest.get("lat"),
                     rest.get("lng"),
                     rest.get("formatted_address"),
+                    phone,
+                    website,
+                    hours,
                 ),
             )
             count += 1
@@ -846,6 +901,7 @@ def seed_api(conn: sqlite3.Connection) -> None:
     """Fetch live API data for all seeded cities and cache to api_* tables."""
     import sys as _sys
     _sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+    ensure_schema_columns(conn)
 
     # Load environment variables from .env (project root or parents)
     try:
@@ -902,11 +958,31 @@ def seed_api(conn: sqlite3.Connection) -> None:
     print("API sync complete.")
 
 
+def ensure_schema_columns(conn: sqlite3.Connection) -> None:
+    """Add new columns to existing tables without recreating the DB.
+
+    Safe to call multiple times — SQLite ignores ALTER TABLE errors for
+    columns that already exist.
+    """
+    migrations = [
+        "ALTER TABLE cities     ADD COLUMN ta_key     TEXT",
+        "ALTER TABLE api_hotels ADD COLUMN price_min  REAL",
+        "ALTER TABLE api_hotels ADD COLUMN price_max  REAL",
+    ]
+    for sql in migrations:
+        try:
+            conn.execute(sql)
+        except sqlite3.OperationalError:
+            pass  # column already exists
+    conn.commit()
+
+
 def create_travel_db(with_api: bool = False) -> None:
     conn = sqlite3.connect(DB_PATH)
     conn.execute("PRAGMA foreign_keys = ON")
     try:
         conn.executescript(SCHEMA)
+        ensure_schema_columns(conn)
         seed_reference(conn)
         seed_travel(conn)
         conn.commit()

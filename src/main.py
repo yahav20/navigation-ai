@@ -15,9 +15,8 @@ from langgraph.checkpoint.sqlite import SqliteSaver  # noqa: E402
 from langgraph.types import Command  # noqa: E402
 
 import ui  # noqa: E402
-from agent.graph import build_graph  # noqa: E402
-from config.session_name import generate_session_name  # noqa: E402
-from config.setting import CHOSEN_PROVIDER  # noqa: E402
+from agent.core.graph import build_graph  # noqa: E402
+from config.config import generate_session_name, CHOSEN_PROVIDER  # noqa: E402
 from security import MAX_TURNS_PER_SESSION, generate_session_id, log_turn, scan_output, validate_input  # noqa: E402
 
 CHECKPOINT_DB = Path(__file__).resolve().parent.parent / "data" / "checkpoints.db"
@@ -35,6 +34,16 @@ def _parse_args() -> argparse.Namespace:
         help="Session name (thread_id) to resume or create. Defaults to a random name like 'happy-traveler'.",
     )
     return parser.parse_args()
+
+
+def _fmt_travelers(adults, children) -> str:
+    """Compact travellers label for the state line, e.g. '2A·1C' (or 'None')."""
+    if adults is None:
+        return "None"
+    label = f"{adults}A"
+    if children:
+        label += f"·{children}C"
+    return label
 
 
 def _restrict_db_permissions(path: Path) -> None:
@@ -61,19 +70,24 @@ def run_agent(session_id: str = "default") -> None:
 def _interactive_loop(conn: sqlite3.Connection, session_id: str) -> None:
     checkpointer = SqliteSaver(conn=conn, serde=JsonPlusSerializer())
     graph = build_graph(provider=CHOSEN_PROVIDER, checkpointer=checkpointer)
-    config = {"configurable": {"thread_id": session_id}}
+    # recursion_limit raised from the default 25: the itinerary plan-and-execute
+    # loop spends ~2 super-steps per plan step (executor → replanner), so a
+    # multi-day trip or a critic budget-replan cycle easily exceeds 25.
+    config = {"configurable": {"thread_id": session_id}, "recursion_limit": 100}
 
     saved = graph.get_state(config).values
     resuming = bool(saved)
     ui.render_banner(CHOSEN_PROVIDER, session_id, CHECKPOINT_DB, resuming)
 
     prompt_session = ui.make_prompt_session()
-    current_state: tuple[str, str, str, str, str] = (
+    current_state: tuple[str, ...] = (
         saved.get("current_city", "None") if saved else "None",
         saved.get("destination_city", "None") if saved else "None",
         saved.get("total_budget", "None") if saved else "None",
         saved.get("trip_days", "None") if saved else "None",
         saved.get("trip_start", "None") if saved else "None",
+        _fmt_travelers(saved.get("num_adults"), saved.get("num_children") or 0) if saved else "None",
+        saved.get("num_rooms", "None") if saved else "None",
     )
     turn_count = 0
 
@@ -112,10 +126,10 @@ def _run_turn(
     graph,
     config: dict,
     user_input: str,
-    current_state: tuple[str, str, str, str, str],
+    current_state: tuple[str, ...],
     session_id: str = "unknown",
     prompt_session=None,
-) -> tuple[str, str, str, str, str]:
+) -> tuple[str, ...]:
     """Run one user turn, including any HITL interrupt-resume cycles."""
     _SELF_REPORTING_NODES = {"advisor_planner", "advisor_executor", "advisor_replanner"}
 
@@ -158,6 +172,8 @@ def _run_turn(
                     data.get("total_budget", "None"),
                     data.get("trip_days", "None"),
                     data.get("trip_start", "None"),
+                    _fmt_travelers(data.get("num_adults"), data.get("num_children") or 0),
+                    data.get("num_rooms", "None"),
                 )
                 display.update(current_state)
 
@@ -170,7 +186,14 @@ def _run_turn(
             break
 
         # ── HITL: show the question and collect the user's choice ──────
-        if isinstance(pending_interrupt, dict) and "options" in pending_interrupt:
+        if isinstance(pending_interrupt, dict) and pending_interrupt.get("action_requests"):
+            # Agent Inbox HITLRequest schema (e.g. save_plan), shared with
+            # agent-chat-ui. The CLI resumes with a plain "yes"/"no" string,
+            # which the node's _parse_decision handles.
+            action = pending_interrupt["action_requests"][0]
+            ui.render_agent_message("Atlas", action.get("description") or "Continue? (yes/no)")
+            user_response = ui.ask_user(prompt_session, state=current_state)
+        elif isinstance(pending_interrupt, dict) and "options" in pending_interrupt:
             # Structured interrupt: render the question then show arrow-key picker.
             question = pending_interrupt.get("question", "")
             if question:

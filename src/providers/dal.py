@@ -10,9 +10,10 @@ import logging
 import sqlite3
 from typing import Any
 
-from providers.city_metadata import get_city_info
-from providers.google_maps.places_api import search_nearby_places
+from providers.city_metadata import CITY_METADATA
+from providers.google_maps.places_api import get_place_details, search_nearby_places
 from providers.sqlite.provider import SQLiteDataProvider
+from providers.tripadvisor_lookup import scrape_ta_location_key
 from providers.wikipedia.enrichment import fetch_wiki_summary
 from providers.xotelo.hotels_api import xotelo_get_rates, xotelo_list_hotels
 
@@ -50,13 +51,17 @@ class HybridDAL:
         raw_stars = row.get("stars")
         stars = round(float(raw_stars), 2) if raw_stars is not None else None
 
-        raw_price = row.get("price_per_night")
-        price_per_night = round(float(raw_price), 2) if raw_price is not None else None
+        raw_price_min = row.get("price_min") or row.get("price_per_night")
+        raw_price_max = row.get("price_max")
+        price_per_night = round(float(raw_price_min), 2) if raw_price_min is not None else None
+        price_max = round(float(raw_price_max), 2) if raw_price_max is not None else None
 
         return {
             "name": row.get("name") or "",
             "stars": stars,
             "price_per_night": price_per_night,
+            "price_min": price_per_night,
+            "price_max": price_max,
             "latitude": row.get("latitude") or row.get("lat"),
             "longitude": row.get("longitude") or row.get("lng"),
             "address": row.get("address") or row.get("formatted_address") or "",
@@ -68,6 +73,8 @@ class HybridDAL:
             "review_count": row.get("review_count"),
             "phone": row.get("phone") or "",
             "website": row.get("website") or "",
+            "image_urls": row.get("image_urls") or "",
+            "booking_url": row.get("booking_url") or row.get("tripadvisor_url") or "",
             # Preserve the Xotelo/TripAdvisor key so callers can fetch rates later
             "hotel_key": row.get("hotel_key") or row.get("tripadvisor_key"),
             "source": source,
@@ -121,6 +128,7 @@ class HybridDAL:
             "review_count": row.get("review_count"),
             "phone": row.get("phone") or "",
             "website": row.get("website") or "",
+            "hours": row.get("hours") or "",
             "source": source,
         }
 
@@ -187,6 +195,65 @@ class HybridDAL:
         merged["source"] = "hybrid"
         return merged
 
+    @staticmethod
+    def _normalize_restaurant(row: dict, source: str = "api") -> dict:
+        """Return a unified restaurant dict with consistent keys."""
+        raw_rating = row.get("rating")
+        rating = round(float(raw_rating), 2) if raw_rating is not None else None
+
+        raw_price = row.get("price")
+        price_level = row.get("price_level")
+        if raw_price is not None:
+            price = float(raw_price)
+        elif price_level is not None:
+            price = _PRICE_LEVEL_TO_USD.get(int(price_level), 0.0)
+        else:
+            price = None
+
+        return {
+            "name": row.get("name") or "",
+            "rating": rating,
+            "price": price,
+            "price_level": price_level,
+            "review_count": row.get("review_count"),
+            "latitude": row.get("latitude") or row.get("lat"),
+            "longitude": row.get("longitude") or row.get("lng"),
+            "address": row.get("address") or row.get("formatted_address") or "",
+            "phone": row.get("phone") or "",
+            "website": row.get("website") or "",
+            "hours": row.get("hours") or "",
+            "cuisine": row.get("cuisine") or "",
+            "source": source,
+        }
+
+    def _enrich_places_with_details(self, places: list[dict], max_enrichments: int = 20) -> list[dict]:
+        """Enrich places with phone, website, hours from Google Place Details API.
+
+        Only called during initial cache population so the cost is paid once per city.
+        Silently skips on API error or missing key.
+        """
+        enriched = []
+        count = 0
+        for place in places:
+            place = dict(place)
+            pid = place.get("place_id")
+            if pid and count < max_enrichments:
+                try:
+                    details = get_place_details(pid)
+                    if details:
+                        if details.get("phone"):
+                            place["phone"] = details["phone"]
+                        if details.get("website"):
+                            place["website"] = details["website"]
+                        hours = details.get("hours")
+                        if hours:
+                            place["hours"] = json.dumps(hours) if isinstance(hours, list) else hours
+                    count += 1
+                except Exception as e:
+                    _logger.warning("Place Details failed for %s: %s", place.get("name"), e)
+            enriched.append(place)
+        return enriched
+
     # ------------------------------------------------------------------
     # Internal city lookup
     # ------------------------------------------------------------------
@@ -219,6 +286,42 @@ class HybridDAL:
             (name + "%",),
         )
         return rows[0]["id"] if rows else None
+
+    def _get_ta_key(self, city_name: str, city_id: int) -> str | None:
+        """Resolve a TripAdvisor gXXXXXX location key for a city.
+
+        Lookup order:
+        1. cities.ta_key column in DB (fastest, covers pre-seeded and previously scraped)
+        2. Hardcoded CITY_METADATA dict (redundant after first seed, but a safe fallback)
+        3. Scrape TripAdvisor search page and persist the result for next time
+        """
+        # 1. DB column
+        rows = self.sqlite._query("SELECT ta_key FROM cities WHERE id = ?", (city_id,))
+        if rows and rows[0].get("ta_key"):
+            return rows[0]["ta_key"]
+
+        # 2. Hardcoded metadata
+        key = city_name.lower().strip()
+        meta = CITY_METADATA.get(key)
+        if meta and meta.get("ta_key"):
+            ta_key = meta["ta_key"]
+            self._save_ta_key(city_id, ta_key)
+            return ta_key
+
+        # 3. Scrape TripAdvisor
+        ta_key = scrape_ta_location_key(city_name)
+        if ta_key:
+            self._save_ta_key(city_id, ta_key)
+        return ta_key
+
+    def _save_ta_key(self, city_id: int, ta_key: str) -> None:
+        import sqlite3 as _sqlite3
+        conn = _sqlite3.connect(self.db_path)
+        try:
+            conn.execute("UPDATE cities SET ta_key = ? WHERE id = ?", (ta_key, city_id))
+            conn.commit()
+        finally:
+            conn.close()
 
     # ------------------------------------------------------------------
     # Public fetch methods
@@ -257,10 +360,10 @@ class HybridDAL:
 
         # 2. Call Xotelo if cache is empty
         if not api_results:
-            info = get_city_info(city)
-            if info and info.get("ta_key"):
+            ta_key = self._get_ta_key(city, city_id)
+            if ta_key:
                 try:
-                    hotels = xotelo_list_hotels(info["ta_key"])
+                    hotels = xotelo_list_hotels(ta_key)
                     if hotels:
                         hotels = self._enrich_hotel_prices(hotels)
                         self._cache_hotels(city_id, hotels)
@@ -380,7 +483,7 @@ class HybridDAL:
                 (city_id,),
             )
             if cache:
-                return [dict(row) for row in cache]
+                return [self._normalize_restaurant(dict(row), "api") for row in cache]
 
         # 2. Call API
         rows = self.sqlite._query("SELECT lat, lng FROM cities WHERE id = ?", (city_id,))
@@ -390,7 +493,7 @@ class HybridDAL:
                 restaurants = search_nearby_places((lat, lng), "restaurant", limit=10)
                 if restaurants:
                     self._cache_restaurants(city_id, restaurants)
-                    return restaurants
+                    return [self._normalize_restaurant(r, "api") for r in restaurants]
             except Exception as e:
                 _logger.error("Google Restaurants API failed for %s: %s", city, e)
 
@@ -408,8 +511,9 @@ class HybridDAL:
                     """
                     INSERT OR REPLACE INTO api_hotels
                     (city_id, api_source, tripadvisor_key, name, stars, review_count,
-                     price_per_night, currency, latitude, longitude, address)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     price_per_night, price_min, price_max, currency, latitude, longitude,
+                     address, image_urls, booking_url)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         city_id,
@@ -418,11 +522,15 @@ class HybridDAL:
                         hotel["name"],
                         hotel.get("stars"),
                         hotel.get("review_count"),
-                        hotel.get("price_per_night"),
+                        hotel.get("price_per_night") or hotel.get("price_min"),
+                        hotel.get("price_min"),
+                        hotel.get("price_max"),
                         hotel.get("currency", "USD"),
                         hotel.get("lat"),
                         hotel.get("lng"),
                         hotel.get("address"),
+                        hotel.get("image_urls"),
+                        hotel.get("booking_url") or hotel.get("tripadvisor_url"),
                     ),
                 )
             conn.commit()
@@ -430,6 +538,7 @@ class HybridDAL:
             conn.close()
 
     def _cache_attractions(self, city_id: int, attractions: list[dict]) -> None:
+        attractions = self._enrich_places_with_details(attractions)
         conn = sqlite3.connect(self.db_path)
         try:
             for attr in attractions:
@@ -437,8 +546,9 @@ class HybridDAL:
                     """
                     INSERT OR REPLACE INTO api_attractions
                     (city_id, place_id, name, rating, price_level, latitude, longitude,
-                     address, types, wiki_title, wiki_description, wiki_url)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     address, types, wiki_title, wiki_description, wiki_url,
+                     phone, website, hours)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         city_id,
@@ -453,6 +563,9 @@ class HybridDAL:
                         attr.get("wiki_title"),
                         attr.get("wiki_description"),
                         attr.get("wiki_url"),
+                        attr.get("phone"),
+                        attr.get("website"),
+                        attr.get("hours"),
                     ),
                 )
             conn.commit()
@@ -460,25 +573,36 @@ class HybridDAL:
             conn.close()
 
     def _cache_restaurants(self, city_id: int, restaurants: list[dict]) -> None:
+        restaurants = self._enrich_places_with_details(restaurants)
         conn = sqlite3.connect(self.db_path)
         try:
             for rest in restaurants:
+                price_level = rest.get("price_level")
+                price = (
+                    _PRICE_LEVEL_TO_USD.get(int(price_level), 0.0)
+                    if price_level is not None else None
+                )
                 conn.execute(
                     """
                     INSERT OR REPLACE INTO api_restaurants
-                    (city_id, place_id, name, rating, price_level, latitude, longitude,
-                     address)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    (city_id, place_id, name, rating, review_count, price, price_level,
+                     latitude, longitude, address, phone, website, hours)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         city_id,
                         rest.get("place_id"),
                         rest["name"],
                         rest.get("rating"),
-                        rest.get("price_level"),
+                        rest.get("review_count"),
+                        price,
+                        price_level,
                         rest.get("lat"),
                         rest.get("lng"),
                         rest.get("formatted_address"),
+                        rest.get("phone"),
+                        rest.get("website"),
+                        rest.get("hours"),
                     ),
                 )
             conn.commit()
