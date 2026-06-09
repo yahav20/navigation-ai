@@ -128,7 +128,7 @@ def test_validate_and_fix_skips_completed_days():
 
 @pytest.mark.unit
 def test_wikipedia_tool_returns_valid_json():
-    from tools.advisor_tools import get_wikipedia_summary
+    from tools.destinations import get_wikipedia_summary
     raw = get_wikipedia_summary.invoke({"topic": "Paris"})
     data = json.loads(raw)
     assert "summary" in data or "error" in data
@@ -136,7 +136,7 @@ def test_wikipedia_tool_returns_valid_json():
 
 @pytest.mark.unit
 def test_wikipedia_tool_known_topic_has_summary():
-    from tools.advisor_tools import get_wikipedia_summary
+    from tools.destinations import get_wikipedia_summary
     raw = get_wikipedia_summary.invoke({"topic": "Louvre"})
     data = json.loads(raw)
     assert "summary" in data
@@ -145,7 +145,7 @@ def test_wikipedia_tool_known_topic_has_summary():
 
 @pytest.mark.unit
 def test_wikipedia_tool_unknown_topic_returns_error_not_crash():
-    from tools.advisor_tools import get_wikipedia_summary
+    from tools.destinations import get_wikipedia_summary
     raw = get_wikipedia_summary.invoke({"topic": "xyznonexistentplace99999"})
     data = json.loads(raw)
     assert "error" in data
