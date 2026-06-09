@@ -17,7 +17,6 @@ import {
   ChevronRight,
   X,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
 
 /* ─────────────────────────────────────────
    Types
@@ -50,7 +49,7 @@ const AGENTS: AgentCard[] = [
   {
     id: "flight_finder",
     label: "Flight Finder",
-    description: "I’ll find you the best flights at the right price",
+    description: "I'll find you the best flights at the right price",
     icon: <Plane className="size-5" />,
     color: "oklch(0.62 0.2 195)",
     hasForm: true,
@@ -86,29 +85,101 @@ const inputCls = cn(
 const labelCls = "block text-xs font-medium text-[--muted-foreground] mb-1";
 
 /* ─────────────────────────────────────────
+   Travelers row (shared between forms)
+───────────────────────────────────────── */
+function TravelersRow({
+  adults, setAdults,
+  children, setChildren,
+  rooms, setRooms,
+  showRooms = true,
+}: {
+  adults: string; setAdults: (v: string) => void;
+  children: string; setChildren: (v: string) => void;
+  rooms: string; setRooms: (v: string) => void;
+  showRooms?: boolean;
+}) {
+  return (
+    <div className={cn("grid gap-3", showRooms ? "grid-cols-3" : "grid-cols-2")}>
+      <div>
+        <label className={labelCls}>
+          <Users className="inline size-3 mr-1 mb-0.5" />
+          Adults
+        </label>
+        <input
+          className={inputCls}
+          type="number"
+          min={1}
+          placeholder="2"
+          value={adults}
+          onChange={(e) => setAdults(e.target.value)}
+          dir="ltr"
+        />
+      </div>
+      <div>
+        <label className={labelCls}>
+          <Baby className="inline size-3 mr-1 mb-0.5" />
+          Children
+        </label>
+        <input
+          className={inputCls}
+          type="number"
+          min={0}
+          placeholder="0"
+          value={children}
+          onChange={(e) => setChildren(e.target.value)}
+          dir="ltr"
+        />
+      </div>
+      {showRooms && (
+        <div>
+          <label className={labelCls}>
+            <BedDouble className="inline size-3 mr-1 mb-0.5" />
+            Rooms
+          </label>
+          <input
+            className={inputCls}
+            type="number"
+            min={1}
+            placeholder="1"
+            value={rooms}
+            onChange={(e) => setRooms(e.target.value)}
+            dir="ltr"
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────
    Trip Planner Form
 ───────────────────────────────────────── */
-function TripPlannerForm({
-  onSubmit,
-}: {
-  onSubmit: (text: string) => void;
-}) {
+function TripPlannerForm({ onSubmit }: { onSubmit: (text: string) => void }) {
   const [origin, setOrigin] = useState("");
   const [destination, setDestination] = useState("");
   const [days, setDays] = useState("");
   const [budget, setBudget] = useState("");
   const [month, setMonth] = useState("");
-
-  // TODO: add when integration is available
   const [adults, setAdults] = useState("");
   const [children, setChildren] = useState("");
   const [rooms, setRooms] = useState("");
 
   const handleSubmit = () => {
     if (!origin || !destination || !days) return;
+    const numAdults   = parseInt(adults)   || 1;
+    const numChildren = parseInt(children) || 0;
+    const numRooms    = parseInt(rooms)    || 1;
+    const travelers =
+      numAdults === 1 && numChildren === 0
+        ? "1 adult"
+        : `${numAdults} adult${numAdults > 1 ? "s" : ""}` +
+          (numChildren > 0 ? ` and ${numChildren} child${numChildren > 1 ? "ren" : ""}` : "");
+
     const parts = [
-      `I want to plan a trip from ${origin} to ${destination}`,
+      `Plan a 3-day itinerary from ${origin} to ${destination}`,
       `for ${days} days`,
+      `for ${travelers}`,
+      numRooms > 1 ? `in ${numRooms} rooms` : "",
       budget && `with a budget of ${budget}`,
       month && `in ${month}`,
     ].filter(Boolean);
@@ -116,103 +187,68 @@ function TripPlannerForm({
   };
 
   return (
-    <div className="grid grid-cols-2 gap-3">
-      <div>
-        <label className={labelCls}>
-          <Globe className="mb-0.5 mr-1 inline size-3" />
-          Origin country
-        </label>
-        <input
-          className={inputCls}
-          placeholder="Israel"
-          value={origin}
-          onChange={(e) => setOrigin(e.target.value)}
-          dir="ltr"
-        />
+    <div className="flex flex-col gap-3">
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className={labelCls}>
+            <Globe className="mb-0.5 mr-1 inline size-3" />
+            Origin country
+          </label>
+          <input className={inputCls} placeholder="Israel" value={origin}
+            onChange={(e) => setOrigin(e.target.value)} dir="ltr" />
+        </div>
+        <div>
+          <label className={labelCls}>
+            <MapPin className="mb-0.5 mr-1 inline size-3" />
+            Destination country
+          </label>
+          <input className={inputCls} placeholder="Italy" value={destination}
+            onChange={(e) => setDestination(e.target.value)} dir="ltr" />
+        </div>
+        <div>
+          <label className={labelCls}>
+            <Calendar className="mb-0.5 mr-1 inline size-3" />
+            Number of days
+          </label>
+          <input className={inputCls} type="number" placeholder="7" min={1}
+            value={days} onChange={(e) => setDays(e.target.value)} dir="ltr" />
+        </div>
+        <div>
+          <label className={labelCls}>
+            <Calendar className="mb-0.5 mr-1 inline size-3" />
+            Estimated month
+          </label>
+          <select className={inputCls} value={month} onChange={(e) => setMonth(e.target.value)} dir="ltr">
+            <option value="">Select month...</option>
+            {["January","February","March","April","May","June",
+              "July","August","September","October","November","December"].map((m) => (
+              <option key={m} value={m}>{m}</option>
+            ))}
+          </select>
+        </div>
+        <div className="col-span-2">
+          <label className={labelCls}>
+            <DollarSign className="mb-0.5 mr-1 inline size-3" />
+            Estimated budget (optional)
+          </label>
+          <input className={inputCls} placeholder="$5,000 per person" value={budget}
+            onChange={(e) => setBudget(e.target.value)} dir="ltr" />
+        </div>
       </div>
+
+      {/* Travelers */}
       <div>
-        <label className={labelCls}>
-          <MapPin className="mb-0.5 mr-1 inline size-3" />
-          Destination country
-        </label>
-        <input
-          className={inputCls}
-          placeholder="Italy"
-          value={destination}
-          onChange={(e) => setDestination(e.target.value)}
-          dir="ltr"
-        />
-      </div>
-      <div>
-        <label className={labelCls}>
-          <Calendar className="mb-0.5 mr-1 inline size-3" />
-          Number of days
-        </label>
-        <input
-          className={inputCls}
-          type="number"
-          placeholder="7"
-          min={1}
-          value={days}
-          onChange={(e) => setDays(e.target.value)}
-          dir="ltr"
-        />
-      </div>
-      <div>
-        <label className={labelCls}>
-          <Calendar className="mb-0.5 mr-1 inline size-3" />
-          Estimated month
-        </label>
-        <select
-          className={inputCls}
-          value={month}
-          onChange={(e) => setMonth(e.target.value)}
-          dir="ltr"
-        >
-          <option value="">Select month...</option>
-          {[
-            "January","February","March","April","May","June",
-            "July","August","September","October","November","December",
-          ].map((m) => (
-            <option key={m} value={m}>{m}</option>
-          ))}
-        </select>
-      </div>
-      <div className="col-span-2">
-        <label className={labelCls}>
-          <DollarSign className="mb-0.5 mr-1 inline size-3" />
-          Estimated budget (optional)
-        </label>
-        <input
-          className={inputCls}
-          placeholder="₪5,000 per person"
-          value={budget}
-          onChange={(e) => setBudget(e.target.value)}
-          dir="ltr"
+        <p className="text-xs font-medium text-[--muted-foreground] mb-2">Travelers</p>
+        <TravelersRow
+          adults={adults} setAdults={setAdults}
+          children={children} setChildren={setChildren}
+          rooms={rooms} setRooms={setRooms}
         />
       </div>
 
-      {/* TODO: enable when hotel integration is available */}
-      <div>
-        <label className={labelCls}><Users className="inline size-3 mr-1 mb-0.5" />Adults</label>
-        <input className={inputCls} type="number" min={1} placeholder="2" value={adults} onChange={(e) => setAdults(e.target.value)} dir="ltr" />
-      </div>
-      <div>
-        <label className={labelCls}><Baby className="inline size-3 mr-1 mb-0.5" />Children</label>
-        <input className={inputCls} type="number" min={0} placeholder="0" value={children} onChange={(e) => setChildren(e.target.value)} dir="ltr" />
-      </div>
-      <div>
-        <label className={labelCls}><BedDouble className="inline size-3 mr-1 mb-0.5" />Rooms</label>
-        <input className={inputCls} type="number" min={1} placeholder="1" value={rooms} onChange={(e) => setRooms(e.target.value)} dir="ltr" />
-      </div>
-
-      <div className="col-span-2 flex justify-end pt-1">
-        <FormSubmitButton
-          onClick={handleSubmit}
-          disabled={!origin || !destination || !days}
-          label="Plan my trip"
-          icon={<MapPin className="size-4" />}
-        />
+      <div className="flex justify-end pt-1">
+        <FormSubmitButton onClick={handleSubmit} disabled={!origin || !destination || !days}
+          label="Plan my trip" icon={<MapPin className="size-4" />} />
       </div>
     </div>
   );
@@ -227,116 +263,93 @@ function FlightFinderForm({ onSubmit }: { onSubmit: (text: string) => void }) {
   const [month, setMonth] = useState("");
   const [budget, setBudget] = useState("");
   const [days, setDays] = useState("");
-
-  // TODO: enable when booking platform integration is available
   const [adults, setAdults] = useState("");
   const [children, setChildren] = useState("");
 
   const handleSubmit = () => {
     if (!origin || !destination) return;
+    const numAdults   = parseInt(adults)   || 1;
+    const numChildren = parseInt(children) || 0;
+    const travelers =
+      numAdults === 1 && numChildren === 0
+        ? "1 adult"
+        : `${numAdults} adult${numAdults > 1 ? "s" : ""}` +
+          (numChildren > 0 ? ` and ${numChildren} child${numChildren > 1 ? "ren" : ""}` : "");
+
     const parts = [
       `I'm looking for flights from ${origin} to ${destination}`,
       month && `in ${month}`,
       days && `for a ${days}-day trip`,
+      `for ${travelers}`,
       budget && `with a budget of ${budget}`,
     ].filter(Boolean);
     onSubmit(parts.join(", ") + ".");
   };
 
   return (
-    <div className="grid grid-cols-2 gap-3">
-      <div>
-        <label className={labelCls}>
-          <Globe className="mb-0.5 mr-1 inline size-3" />
-          Origin city / airport
-        </label>
-        <input
-          className={inputCls}
-          placeholder="Tel Aviv (TLV)"
-          value={origin}
-          onChange={(e) => setOrigin(e.target.value)}
-          dir="ltr"
-        />
+    <div className="flex flex-col gap-3">
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className={labelCls}>
+            <Globe className="mb-0.5 mr-1 inline size-3" />
+            Origin city / airport
+          </label>
+          <input className={inputCls} placeholder="Tel Aviv (TLV)" value={origin}
+            onChange={(e) => setOrigin(e.target.value)} dir="ltr" />
+        </div>
+        <div>
+          <label className={labelCls}>
+            <Plane className="mb-0.5 mr-1 inline size-3" />
+            Destination
+          </label>
+          <input className={inputCls} placeholder="Rome (FCO)" value={destination}
+            onChange={(e) => setDestination(e.target.value)} dir="ltr" />
+        </div>
+        <div>
+          <label className={labelCls}>
+            <Calendar className="mb-0.5 mr-1 inline size-3" />
+            Estimated month
+          </label>
+          <select className={inputCls} value={month} onChange={(e) => setMonth(e.target.value)} dir="ltr">
+            <option value="">Select month...</option>
+            {["January","February","March","April","May","June",
+              "July","August","September","October","November","December"].map((m) => (
+              <option key={m} value={m}>{m}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className={labelCls}>
+            <Calendar className="mb-0.5 mr-1 inline size-3" />
+            Trip duration (days)
+          </label>
+          <input className={inputCls} type="number" min={1} placeholder="7" value={days}
+            onChange={(e) => setDays(e.target.value)} dir="ltr" />
+        </div>
+        <div className="col-span-2">
+          <label className={labelCls}>
+            <DollarSign className="mb-0.5 mr-1 inline size-3" />
+            Flight budget (optional)
+          </label>
+          <input className={inputCls} placeholder="Up to ₪2,000 one-way" value={budget}
+            onChange={(e) => setBudget(e.target.value)} dir="ltr" />
+        </div>
       </div>
+
+      {/* Travelers */}
       <div>
-        <label className={labelCls}>
-          <Plane className="mb-0.5 mr-1 inline size-3" />
-          Destination
-        </label>
-        <input
-          className={inputCls}
-          placeholder="Rome (FCO)"
-          value={destination}
-          onChange={(e) => setDestination(e.target.value)}
-          dir="ltr"
-        />
-      </div>
-      <div>
-        <label className={labelCls}>
-          <Calendar className="mb-0.5 mr-1 inline size-3" />
-          Estimated month
-        </label>
-        <select
-          className={inputCls}
-          value={month}
-          onChange={(e) => setMonth(e.target.value)}
-          dir="ltr"
-        >
-          <option value="">Select month...</option>
-          {[
-            "January","February","March","April","May","June",
-            "July","August","September","October","November","December",
-          ].map((m) => (
-            <option key={m} value={m}>{m}</option>
-          ))}
-        </select>
-      </div>
-      <div>
-        <label className={labelCls}>
-          <Calendar className="mb-0.5 mr-1 inline size-3" />
-          Trip duration (days)
-        </label>
-        <input
-          className={inputCls}
-          type="number"
-          min={1}
-          placeholder="7"
-          value={days}
-          onChange={(e) => setDays(e.target.value)}
-          dir="ltr"
-        />
-      </div>
-      <div className="col-span-2">
-        <label className={labelCls}>
-          <DollarSign className="mb-0.5 mr-1 inline size-3" />
-          Flight budget (optional)
-        </label>
-        <input
-          className={inputCls}
-          placeholder="Up to ₪2,000 one-way"
-          value={budget}
-          onChange={(e) => setBudget(e.target.value)}
-          dir="ltr"
+        <p className="text-xs font-medium text-[--muted-foreground] mb-2">Travelers</p>
+        <TravelersRow
+          adults={adults} setAdults={setAdults}
+          children={children} setChildren={setChildren}
+          rooms="" setRooms={() => {}}
+          showRooms={false}
         />
       </div>
 
-      {/* TODO: enable when booking platform integration is available */}
-      <div>
-        <label className={labelCls}><Users className="inline size-3 mr-1 mb-0.5" />Adults</label>
-        <input className={inputCls} type="number" min={1} placeholder="2" value={adults} onChange={(e) => setAdults(e.target.value)} dir="ltr"/>
-      </div>
-      <div>
-        <label className={labelCls}><Baby className="inline size-3 mr-1 mb-0.5" />Children</label>
-        <input className={inputCls} type="number" min={0} placeholder="0" value={children} onChange={(e) => setChildren(e.target.value)} dir="ltr"/>
-      </div>
-
-      <div className="col-span-2 flex justify-end pt-1">
-        <FormSubmitButton
-          onClick={handleSubmit}
-          disabled={!origin || !destination}
-          label="Search flights"
-          icon={<Plane className="size-4" />}
-        />
+      <div className="flex justify-end pt-1">
+        <FormSubmitButton onClick={handleSubmit} disabled={!origin || !destination}
+          label="Search flights" icon={<Plane className="size-4" />} />
       </div>
     </div>
   );
@@ -345,11 +358,7 @@ function FlightFinderForm({ onSubmit }: { onSubmit: (text: string) => void }) {
 /* ─────────────────────────────────────────
    Recommendations Form
 ───────────────────────────────────────── */
-function RecommendationsForm({
-  onSubmit,
-}: {
-  onSubmit: (text: string) => void;
-}) {
+function RecommendationsForm({ onSubmit }: { onSubmit: (text: string) => void }) {
   const [origin, setOrigin] = useState("");
   const [month, setMonth] = useState("");
   const [topic, setTopic] = useState("");
@@ -357,7 +366,7 @@ function RecommendationsForm({
   const handleSubmit = () => {
     if (!origin) return;
     const parts = [
-      `I'm looking for travel recommendations`,
+      "I'm looking for travel recommendations",
       origin && `from ${origin}`,
       month && `in ${month}`,
       topic && `about ${topic}`,
@@ -372,30 +381,18 @@ function RecommendationsForm({
           <Globe className="mb-0.5 mr-1 inline size-3" />
           Origin country
         </label>
-        <input
-          className={inputCls}
-          placeholder="Israel"
-          value={origin}
-          onChange={(e) => setOrigin(e.target.value)}
-          dir="ltr"
-        />
+        <input className={inputCls} placeholder="Israel" value={origin}
+          onChange={(e) => setOrigin(e.target.value)} dir="ltr" />
       </div>
       <div>
         <label className={labelCls}>
           <Calendar className="mb-0.5 mr-1 inline size-3" />
           Estimated date
         </label>
-        <select
-          className={inputCls}
-          value={month}
-          onChange={(e) => setMonth(e.target.value)}
-          dir="ltr"
-        >
+        <select className={inputCls} value={month} onChange={(e) => setMonth(e.target.value)} dir="ltr">
           <option value="">Select month...</option>
-          {[
-            "January","February","March","April","May","June",
-            "July","August","September","October","November","December",
-          ].map((m) => (
+          {["January","February","March","April","May","June",
+            "July","August","September","October","November","December"].map((m) => (
             <option key={m} value={m}>{m}</option>
           ))}
         </select>
@@ -405,21 +402,12 @@ function RecommendationsForm({
           <Star className="mb-0.5 mr-1 inline size-3" />
           What are you looking for? (Optional)
         </label>
-        <input
-          className={inputCls}
-          placeholder="food, beaches, mountains, culture..."
-          value={topic}
-          onChange={(e) => setTopic(e.target.value)}
-          dir="ltr"
-        />
+        <input className={inputCls} placeholder="food, beaches, mountains, culture..."
+          value={topic} onChange={(e) => setTopic(e.target.value)} dir="ltr" />
       </div>
       <div className="col-span-2 flex justify-end pt-1">
-        <FormSubmitButton
-          onClick={handleSubmit}
-          disabled={!origin}
-          label="Get Recommendations"
-          icon={<Star className="size-4" />}
-        />
+        <FormSubmitButton onClick={handleSubmit} disabled={!origin}
+          label="Get Recommendations" icon={<Star className="size-4" />} />
       </div>
     </div>
   );
@@ -429,10 +417,7 @@ function RecommendationsForm({
    Submit button
 ───────────────────────────────────────── */
 function FormSubmitButton({
-  onClick,
-  disabled,
-  label,
-  icon,
+  onClick, disabled, label, icon,
 }: {
   onClick: () => void;
   disabled: boolean;
@@ -464,13 +449,8 @@ function FormSubmitButton({
 /* ─────────────────────────────────────────
    Agent Selector — main exported component
 ───────────────────────────────────────── */
-export function AgentSelector({
-  onSubmit,
-}: {
-  onSubmit: (text: string) => void;
-}) {
+export function AgentSelector({ onSubmit }: { onSubmit: (text: string) => void }) {
   const [selected, setSelected] = useState<AgentType>(null);
-
   const selectedAgent = AGENTS.find((a) => a.id === selected);
 
   return (
@@ -494,15 +474,12 @@ export function AgentSelector({
             whileHover={{ scale: 1.02, y: -2 }}
             whileTap={{ scale: 0.98 }}
           >
-            {/* Icon */}
             <div
               className="flex h-9 w-9 items-center justify-center rounded-xl text-white"
               style={{ background: agent.color, boxShadow: `0 0 12px ${agent.color}55` }}
             >
               {agent.icon}
             </div>
-
-            {/* Text */}
             <div>
               <p className="text-sm font-semibold leading-tight text-[--foreground]">
                 {agent.label}
@@ -511,8 +488,6 @@ export function AgentSelector({
                 {agent.description}
               </p>
             </div>
-
-            {/* Selected indicator */}
             {selected === agent.id && (
               <motion.div
                 layoutId="agent-selected-dot"
@@ -535,23 +510,14 @@ export function AgentSelector({
             transition={{ duration: 0.3, ease: [0.25, 0.46, 0.45, 0.94] }}
             className="overflow-hidden"
           >
-            <div
-              className={cn(
-                "relative rounded-2xl border border-[--ring]/40 bg-[--card]/80 p-4 backdrop-blur-md",
-                "shadow-[0_0_0_1px_var(--ring)/20,0_8px_32px_var(--glow-accent)]",
-              )}
-            >
-              {/* Top accent line */}
+            <div className={cn(
+              "relative rounded-2xl border border-[--ring]/40 bg-[--card]/80 p-4 backdrop-blur-md",
+              "shadow-[0_0_0_1px_var(--ring)/20,0_8px_32px_var(--glow-accent)]",
+            )}>
               <div
                 className="absolute inset-x-6 top-0 h-px rounded-full"
-                style={{
-                  background:
-                    "linear-gradient(to right, transparent, var(--ring), transparent)",
-                  opacity: 0.7,
-                }}
+                style={{ background: "linear-gradient(to right, transparent, var(--ring), transparent)", opacity: 0.7 }}
               />
-
-              {/* Form title + close */}
               <div className="mb-3 flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <div
@@ -572,7 +538,6 @@ export function AgentSelector({
                 </button>
               </div>
 
-              {/* Dynamic form */}
               {selected === "trip_planner" && (
                 <TripPlannerForm onSubmit={(t) => { onSubmit(t); setSelected(null); }} />
               )}
