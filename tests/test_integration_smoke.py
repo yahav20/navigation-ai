@@ -1,22 +1,16 @@
 """Integration smoke tests — real Groq LLM calls, requires GROQ_API_KEY."""
+
 import os
 
 import pytest
 from langchain_core.messages import HumanMessage
 
+
 def _build_graph():
     from agent.core.graph import build_graph
+
     assert os.getenv("GROQ_API_KEY"), "GROQ_API_KEY not set"
     return build_graph(provider="groq")
-
-@pytest.mark.integration
-@pytest.mark.skipif(not os.getenv("GROQ_API_KEY"), reason="GROQ_API_KEY not set")
-def test_paris_3day_smoke():
-    """Full pipeline: Tel Aviv -> Paris, 3-day itinerary, $1500."""
-    from agent.core.graph import build_graph
-
-    graph = _build_graph()
-
 
 
 def _last_content(result: dict) -> str:

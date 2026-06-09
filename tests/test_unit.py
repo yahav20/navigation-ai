@@ -1,9 +1,10 @@
 """Unit tests — pure Python, no LLM, no network. Runs in milliseconds."""
+
 import json
 
 import pytest
 
-from agent.itinerary.planner import _completed_step_types , _validate_and_fix
+from agent.itinerary.planner import _completed_step_types, _validate_and_fix
 from agent.itinerary.schemas import ExecutionPlan, PlanStep
 from security import validate_city, validate_input, validate_positive_number
 
