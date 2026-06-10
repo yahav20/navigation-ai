@@ -9,6 +9,20 @@ from agent.core.state import AgentState
 from agent.shared.travelers import apply_traveler_updates
 
 
+def _same_month_refinement(old: str | None, new: str) -> bool:
+    """True when old and new describe the same month at different precision
+    (e.g. '2026-06' vs '2026-06-14') — a refinement, not a reschedule.
+
+    Guards against spuriously invalidating an already-found travel plan when the
+    extractor re-reads a concrete flight date from the rendered plan in history
+    while state still holds the user's original month-level start.
+    """
+    if not old:
+        return False
+    short, long = sorted((old, new), key=len)
+    return len(short) == 7 and len(long) == 10 and long.startswith(short)
+
+
 class MetadataNode:
     """Pull travel metadata fields out of the recent chat history."""
 
@@ -140,7 +154,7 @@ class MetadataNode:
             if old_days is not None and metadata.trip_days != old_days:
                 _invalidate_flights()
 
-        if metadata.trip_start is not None:
+        if metadata.trip_start is not None and not _same_month_refinement(old_start, metadata.trip_start):
             updates["trip_start"] = metadata.trip_start
             if old_start is not None and metadata.trip_start != old_start:
                 _invalidate_flights()

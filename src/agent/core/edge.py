@@ -18,9 +18,11 @@ def after_enrichment(state: AgentState) -> str:
     if state.get("intent") == "build_itinerary":
         return "plan_check"
 
-    # When the user adjusts an active standalone itinerary, skip flight search
-    # and re-present the plan_check HITL (standalone vs. with_travel_data choice).
-    if state.get("is_adjustment") and state.get("itinerary_mode") == "standalone":
+    # When the user adjusts an active itinerary (standalone or with_travel_data),
+    # route back to plan_check to rebuild it instead of running a flight search.
+    # itinerary_mode is only set after plan_check ran, so this condition is only
+    # true when a prior itinerary existed. itinerary_mode=None → flight_search.
+    if state.get("is_adjustment") and state.get("itinerary_mode") in ("standalone", "with_travel_data"):
         return "plan_check"
 
     return "flight_search"
@@ -60,6 +62,8 @@ def after_router(state: AgentState) -> str:
         return "advisor_planner"
     elif intent == "build_itinerary":
         return "extract_metadata"
+    elif intent == "update_itinerary":
+        return "itinerary_planner"
     elif intent == "general_chat":
         return "advisor_planner"
     elif intent == "out_of_scope":

@@ -56,6 +56,7 @@ class AgentState(TypedDict):
     critic_min_prices: NotRequired[dict]        # Minimum available flight/hotel prices (standalone only, set on "min_travel" action)
     use_min_prices_for_budget: NotRequired[bool]  # When True, verify_budget uses fetch_min_prices data instead of fetch_avg_prices
     switch_travel_triggered: NotRequired[bool]    # Set by critic; tells planner to inject switch_travel_options step
+    itinerary_update_request: NotRequired[dict]  # Set by ItineraryPlannerNode (update mode); consumed by step handlers
 
     # --- Advisor ---
     advisor_plan: list                 # list of {tool_name, args} dicts produced by advisor_planner

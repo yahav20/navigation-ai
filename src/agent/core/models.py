@@ -236,6 +236,7 @@ class IntentClassification(BaseModel):
     intent: Literal[
         "new_travel_plan",
         "update_travel_plan",
+        "update_itinerary",
         "advisor",
         "build_itinerary",
         "out_of_scope",
@@ -253,6 +254,12 @@ class IntentClassification(BaseModel):
             "- 'new_travel_plan': ONLY when the user commits to a SPECIFIC destination and wants to CHECK "
             "or BOOK flights, hotels, or costs. (e.g. 'I want to fly to Rome', 'show me hotels in Madrid', "
             "'let\\'s plan a trip to Tokyo'). Do NOT use just because a city is mentioned.\n"
+            "- 'update_travel_plan': Changing core trip parameters (budget, days, destination, origin) "
+            "of an ALREADY-PLANNED trip.\n"
+            "- 'update_itinerary': Modifying the day-by-day schedule of an ALREADY-BUILT itinerary — "
+            "swapping or removing activities/restaurants, adding a specific place, changing meal preferences "
+            "('I don\\'t want the Eiffel Tower', 'add PSG Museum', 'remove breakfast from all days'). "
+            "Only use when an itinerary has been built and the user is editing its content.\n"
             "- 'update_travel_plan': Changing parameters (budget, days, destination, number of "
             "travellers (adults/children), or number of hotel rooms) of an ALREADY-PLANNED trip.\n"
             "- 'build_itinerary': ONLY when user EXPLICITLY requests a day-by-day SCHEDULE. "

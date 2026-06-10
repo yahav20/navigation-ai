@@ -1,36 +1,37 @@
 """
 ItineraryReplannerNode
 ======================
+All quality checks are deterministic — no LLM calls in this node.
+
 Reviews the result of each Executor step and decides what to do next:
 
   continue  — last step succeeded, more steps remain → back to Executor
-  replan    — last step failed, retries remain → back to Planner with context
-  done      — all steps complete OR retries exhausted → forward to Formatter
+  replan    — step failed or failed quality check → back to Planner
+  done      — all steps complete → forward to Critic / Formatter
 
-On "done" (success path): runs an LLM quality review and generates the final
-markdown itinerary. The markdown is stored in itinerary_plan["final_markdown"]
-for the Formatter to render.
+Quality checks (all deterministic):
+  fetch_activities / fetch_weather: non-empty result
+  build_day_schedule: at least 1 activity slot per day
 
-On "done" (failure path): sets itinerary_feasible=False and writes a
-human-readable error into itinerary_fallback_reason for the Formatter.
+On "done": computes budget roll-up and generates markdown via the
+deterministic _generate_fallback_markdown template.
 
 Replan context written to itinerary_plan["replan_context"]:
   {
-    "error_code":      str,   # machine-readable failure category
-    "error_message":   str,   # human-readable description
-    "failed_step":     str,   # step_type that failed
-    "replan_hint":     str,   # specific corrective suggestion for the Planner
-    "completed_steps": list,  # step_types with successful results
-    "system_state":    dict,  # budget, trip_days, destination, origin snapshot
+    "error_code":      str,
+    "error_message":   str,
+    "failed_step":     str,
+    "replan_hint":     str,
+    "completed_steps": list,
+    "system_state":    dict,
   }
 """
 from __future__ import annotations
 
 import json
-from typing import Optional
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from agent.core.llm import silent
 from agent.core.state import AgentState
@@ -65,21 +66,12 @@ MARKDOWN FORMAT (output this if the plan is acceptable):
 # ✈️ Your [N]-Day [Destination] Itinerary
 
 ## 📅 Day 1 — [fill in the actual theme from the data]
-
-If GROUP_COMPOSITION is present and the group has more than 1 person, use this table header:
-| Time | Activity | Duration | Per Person | Group Cost |
-|------|----------|----------|-----------|------------|
-| HH:MM | [icon] [Actual name from data] | X min | $Y pp | $Z group |
-
-Otherwise use:
 | Time | Activity | Duration | Cost |
 |------|----------|----------|------|
 | HH:MM | [icon] [Actual name from data] | X min | $Y |
 
-The GROUP_COST for an activity = estimated_cost × (adults + children).
-The per-person cost is the estimated_cost from the data.
 *(Render EVERY slot from the data for this day. Never skip rows.)*
-**Day total: $[actual day_cost from data] pp** (add " | $[group_day_total] for [group_label]" when group > 1)
+**Day total: $[actual day_cost from data]**
 
 [Repeat ## 📅 Day N section for every day in the trip]
 
@@ -102,7 +94,7 @@ Respond ONLY as JSON (no markdown fences):
   "replan_hint": "<specific corrective action for the Planner; empty string on success>"
 }
 """
-
+_MIN_ACTIVITIES_PER_DAY = 1
 _FETCH_STEP_TYPES = {"fetch_activities", "fetch_weather"}
 
 
@@ -171,15 +163,14 @@ def _build_summary(
     """
     is_group = num_adults + num_children > 1
     glabel   = group_label(num_adults, num_children)
-
     lines = [
         f"TRIP: {trip_days} days | Destination: {destination} | Origin: {origin} | "
         f"Budget: ${budget or 'flexible'} | Mode: {mode}",
+        "",
     ]
     if is_group:
         lines.append(f"GROUP_COMPOSITION: {glabel} ({num_adults} adults, {num_children} children)")
     lines.append("")
-
     # ── Day schedules (most important — render every slot compactly) ────────
     for d in range(1, trip_days + 1):
         key = next(
@@ -258,12 +249,18 @@ def _is_result_empty(val) -> bool:
     return False
 
 
-def _strip_json_fences(s: str) -> str:
-    if s.startswith("```"):
-        parts = s.split("```")
-        s = parts[1] if len(parts) > 1 else s
-        s = s.lstrip("json").strip().rstrip("```").strip()
-    return s
+def _validate_day_quality(day_data: dict) -> tuple[bool, str]:
+    """Deterministic quality check for a single built day."""
+    slots = day_data.get("slots", [])
+    if not slots:
+        return False, "No slots were generated for this day."
+    activity_count = sum(1 for s in slots if s.get("slot_type") == "activity")
+    if activity_count < _MIN_ACTIVITIES_PER_DAY:
+        return False, (
+            f"Day has {activity_count} scheduled activities "
+            f"(minimum {_MIN_ACTIVITIES_PER_DAY} required)."
+        )
+    return True, ""
 
 
 # ---------------------------------------------------------------------------
@@ -284,8 +281,7 @@ class ItineraryReplannerNode:
         budget        = state.get("total_budget", 0)
         trip_days     = state.get("trip_days", 3)
 
-        # Identify the last executed step (used by all branches below)
-        last_step   = plan_steps[current_index - 1] if current_index > 0 else {}
+        last_step   = plan_steps[current_index - 1] if (0 < current_index <= len(plan_steps)) else {}
         step_type   = last_step.get("step_type", "unknown")
         step_id     = last_step.get("step_id", 0)
         last_key    = f"{step_type}_{step_id}"
@@ -296,7 +292,6 @@ class ItineraryReplannerNode:
             error_msg   = last_result.get("error", "step failed")
             replan_hint = last_result.get("replan_hint", "")
 
-            # Hard stop
             if replan_count >= MAX_REPLANS:
                 hard_reason = json.dumps({
                     "error_code":    "MAX_REPLANS",
@@ -308,8 +303,8 @@ class ItineraryReplannerNode:
                     "replan_hint":   replan_hint,
                 }, ensure_ascii=False)
                 return {
-                    "itinerary_feasible":      False,
-                    "replanner_action":        "done",
+                    "itinerary_feasible":       False,
+                    "replanner_action":         "done",
                     "itinerary_fallback_reason": hard_reason,
                     "progress_log": [
                         f"❌ **REPLANNER → DONE (max replans={MAX_REPLANS} reached)**\n"
@@ -317,7 +312,6 @@ class ItineraryReplannerNode:
                     ],
                 }
 
-            # Soft replan
             replan_ctx = _build_replan_context(
                 error_code="STEP_ERROR",
                 error_message=error_msg,
@@ -331,9 +325,9 @@ class ItineraryReplannerNode:
                 "replanner_action":   "replan",
                 "itinerary_plan": {
                     **plan_state,
-                    "step_results":  _drop_stale_budget(results),
+                    "step_results":   _drop_stale_budget(results),
                     "replan_context": replan_ctx,
-                    "replan_count":   replan_count,  # Planner increments on its side
+                    "replan_count":   replan_count,
                 },
                 "progress_log": [
                     f"🔄 **REPLANNER → REPLAN** "
@@ -344,34 +338,38 @@ class ItineraryReplannerNode:
                 ],
             }
 
-        # ── B. Per-step critic for fetch results ───────────────────────────
+        # ── B. Deterministic fetch-step quality check ──────────────────────
         if step_type in _FETCH_STEP_TYPES:
-            verdict = self._evaluate_step_result(step_type, last_result)
-            if verdict["status"] == "failed":
+            data  = last_result.get("data")
+            if _is_result_empty(data):
+                replan_hint = f"`{step_type}` returned no usable data."
                 if replan_count >= MAX_REPLANS:
                     hard_reason = json.dumps({
                         "error_code":    "MAX_REPLANS",
                         "error_message": (
                             f"Gave up after {replan_count} replan attempts. "
-                            f"Critic: {verdict['verdict']}"
+                            f"`{step_type}` returned empty data."
                         ),
                         "failed_step":   step_type,
-                        "replan_hint":   verdict.get("replan_hint", ""),
+                        "replan_hint":   replan_hint,
                     }, ensure_ascii=False)
                     return {
                         "itinerary_feasible":       False,
                         "replanner_action":         "done",
                         "itinerary_fallback_reason": hard_reason,
-                        "progress_log": [
-                            f"❌ **REPLANNER → DONE (max replans={MAX_REPLANS} reached)**\n"
-                            f"*Critic:* `{step_type}` — {verdict['verdict']}"
-                        ],
+                        "messages": [AIMessage(
+                            content=(
+                                f"❌ **REPLANNER → DONE (max replans={MAX_REPLANS} reached)**\n"
+                                f"*Step:* `{step_type}` returned empty data."
+                            ),
+                            name="replanner_log",
+                        )],
                     }
                 replan_ctx = _build_replan_context(
-                    error_code="CRITIC_REJECT",
-                    error_message=verdict["verdict"],
+                    error_code="EMPTY_DATA",
+                    error_message=f"`{step_type}` returned no usable data.",
                     failed_step=step_type,
-                    replan_hint=verdict.get("replan_hint") or f"Data quality check failed for `{step_type}`.",
+                    replan_hint=replan_hint,
                     step_results=results,
                     state=state,
                 )
@@ -380,34 +378,94 @@ class ItineraryReplannerNode:
                     "replanner_action":   "replan",
                     "itinerary_plan": {
                         **plan_state,
-                        "step_results":  _drop_stale_budget(results),
+                        "step_results":   _drop_stale_budget(results),
                         "replan_context": replan_ctx,
                         "replan_count":   replan_count,
                     },
-                    "progress_log": [
-                        f"🔄 **REPLANNER → REPLAN** (critic reject, "
-                        f"attempt {replan_count}/{MAX_REPLANS})\n"
-                        f"*Step:* `{step_type}`\n"
-                        f"*Verdict:* {verdict['verdict']}\n"
-                        f"*Hint:* {verdict.get('replan_hint', '')}"
-                    ],
+                    "messages": [AIMessage(
+                        content=(
+                            f"🔄 **REPLANNER → REPLAN** (empty data, "
+                            f"attempt {replan_count}/{MAX_REPLANS})\n"
+                            f"*Step:* `{step_type}` returned no usable data."
+                        ),
+                        name="replanner_log",
+                    )],
                 }
 
-        # ── C. More steps remain — keep going ─────────────────────────────
+        # ── C. Per-day quality check for build_day_schedule ───────────────
+        if step_type == "build_day_schedule":
+            day_data = _unwrap(last_result)
+            day_num  = day_data.get("day", "?")
+            valid, reason = _validate_day_quality(day_data)
+            if not valid:
+                if replan_count >= MAX_REPLANS:
+                    hard_reason = json.dumps({
+                        "error_code":    "MAX_REPLANS",
+                        "error_message": f"Day {day_num} quality check failed: {reason}",
+                        "failed_step":   "build_day_schedule",
+                        "replan_hint":   "",
+                    }, ensure_ascii=False)
+                    return {
+                        "itinerary_feasible":       False,
+                        "replanner_action":         "done",
+                        "itinerary_fallback_reason": hard_reason,
+                        "messages": [AIMessage(
+                            content=(
+                                f"❌ **REPLANNER → DONE (max replans={MAX_REPLANS} reached)**\n"
+                                f"*Day {day_num}:* {reason}"
+                            ),
+                            name="replanner_log",
+                        )],
+                    }
+                # Drop all day results + fetch_activities so ActivitySelector reruns
+                results_for_replan = {
+                    k: v for k, v in results.items()
+                    if not k.startswith("build_day_schedule")
+                    and not k.startswith("fetch_activities")
+                    and not k.startswith("verify_budget")
+                }
+                replan_ctx = _build_replan_context(
+                    error_code="DAY_QUALITY_FAIL",
+                    error_message=f"Day {day_num}: {reason}",
+                    failed_step="build_day_schedule",
+                    replan_hint=(
+                        f"Day {day_num} failed quality check: {reason}. "
+                        "Re-run fetch_activities so the ActivitySelector can assign "
+                        "more activities across all days, then rebuild all day schedules."
+                    ),
+                    step_results=results_for_replan,
+                    state=state,
+                )
+                return {
+                    "itinerary_feasible": False,
+                    "replanner_action":   "replan",
+                    "itinerary_plan": {
+                        **plan_state,
+                        "replan_context": replan_ctx,
+                        "replan_count":   replan_count,
+                        "step_results":   results_for_replan,
+                    },
+                    "messages": [AIMessage(
+                        content=(
+                            f"🔄 **REPLANNER → REPLAN** (day quality check)\n"
+                            f"*Day {day_num}:* {reason}"
+                        ),
+                        name="replanner_log",
+                    )],
+                }
+
+        # ── D. More steps remain — continue ───────────────────────────────
         if current_index < len(plan_steps):
             return {
-                "replanner_action": "continue",
+                "replanner_action":   "continue",
                 "itinerary_feasible": True,
             }
 
-        # ── D. All steps done — LLM quality review + markdown generation ──
+        # ── E. All steps done — compute budget + generate markdown ────────
         mode        = state.get("itinerary_mode", "standalone")
-        travel_plan = state.get("travel_plan")
         origin      = state.get("current_city", "")
         destination = state.get("destination_city", "")
 
-        # Pre-compute budget so the Critic can read it without recomputing, and so the
-        # markdown includes a deterministic budget table. Stored under "verify_budget_0".
         results_with_budget = dict(results)
         try:
             budget_result = handle_verify_budget(
@@ -495,12 +553,11 @@ class ItineraryReplannerNode:
             "itinerary_plan": {
                 **plan_state,
                 "final_markdown": markdown,
-                # Persist the budget result so the Critic can read it without recomputing.
-                "step_results": results_with_budget,
+                "step_results":   results_with_budget,
             },
             "itinerary_feasible": True,
             "replanner_action":   "done",
-            "progress_log": ["✅ **Itinerary complete.**"],
+            "messages": [AIMessage(content="✅ **Itinerary complete.**", name="replanner_log")],
         }
 
     # ── Per-step critic ────────────────────────────────────────────────────

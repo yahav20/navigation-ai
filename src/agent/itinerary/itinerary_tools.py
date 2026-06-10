@@ -11,6 +11,7 @@ Tools exposed:
 """
 from __future__ import annotations
 
+import concurrent.futures
 from typing import Optional
 from langchain_core.tools import tool, ToolException
 
@@ -176,11 +177,9 @@ def get_average_location_cost(destination: str, origin: str, trip_days: int) -> 
     Returns avg_flight_price, avg_return_flight_price, avg_hotel_per_night.
     """
     try:
-        destination = validate_city(destination)
-        origin      = validate_city(origin)
-
-        flights_out    = search_flights_with_fallback(origin, destination) or []
-        flights_return = search_flights_with_fallback(destination, origin) or []
+        destination  = validate_city(destination)
+        origin       = validate_city(origin)
+        location_key = TRIPADVISOR_LOCATION_KEYS.get(destination.lower())
 
         def _avg_price(items: list, key: str, fallback: float) -> float:
             prices = [
@@ -190,21 +189,25 @@ def get_average_location_cost(destination: str, origin: str, trip_days: int) -> 
             ]
             return round(sum(prices) / len(prices), 2) if prices else fallback
 
-        avg_flight        = _avg_price(flights_out,    "price", 400.0)
-        avg_return_flight = _avg_price(flights_return, "price", 400.0)
+        # Fetch outbound flights, return flights, and hotels in parallel
+        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
+            fut_out    = pool.submit(search_flights_with_fallback, origin, destination)
+            fut_ret    = pool.submit(search_flights_with_fallback, destination, origin)
+            fut_hotels = pool.submit(xotelo_list_hotels, location_key) if location_key else None
 
-        # Use Xotelo (external) hotel data; fall back to SQLite for unknown cities
-        location_key = TRIPADVISOR_LOCATION_KEYS.get(destination.lower())
-        xotelo_hotels = xotelo_list_hotels(location_key) if location_key else []
-        if xotelo_hotels:
-            avg_hotel = _avg_price(xotelo_hotels, "price_per_night", 120.0)
-        else:
+            flights_out    = fut_out.result()    or []
+            flights_return = fut_ret.result()    or []
+            xotelo_hotels  = (fut_hotels.result() if fut_hotels else None) or []
+
+        if not xotelo_hotels:
             db_hotels = data_provider.fetch_hotels(destination) or []
             avg_hotel = _avg_price(db_hotels, "price_per_night", 120.0)
+        else:
+            avg_hotel = _avg_price(xotelo_hotels, "price_per_night", 120.0)
 
         return {
-            "avg_flight_price":        avg_flight,
-            "avg_return_flight_price": avg_return_flight,
+            "avg_flight_price":        _avg_price(flights_out,    "price", 400.0),
+            "avg_return_flight_price": _avg_price(flights_return, "price", 400.0),
             "avg_hotel_per_night":     avg_hotel,
             "note": "estimated averages — no booking confirmed",
         }
@@ -221,11 +224,9 @@ def get_min_location_cost(destination: str, origin: str, trip_days: int) -> dict
     Returns min_flight_price, min_return_flight_price, min_hotel_per_night.
     """
     try:
-        destination = validate_city(destination)
-        origin      = validate_city(origin)
-
-        flights_out    = search_flights_with_fallback(origin, destination) or []
-        flights_return = search_flights_with_fallback(destination, origin) or []
+        destination  = validate_city(destination)
+        origin       = validate_city(origin)
+        location_key = TRIPADVISOR_LOCATION_KEYS.get(destination.lower())
 
         def _min_price(items: list, key: str, fallback: float) -> float:
             prices = [
@@ -235,20 +236,25 @@ def get_min_location_cost(destination: str, origin: str, trip_days: int) -> dict
             ]
             return round(min(prices), 2) if prices else fallback
 
-        min_flight        = _min_price(flights_out,    "price", 400.0)
-        min_return_flight = _min_price(flights_return, "price", 400.0)
+        # Fetch outbound flights, return flights, and hotels in parallel
+        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
+            fut_out    = pool.submit(search_flights_with_fallback, origin, destination)
+            fut_ret    = pool.submit(search_flights_with_fallback, destination, origin)
+            fut_hotels = pool.submit(xotelo_list_hotels, location_key) if location_key else None
 
-        location_key  = TRIPADVISOR_LOCATION_KEYS.get(destination.lower())
-        xotelo_hotels = xotelo_list_hotels(location_key) if location_key else []
-        if xotelo_hotels:
-            min_hotel = _min_price(xotelo_hotels, "price_per_night", 120.0)
-        else:
+            flights_out    = fut_out.result()    or []
+            flights_return = fut_ret.result()    or []
+            xotelo_hotels  = (fut_hotels.result() if fut_hotels else None) or []
+
+        if not xotelo_hotels:
             db_hotels = data_provider.fetch_hotels(destination) or []
             min_hotel = _min_price(db_hotels, "price_per_night", 120.0)
+        else:
+            min_hotel = _min_price(xotelo_hotels, "price_per_night", 120.0)
 
         return {
-            "min_flight_price":        min_flight,
-            "min_return_flight_price": min_return_flight,
+            "min_flight_price":        _min_price(flights_out,    "price", 400.0),
+            "min_return_flight_price": _min_price(flights_return, "price", 400.0),
             "min_hotel_per_night":     min_hotel,
             "note": "minimum available prices — actual booking required",
         }

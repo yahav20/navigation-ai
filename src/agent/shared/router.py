@@ -55,10 +55,12 @@ class RouterNode:
         3. 'build_itinerary': ONLY when user EXPLICITLY asks for a day-by-day schedule.
            ("Build a 3-day itinerary for Rome", "plan my days in Paris", "replan for $700").
            "How should I split my time?" or "how many days per city?" → 'advisor', NOT here.
-        4. 'update_travel_plan': Changing an existing confirmed plan's parameters — budget, dates,
-           destination, number of travellers (adults/children), or number of hotel rooms
-           ("make it 2 rooms", "add a room", "2 more adults are joining").
-        5. 'out_of_scope': ONLY for queries with zero travel relevance (coding, math, recipes, sports).
+        4. 'update_travel_plan': Changing an existing confirmed plan's core parameters (budget, dates, destination, origin, or number of trip days/duration).
+        5. 'update_itinerary': Editing the day-by-day schedule of an ALREADY-BUILT itinerary — swapping or
+           removing activities/restaurants, adding a specific place, changing meal preferences
+           ("I don't want the Eiffel Tower", "add PSG Museum", "remove breakfast from all days").
+           Only use when an itinerary has already been built.
+        6. 'out_of_scope': ONLY for queries with zero travel relevance (coding, math, recipes, sports).
 
         TRANSITION RULE (critical): If the system is in ACTIVE ADVISOR FLOW and the user
         says something like "plan this trip", "let's go", "book this", "sounds good let's do it",
@@ -100,8 +102,43 @@ class RouterNode:
             if any(word in content_lower for word in trigger_words):
                 final_intent = "build_itinerary"
 
+        # Guardrail 4b: trip duration changes must go to update_travel_plan, not update_itinerary
+        if final_intent == "update_itinerary":
+            content_lower = last_msg.content.lower()
+            day_change_phrases = [
+                "add a day", "add one day", "one more day", "more day",
+                "another day", "add day", "extra day",
+                "fewer day", "remove a day", "one less day", "less day",
+                "extend the trip", "shorten the trip", "longer trip", "shorter trip",
+                "increase days", "decrease days", "more days", "less days",
+            ]
+            if any(phrase in content_lower for phrase in day_change_phrases):
+                final_intent = "update_travel_plan"
+
+        # Guardrail 4c: hotel preference changes (stars/price) on an active trip must
+        # re-plan the travel options, not fall through to advisor.
+        if final_intent in ("advisor", "update_itinerary") and has_active_trip:
+            content_lower = last_msg.content.lower()
+            hotel_pref_phrases = [
+                "star hotel", "-star", "5 star", "4 star", "3 star",
+                "cheaper hotel", "less expensive hotel", "cheaper room",
+                "luxury hotel", "nicer hotel", "fancier hotel", "budget hotel",
+                "hotel under", "hotel below", "per night",
+            ]
+            if any(phrase in content_lower for phrase in hotel_pref_phrases):
+                final_intent = "update_travel_plan"
+
         # Guardrail 5: out_of_scope cannot be overridden by trip context
         if final_intent == "out_of_scope":
             return {"intent": "out_of_scope"}
+
+        # Guardrail 6: update_itinerary requires a built itinerary; otherwise build a fresh one
+        if final_intent == "update_itinerary":
+            has_itinerary = bool(
+                isinstance(state.get("itinerary_plan"), dict)
+                and state["itinerary_plan"].get("step_results")
+            )
+            if not has_itinerary:
+                final_intent = "build_itinerary"
 
         return {"intent": final_intent}
