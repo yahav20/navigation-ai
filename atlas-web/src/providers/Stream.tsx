@@ -6,7 +6,7 @@ import React, {
   useEffect,
 } from "react";
 import { useStream } from "@langchain/langgraph-sdk/react";
-import { type Message } from "@langchain/langgraph-sdk";
+import { type Message, type Thread } from "@langchain/langgraph-sdk";
 import {
   uiMessageReducer,
   isUIMessage,
@@ -45,6 +45,43 @@ const StreamContext = createContext<StreamContextType | undefined>(undefined);
 
 async function sleep(ms = 4000) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function getThreadMessages(thread: Thread | undefined): Message[] {
+  if (
+    typeof thread?.values === "object" &&
+    thread.values &&
+    "messages" in thread.values &&
+    Array.isArray(thread.values.messages)
+  ) {
+    return thread.values.messages as Message[];
+  }
+  return [];
+}
+
+function mergeFetchedThreads(fetched: Thread[], current: Thread[]): Thread[] {
+  const currentById = new Map(
+    current.map((thread) => [thread.thread_id, thread]),
+  );
+  const fetchedIds = new Set(fetched.map((thread) => thread.thread_id));
+  const missingThreads = current.filter(
+    (thread) => !fetchedIds.has(thread.thread_id),
+  );
+
+  return [
+    ...missingThreads,
+    ...fetched.map((thread) => {
+      const currentThread = currentById.get(thread.thread_id);
+      if (
+        currentThread &&
+        getThreadMessages(thread).length === 0 &&
+        getThreadMessages(currentThread).length > 0
+      ) {
+        return { ...thread, values: currentThread.values };
+      }
+      return thread;
+    }),
+  ];
 }
 
 async function checkGraphStatus(
@@ -104,11 +141,61 @@ const StreamSession = ({
     },
     onThreadId: (id) => {
       setThreadId(id);
-      // Refetch threads list when thread ID changes.
-      // Wait for some seconds before fetching so we're able to get the new thread that was created.
-      sleep().then(() => getThreads().then(setThreads).catch(console.error));
+      const now = new Date().toISOString();
+      setThreads((current) => {
+        if (current.some((thread) => thread.thread_id === id)) return current;
+        return [
+          {
+            thread_id: id,
+            created_at: now,
+            updated_at: now,
+            state_updated_at: now,
+            metadata: null,
+            status: "busy",
+            values: { messages: [] },
+            interrupts: {},
+          },
+          ...current,
+        ];
+      });
+
+      // Reconcile with the server after it has had time to persist the thread.
+      sleep().then(() =>
+        getThreads()
+          .then((fetched) =>
+            setThreads((current) => mergeFetchedThreads(fetched, current)),
+          )
+          .catch(console.error),
+      );
     },
   });
+
+  const firstMessage = streamValue.messages[0];
+  useEffect(() => {
+    if (!threadId || !firstMessage) return;
+
+    setThreads((current) =>
+      current.map((thread) => {
+        if (thread.thread_id !== threadId) return thread;
+
+        const currentMessages = getThreadMessages(thread);
+        if (currentMessages[0]?.id === firstMessage.id) return thread;
+
+        const values =
+          typeof thread.values === "object" && thread.values
+            ? thread.values
+            : {};
+
+        return {
+          ...thread,
+          values: {
+            ...values,
+            messages: [firstMessage, ...currentMessages.slice(1)],
+          },
+        };
+      }),
+    );
+  }, [firstMessage, setThreads, threadId]);
 
   useEffect(() => {
     checkGraphStatus(apiUrl, apiKey, authScheme).then((ok) => {

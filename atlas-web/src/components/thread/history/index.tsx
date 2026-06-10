@@ -27,7 +27,7 @@ function ThreadList({
   return (
     <div className="flex h-full w-full flex-col items-start justify-start gap-2 overflow-y-scroll [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-track]:bg-transparent">
       {threads.map((t) => {
-        let itemText = t.thread_id;
+        let itemText = "New chat";
         if (
           typeof t.values === "object" &&
           t.values &&
@@ -36,7 +36,7 @@ function ThreadList({
           t.values.messages?.length > 0
         ) {
           const firstMessage = t.values.messages[0];
-          itemText = getContentString(firstMessage.content);
+          itemText = getContentString(firstMessage.content) || itemText;
         }
         return (
           <div
