@@ -37,17 +37,17 @@ Free tier limits:
 ### 2. Create a Virtual Environment
 
 ```bash
-python -m venv taenv
-.\taenv\Scripts\activate   # Windows
+
+py -3.12 -m venv .venv
+
 ```
 
 ### 3. Install Dependencies
 
 ```bash
-pip install python-dotenv
-pip install -U langchain-google-genai
-pip install -q -U google-generativeai
-pip install langgraph
+.venv\Scripts\pip install -r requirements-server.txt
+
+.venv\Scripts\langgraph dev --allow-blocking
 ```
 
 ### 4. Configure Environment Variables
@@ -55,7 +55,12 @@ pip install langgraph
 Create a `.env` file in the project root (do **not** commit this file):
 
 ```
-GOOGLE_API_KEY=your_key_here
+GOOGLE_API_KEY=""
+GROQ_API_KEY=""
+OPENAI_API_KEY=""
+MODEL_PROVIDER=""
+TRAVELPAYOUTS_API_KEY=""
+GOOGLE_MAPS_API_KEY=""
 ```
 
 ### 5. Test the Connection
