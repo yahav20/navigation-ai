@@ -19,6 +19,48 @@ import { QuestionOptionsInterruptView } from "./question-options-interrupt";
 import { useArtifact } from "../artifact";
 import { Fragment } from "react";
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/**
+ * For a given AI message, return the UI components that belong to it.
+ *
+ * Priority:
+ *  1. Any UI item whose metadata.message_id matches the message exactly.
+ *  2. Fallback (only for the LAST AI message): the single most-recent
+ *     ItineraryViewer in the whole ui list (handles Python AIMessage ID
+ *     mismatch). We intentionally pick only ONE so that old viewers from
+ *     earlier turns don't resurface.
+ *
+ * FIX #1 & #2: previously the fallback returned ALL ItineraryViewer items,
+ * causing (a) every edit to stack a new viewer on the last message and
+ * (b) old viewers persisting throughout the conversation.
+ */
+function resolveCustomComponents(
+  allUi: ReturnType<typeof useStreamContext>["values"]["ui"],
+  messageId: string | undefined,
+  isLastAiMessage: boolean,
+) {
+  const ui = allUi ?? [];
+
+  // Exact match by message_id — always preferred, works for all component types
+  const direct = messageId
+    ? ui.filter((item) => item.metadata?.message_id === messageId)
+    : [];
+  if (direct.length > 0) return direct;
+
+  // Fallback: only the LATEST ItineraryViewer, only on the last AI message
+  if (isLastAiMessage) {
+    const latestItinerary = [...ui]
+      .reverse()
+      .find((item) => item.name === "ItineraryViewer");
+    return latestItinerary ? [latestItinerary] : [];
+  }
+
+  return [];
+}
+
+// ─── Sub-components ───────────────────────────────────────────────────────────
+
 function CustomComponent({
   message,
   thread,
@@ -30,58 +72,47 @@ function CustomComponent({
   const { values } = useStreamContext();
   const allUi = values.ui ?? [];
 
-  // Find the last AI message ID so we can attach orphaned UI messages to it
   const lastAiMessageId = thread.messages
     .filter((m) => m.type === "ai")
     .at(-1)?.id;
   const isLastAiMessage = message.id === lastAiMessageId;
 
-  // Match by message_id metadata (ideal), or attach ItineraryViewer to the
-  // last AI message as fallback (handles Python AIMessage ID mismatch)
-  const customComponents = allUi.filter((ui) => {
-    if (ui.metadata?.message_id === message.id) return true;
-    if (isLastAiMessage && ui.name === "ItineraryViewer") return true;
-    return false;
-  });
-if (!customComponents?.length) return null;
+  const customComponents = resolveCustomComponents(allUi, message.id, isLastAiMessage);
+
+  if (!customComponents.length) return null;
 
   return (
-
     <Fragment key={message.id}>
-
       {customComponents.map((customComponent, index) => (
-
         <LoadExternalComponent
-
-          // שימוש באינדקס כגיבוי למקרה ש-id לא קיים
-
-          key={customComponent.id ?? `custom-ui-${index}`} 
-
+          key={customComponent.id ?? `custom-ui-${index}`}
           stream={thread as unknown as ReturnType<typeof useStream>}
-
           message={customComponent}
-
           meta={{ ui: customComponent, artifact }}
-
           components={{ ItineraryViewer }}
-
         />
-
       ))}
-
     </Fragment>
-
   );
 }
 
-/** Returns true when this message has an ItineraryViewer UI attached to it */
-function useHasItineraryViewer(message: Message | undefined): boolean {
+/**
+ * Returns true when this specific message has an ItineraryViewer attached to it.
+ * Used to suppress the plain-text content when the rich viewer is shown.
+ *
+ * FIX #3: previously only checked metadata.message_id, so the text was never
+ * suppressed for the fallback case (last AI message without an exact id match).
+ */
+function useHasItineraryViewer(
+  message: Message | undefined,
+  isLastAiMessage: boolean,
+): boolean {
   const { values } = useStreamContext();
   const allUi = values.ui ?? [];
   if (!message) return false;
-  return allUi.some(
-    (ui) => ui.name === "ItineraryViewer" && ui.metadata?.message_id === message.id,
-  );
+
+  const components = resolveCustomComponents(allUi, message.id, isLastAiMessage);
+  return components.some((c) => c.name === "ItineraryViewer");
 }
 
 /** Reads the latest node activity from progress_log in stream values */
@@ -91,12 +122,8 @@ function useAgentStatus(): { node: string; detail: string } | null {
   const log: string[] = (values as any).progress_log ?? [];
   if (!log.length) return null;
 
-  // Last entry — may contain "**Step N/M:** `step_type`" or a node rule like "advisor_executor"
   const last = log[log.length - 1].trim();
-
-  // Try to extract bold node name from markdown rule: "**node_name**"
   const nodeMatch = last.match(/\*\*([a-z_]+)\*\*/i);
-  // Try to extract step type from backtick: "`step_type`"
   const stepMatch = last.match(/`([a-z_]+)`/i);
 
   const node = nodeMatch?.[1] ?? "";
@@ -167,6 +194,8 @@ function Interrupt({
   );
 }
 
+// ─── Main exports ─────────────────────────────────────────────────────────────
+
 export function AssistantMessage({
   message,
   isLoading,
@@ -184,12 +213,18 @@ export function AssistantMessage({
   );
 
   const thread = useStreamContext();
-  const hasItineraryViewer = useHasItineraryViewer(message);
-  const agentStatus = useAgentStatus();
+
   const lastMessage = thread.messages.length > 0
-  ? thread.messages[thread.messages.length - 1]
-  : undefined;
+    ? thread.messages[thread.messages.length - 1]
+    : undefined;
   const isLastMessage = message === undefined || lastMessage?.id === message?.id;
+
+  // Compute isLastAiMessage here so we can pass it to both hooks consistently
+  const lastAiMessageId = thread.messages.filter((m) => m.type === "ai").at(-1)?.id;
+  const isLastAiMessage = !!message && message.id === lastAiMessageId;
+
+  const hasItineraryViewer = useHasItineraryViewer(message, isLastAiMessage);
+
   const hasNoAIOrToolMessages = !thread.messages.find(
     (m) => m.type === "ai" || m.type === "tool",
   );
@@ -293,7 +328,6 @@ export function AssistantMessageLoading() {
   const { values } = useStreamContext();
   const log: string[] = (values as any).progress_log ?? [];
 
-  // Parse the latest node name and step detail from progress_log
   let nodeName = "";
   let stepDetail = "";
 
@@ -306,7 +340,6 @@ export function AssistantMessageLoading() {
     if (nodeName && stepDetail) break;
   }
 
-  // Map internal node names to friendly Hebrew/English labels
   const NODE_LABELS: Record<string, string> = {
     itinerary_executor:   "🗓️ Building itinerary",
     itinerary_planner:    "🧠 Planning",
