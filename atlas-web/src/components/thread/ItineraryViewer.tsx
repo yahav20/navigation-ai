@@ -469,18 +469,28 @@ const S: Record<string, CSSProperties> = {
     fontSize: 11, fontWeight: 500, color: "var(--color-text-tertiary, #999)",
     textTransform: "uppercase", letterSpacing: "0.06em", margin: "0 0 10px",
   },
-  travelGrid: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 },
+  travelGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+    gap: 8,
+  },
   travelItem: {
     background: "var(--color-background-secondary, #f5f5f3)",
     borderRadius: 8, padding: "9px 11px", display: "flex", gap: 9, alignItems: "flex-start",
+    minWidth: 0,
   },
   travelIcon: { fontSize: 17, flexShrink: 0, marginTop: 1 },
   travelMeta: { flex: 1, minWidth: 0 },
   travelTitle: {
     fontSize: 13, fontWeight: 500, color: "var(--color-text-primary, #111)",
-    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+    overflowWrap: "anywhere", lineHeight: 1.35,
   },
-  travelSub: { fontSize: 12, color: "var(--color-text-secondary, #666)", marginTop: 2 },
+  travelSub: {
+    fontSize: 12,
+    color: "var(--color-text-secondary, #666)",
+    marginTop: 2,
+    overflowWrap: "anywhere",
+  },
   priceBadge: { fontSize: 12, fontWeight: 500, color: "#0F6E56", whiteSpace: "nowrap", flexShrink: 0 },
   dayNav: { display: "flex", alignItems: "center", gap: 12 },
   navBtn: {
@@ -508,8 +518,19 @@ const S: Record<string, CSSProperties> = {
   slotDot: { width: 8, height: 8, borderRadius: "50%", marginTop: 5, flexShrink: 0 },
   slotLine: { width: 1, flex: 1, minHeight: 12, marginTop: 3, background: "var(--color-border-tertiary, rgba(0,0,0,0.1))" },
   slotBody: { flex: 1, minWidth: 0, paddingBottom: 4 },
-  slotName: { fontSize: 13, fontWeight: 500, color: "var(--color-text-primary, #111)" },
-  slotDesc: { fontSize: 12, color: "var(--color-text-secondary, #666)", marginTop: 2, lineHeight: 1.4 },
+  slotName: {
+    fontSize: 13,
+    fontWeight: 500,
+    color: "var(--color-text-primary, #111)",
+    overflowWrap: "anywhere",
+  },
+  slotDesc: {
+    fontSize: 12,
+    color: "var(--color-text-secondary, #666)",
+    marginTop: 2,
+    lineHeight: 1.4,
+    overflowWrap: "anywhere",
+  },
   slotTags: { display: "flex", gap: 5, marginTop: 5, flexWrap: "wrap" },
   tag: { fontSize: 11, padding: "2px 7px", borderRadius: 4, fontWeight: 500, lineHeight: 1.6 },
   tagNeutral: {
