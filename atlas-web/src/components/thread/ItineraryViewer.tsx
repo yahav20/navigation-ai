@@ -138,7 +138,9 @@ async function geocode(name: string, city: string): Promise<[number, number] | n
       geocodeCache.set(query, coord);
       return coord;
     }
-  } catch {}
+  } catch {
+    // Geocoding is optional; cache the failed lookup below and render without a pin.
+  }
   geocodeCache.set(query, null);
   return null;
 }
