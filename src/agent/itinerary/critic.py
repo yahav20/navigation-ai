@@ -145,13 +145,24 @@ class ItineraryCriticNode:
             return {"critic_action": "pass", "itinerary_plan": plan_state}
 
         data        = raw_result.get("data") or {}
-        grand_total = float(data.get("grand_total", 0))
+        # Compare against the GROUP total — the budget is the whole party's budget,
+        # which is also what the verifier uses to decide over_budget. Falling back to
+        # the per-person grand_total keeps older/solo results working.
+        grand_total = float(data.get("group_grand_total") or data.get("grand_total", 0))
         overage     = grand_total - budget
         critic_attempts = int(state.get("critic_attempts") or 0)
 
         # ── Step 1: Replan with cheaper activities (once, if overage is coverable) ──
-        activities_cost, meals_cost, _ = _extract_activity_costs(results, trip_days)
-        total_activity_cost = activities_cost + meals_cost
+        # Use group-scaled activity costs so the coverage check matches the (now
+        # group-scaled) overage; fall back to the solo sum if the group fields are absent.
+        if data.get("group_activities_total") is not None or data.get("group_meals_total") is not None:
+            total_activity_cost = (
+                float(data.get("group_activities_total", 0))
+                + float(data.get("group_meals_total", 0))
+            )
+        else:
+            activities_cost, meals_cost, _ = _extract_activity_costs(results, trip_days)
+            total_activity_cost = activities_cost + meals_cost
 
         if critic_attempts == 0 and not use_min and overage <= total_activity_cost:
             max_act_per_day = max(10.0, round((budget * 0.25) / trip_days, 0))
