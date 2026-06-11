@@ -1,8 +1,11 @@
 """Unit tests — pure Python, no LLM, no network. Runs in milliseconds."""
 import pytest
+from langchain_core.messages import AIMessage, HumanMessage
 
+from agent.core.models import TravelMetadata
 from agent.itinerary.planner import _completed_step_types
 from agent.itinerary.schemas import ExecutionPlan, PlanStep
+from agent.shared.metadata import MetadataNode
 from security import validate_city, validate_input, validate_positive_number
 
 # ---------------------------------------------------------------------------
@@ -58,6 +61,105 @@ def test_completed_step_types_all_success():
     completed = _completed_step_types(step_results)
     assert "fetch_flights" in completed
     assert "fetch_return_flights" in completed
+
+
+# ---------------------------------------------------------------------------
+# MetadataNode invalidation tests
+# ---------------------------------------------------------------------------
+#
+# extract_metadata runs on the build_itinerary turn and re-reads recent
+# messages — which include the bot's own rendered travel plan (concrete flight
+# dates). A spurious re-extraction must NOT wipe the just-created travel data,
+# or plan_check reports "no plan". Travel-reset keys are only written by
+# _invalidate_flights.
+_RESET_KEYS = {"travel_plan", "flight_options", "return_flight_options", "has_flights"}
+
+
+class _StubExtractor:
+    """Stands in for the extraction model: returns a fixed TravelMetadata.
+
+    MetadataNode calls silent(model.with_structured_output(...)) then .invoke(),
+    so the stub must be chainable through both with_structured_output/with_config.
+    """
+
+    def __init__(self, metadata: TravelMetadata) -> None:
+        self._metadata = metadata
+
+    def with_structured_output(self, _schema):
+        return self
+
+    def with_config(self, *_args, **_kwargs):
+        return self
+
+    def invoke(self, _messages):
+        return self._metadata
+
+
+def _state_with_plan(**overrides) -> dict:
+    """An AgentState that already holds a complete travel plan + a rendered plan
+    AI message in history (what extract_metadata re-reads)."""
+    state = {
+        "messages": [
+            HumanMessage(content="build my daily schedule"),
+            AIMessage(content="**Trip Days:** 3 days\n* Departs: 2026-06-12 at 10:30"),
+        ],
+        "current_city": "Tel Aviv",
+        "destination_city": "Paris",
+        "total_budget": 2000,
+        "trip_days": 3,
+        "trip_start": "2026-06-10",
+        "num_adults": 2,
+        "num_children": 0,
+        "travel_plan": {"hotels": [{"name": "Ibis"}]},
+        "flight_options": [{"flight_number": "LY1"}],
+        "return_flight_options": [{"flight_number": "LY2"}],
+        "has_flights": True,
+    }
+    state.update(overrides)
+    return state
+
+
+@pytest.mark.unit
+def test_metadata_build_itinerary_preserves_plan_on_date_drift():
+    # The rendered plan's flight date (2026-06-12) differs from the stored
+    # day-level start (2026-06-10) — but on a build_itinerary turn this must
+    # NOT invalidate the existing flights/hotels.
+    node = MetadataNode(_StubExtractor(TravelMetadata(trip_start="2026-06-12")))
+    state = _state_with_plan(intent="build_itinerary")
+
+    updates = node(state)
+
+    assert _RESET_KEYS.isdisjoint(updates), f"plan wiped on build_itinerary: {updates}"
+    assert updates["trip_start"] == "2026-06-12"  # field still updated
+
+
+@pytest.mark.unit
+def test_metadata_new_plan_still_invalidates_on_destination_change():
+    # Regression guard: a genuine destination change on a new_travel_plan turn
+    # must still reset travel data so a fresh search runs.
+    node = MetadataNode(_StubExtractor(TravelMetadata(destination_city="Berlin")))
+    state = _state_with_plan(intent="new_travel_plan")
+
+    updates = node(state)
+
+    assert updates["destination_city"] == "Berlin"
+    assert updates["travel_plan"] == {}
+    assert updates["flight_options"] == []
+    assert updates["return_flight_options"] == []
+    assert updates["has_flights"] is False
+
+
+@pytest.mark.unit
+def test_metadata_trip_days_only_change_preserves_plan():
+    # A trip_days-only change keeps the same route/hotel — must NOT invalidate,
+    # matching AdjustmentsNode. True regardless of intent.
+    node = MetadataNode(_StubExtractor(TravelMetadata(trip_days=5)))
+    state = _state_with_plan(intent="new_travel_plan")
+
+    updates = node(state)
+
+    assert updates["trip_days"] == 5
+    assert _RESET_KEYS.isdisjoint(updates), f"trip_days change wiped plan: {updates}"
 
 
 # ---------------------------------------------------------------------------
