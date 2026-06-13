@@ -120,10 +120,19 @@ class MetadataNode:
         old_origin = state.get("current_city", "").lower() if state.get("current_city") else ""
         old_dest = state.get("destination_city", "").lower() if state.get("destination_city") else ""
         old_budget = state.get("total_budget")
-        old_days = state.get("trip_days")
         old_start = state.get("trip_start")
 
+        # On a build_itinerary turn the user is building ON the existing plan, not
+        # changing it. extract_metadata still re-reads recent messages — which now
+        # include the bot's own rendered plan (concrete flight dates etc.) — so a
+        # spurious re-extraction must NOT wipe the just-created travel data. Field
+        # updates below still run; only the destructive reset is suppressed. (If no
+        # plan exists yet, there is nothing to lose, so this is safe either way.)
+        suppress_invalidation = state.get("intent") == "build_itinerary"
+
         def _invalidate_flights(reset_alternatives: bool = False) -> None:
+            if suppress_invalidation:
+                return
             updates["travel_plan"] = {}
             updates["itinerary_plan"] = {}
             updates["flight_options"] = []
@@ -151,8 +160,8 @@ class MetadataNode:
 
         if metadata.trip_days is not None:
             updates["trip_days"] = metadata.trip_days
-            if old_days is not None and metadata.trip_days != old_days:
-                _invalidate_flights()
+            # trip_days-only changes keep the same route/hotel — no re-search needed
+            # (matches AdjustmentsNode's documented behavior).
 
         if metadata.trip_start is not None and not _same_month_refinement(old_start, metadata.trip_start):
             updates["trip_start"] = metadata.trip_start

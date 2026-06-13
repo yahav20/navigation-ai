@@ -176,7 +176,7 @@ function TripPlannerForm({ onSubmit }: { onSubmit: (text: string) => void }) {
           (numChildren > 0 ? ` and ${numChildren} child${numChildren > 1 ? "ren" : ""}` : "");
 
     const parts = [
-      `build a 3-day itinerary from ${origin} to ${destination}`,
+      `Build a 3-day itinerary from ${origin} to ${destination}`,
       `for ${days} days`,
       `for ${travelers}`,
       numRooms > 1 ? `in ${numRooms} rooms` : "",
