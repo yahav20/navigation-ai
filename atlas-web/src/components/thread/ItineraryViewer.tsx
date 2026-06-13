@@ -123,27 +123,6 @@ function makePinIcon(L: any, color: string, label: string) {
   });
 }
 
-// Nominatim geocode cache (persists across re-renders)
-const geocodeCache = new Map<string, [number, number] | null>();
-
-async function geocode(name: string, city: string): Promise<[number, number] | null> {
-  const query = `${name}, ${city}`;
-  if (geocodeCache.has(query)) return geocodeCache.get(query)!;
-  try {
-    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=1`;
-    const res = await fetch(url, { headers: { "Accept-Language": "en" } });
-    const data = await res.json();
-    if (data?.[0]) {
-      const coord: [number, number] = [parseFloat(data[0].lat), parseFloat(data[0].lon)];
-      geocodeCache.set(query, coord);
-      return coord;
-    }
-  } catch {
-    // Geocoding is optional; cache the failed lookup below and render without a pin.
-  }
-  geocodeCache.set(query, null);
-  return null;
-}
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
@@ -248,10 +227,9 @@ const SlotRow: FC<{ slot: TimeSlot; isLast: boolean }> = ({ slot, isLast }) => {
 
 // ─── Map component ────────────────────────────────────────────────────────────
 
-const DayMap: FC<{ day: DaySchedule; hotels: HotelInfo[]; destination: string }> = ({
+const DayMap: FC<{ day: DaySchedule; hotels: HotelInfo[] }> = ({
   day,
   hotels,
-  destination,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
@@ -268,38 +246,19 @@ const DayMap: FC<{ day: DaySchedule; hotels: HotelInfo[]; destination: string }>
       // Destroy old map
       if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; }
 
-      // --- Resolve coordinates ---
-      // Slots with backend-provided lat/lng
+      // Use backend-provided coordinates only (resolved in formatter.py)
       const slotsWithCoords: Array<{ slot: TimeSlot; lat: number; lng: number }> = [];
-      // Slots needing geocoding
-      const slotsNeedingGeo: TimeSlot[] = [];
-
       for (const s of day.slots) {
         if (s.slot_type === "transport" || s.slot_type === "rest") continue;
         if (s.lat != null && s.lng != null) {
           slotsWithCoords.push({ slot: s, lat: s.lat, lng: s.lng });
-        } else {
-          slotsNeedingGeo.push(s);
         }
       }
 
-      // Geocode missing slots (throttle: 1 request / 300 ms to respect Nominatim ToS)
-      for (const s of slotsNeedingGeo) {
-        if (cancelled) return;
-        const coord = await geocode(s.name, destination);
-        if (coord) slotsWithCoords.push({ slot: s, lat: coord[0], lng: coord[1] });
-        await new Promise((r) => setTimeout(r, 300));
-      }
-
-      // Hotels
       const hotelMarkers: Array<{ hotel: HotelInfo; lat: number; lng: number }> = [];
       for (const h of hotels) {
         if (h.lat != null && h.lng != null) {
           hotelMarkers.push({ hotel: h, lat: h.lat, lng: h.lng });
-        } else {
-          const coord = await geocode(h.name, destination);
-          if (coord) hotelMarkers.push({ hotel: h, lat: coord[0], lng: coord[1] });
-          if (cancelled) return;
         }
       }
 
@@ -362,8 +321,7 @@ const DayMap: FC<{ day: DaySchedule; hotels: HotelInfo[]; destination: string }>
       cancelled = true;
       if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; }
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [day.day, destination]);
+  }, [day.day]);
 
   return (
     <div style={S.mapContainer}>
@@ -447,7 +405,7 @@ export default function ItineraryViewer({
             </div>
           </div>
         </div>
-        <DayMap day={day} hotels={hotels} destination={destination} />
+        <DayMap day={day} hotels={hotels} />
       </div>
     </div>
   );

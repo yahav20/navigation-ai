@@ -138,6 +138,19 @@ def _build_ui_props(state: AgentState) -> dict:
                 "nights":          trip_days,
             })
 
+    # ── Coordinate lookup from already-fetched activities ────────────────────
+    _coord_idx: dict[str, tuple[float, float]] = {}
+    acts_key = next((k for k in results if k.startswith("fetch_activities")), None)
+    if acts_key:
+        acts_inner = _unwrap_result(results[acts_key])
+        for pool in ("activities", "restaurants"):
+            for a in acts_inner.get(pool, []):
+                name = a.get("name", "")
+                lat  = float(a.get("latitude") or a.get("lat") or 0)
+                lng  = float(a.get("longitude") or a.get("lng") or 0)
+                if name and (lat or lng):
+                    _coord_idx[name] = (lat, lng)
+
     # ── Days ─────────────────────────────────────────────────────────────────
     days: list[dict] = []
 
@@ -154,20 +167,32 @@ def _build_ui_props(state: AgentState) -> dict:
         day_data = _unwrap_result(results[key])
         raw_slots = day_data.get("slots", [])
 
-        # Enrich slots with lat/lng if available
+        # Enrich slots with lat/lng from the activities lookup
         slots = []
         for s in raw_slots:
-            slot = dict(s)  # shallow copy
-            # lat/lng may already be present if schedule_engine was patched;
-            # otherwise they remain absent and the map uses bbox-only mode.
+            slot = dict(s)
+            if slot.get("lat") is None or slot.get("lng") is None:
+                coords = _coord_idx.get(slot.get("name", ""))
+                if coords:
+                    slot["lat"], slot["lng"] = coords
             slots.append(slot)
+
+        # Derive center from mapped slots (skip transport/rest which have no fixed location)
+        mapped = [
+            (slot["lat"], slot["lng"])
+            for slot in slots
+            if slot.get("lat") and slot.get("lng")
+            and slot.get("slot_type") not in ("transport", "rest")
+        ]
+        center_lat = sum(c[0] for c in mapped) / len(mapped) if mapped else None
+        center_lng = sum(c[1] for c in mapped) / len(mapped) if mapped else None
 
         theme = day_data.get("theme", "")
         days.append({
             "day":        d,
             "label":      f"Day {d}" + (f" — {theme}" if theme else ""),
-            "center_lat": day_data.get("center_lat"),
-            "center_lng": day_data.get("center_lng"),
+            "center_lat": center_lat,
+            "center_lng": center_lng,
             "slots":      slots,
         })
 
