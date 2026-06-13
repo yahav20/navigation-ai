@@ -313,12 +313,20 @@ class DayScheduleBuilder:
         cfg      = self.cfg
         day_plan = day_plan or {}
 
-        day_end          = _pt(self._date, cfg.day_end_time)
-        departure_anchor = (
-            _pt(self._date, cfg.departure_time) - timedelta(minutes=150)
+        day_end         = _pt(self._date, cfg.day_end_time)
+        _dep_dt         = (
+            _pt(self._date, cfg.departure_time)
             if cfg.is_last_day and cfg.departure_time
-            else day_end
+            else None
         )
+        # Guard: if the 2h30 buffer lands at or before day-start the flight is
+        # early-morning (e.g. 02:05) — user has the whole day free for sightseeing.
+        _dep_anchor_raw  = (_dep_dt - timedelta(minutes=150)) if _dep_dt else None
+        _dep_after_start = (
+            _dep_anchor_raw is not None
+            and _dep_anchor_raw > _pt(self._date, cfg.day_start_time)
+        )
+        departure_anchor = _dep_anchor_raw if _dep_after_start else day_end
 
         # ── Weather flags ────────────────────────────────────────────────────
         cond     = cfg.weather_condition.lower()
@@ -556,8 +564,9 @@ class DayScheduleBuilder:
                 cursor, location = self._inject_dinner(
                     cursor, departure_anchor, location, cfg, meal_cands)
 
-        # Departure taxi (last day)
-        if cfg.is_last_day and cfg.departure_time:
+        # Departure taxi (last day) — skip for overnight/early-morning flights;
+        # those depart after the schedule window and the user arranges them separately.
+        if _dep_after_start:
             t_min  = max(AIRPORT_HOTEL_MINUTES, 45)
             t_cost = TAXI_BASE_COST + 30 * TAXI_COST_PER_KM
             ts     = max(cursor, departure_anchor)
