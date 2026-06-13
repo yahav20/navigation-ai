@@ -700,16 +700,27 @@ def handle_update_day_schedule(
     day_cost = round(sum(float(s.get("estimated_cost", 0)) for s in slots), 2)
     theme    = day_plan_filtered.get("theme") or day_plan.get("theme") or f"Day {day_num} — Explore {destination}"
 
+    # Persist coordinates of all candidates (including newly-searched activities not in
+    # fetch_activities) so formatter.py can resolve map pins for replacement activities.
+    coord_index: dict[str, list[float]] = {}
+    for a in available_acts:
+        name = a.get("name", "")
+        lat  = float(a.get("lat") or a.get("latitude") or 0)
+        lng  = float(a.get("lng") or a.get("longitude") or 0)
+        if name and (lat or lng):
+            coord_index[name] = [lat, lng]
+
     return _wrap_result(
         status="success",
         data={
-            "day":      day_num,
-            "theme":    theme,
-            "area":     day_plan_filtered.get("area") or day_plan.get("area", ""),
-            "slots":    slots,
-            "day_cost": day_cost,
-            "hotel":    cfg.hotel_name,
+            "day":         day_num,
+            "theme":       theme,
+            "area":        day_plan_filtered.get("area") or day_plan.get("area", ""),
+            "slots":       slots,
+            "day_cost":    day_cost,
+            "hotel":       cfg.hotel_name,
             "hotel_price_per_night": 0.0 if mode == "standalone" else _hotel_price(state),
+            "coord_index": coord_index,
         },
         error=None, replan_hint="",
         trace=_minimal_trace(action, {"day": day_num, "excluded": target, "added": replacement},

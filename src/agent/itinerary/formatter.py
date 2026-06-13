@@ -151,6 +151,17 @@ def _build_ui_props(state: AgentState) -> dict:
                 if name and (lat or lng):
                     _coord_idx[name] = (lat, lng)
 
+    # Supplement with coords from update_day_schedule results — newly-searched
+    # replacement activities are not in fetch_activities but are stored in coord_index.
+    for k, v in results.items():
+        if k.startswith("build_day_schedule"):
+            inner = _unwrap_result(v)
+            for name, coords in (inner.get("coord_index") or {}).items():
+                if name not in _coord_idx and isinstance(coords, list) and len(coords) == 2:
+                    lat, lng = float(coords[0]), float(coords[1])
+                    if lat or lng:
+                        _coord_idx[name] = (lat, lng)
+
     # ── Days ─────────────────────────────────────────────────────────────────
     days: list[dict] = []
 
@@ -241,7 +252,7 @@ class ItineraryFormatterNode:
             content = self._prepend_over_budget_banner(state, content)
 
         # ── NEW: build the UI message for ItineraryViewer ─────────────────────
-        ai_message = AIMessage(content=content)
+        ai_message = AIMessage(content="content")
         ui_props   = _build_ui_props(state)
         ui_message = {
             "type":     "ui",

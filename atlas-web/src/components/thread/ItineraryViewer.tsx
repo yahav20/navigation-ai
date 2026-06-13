@@ -141,7 +141,7 @@ const TravelCard: FC<{ flights: FlightInfo[]; hotels: HotelInfo[] }> = ({ flight
               {f.flight_number ? ` ${f.flight_number}` : ""}
             </div>
           </div>
-          <span style={S.priceBadge}>{f.price}</span>
+          <span className="itv-price" style={S.priceBadge}>{f.price}</span>
         </div>
       ))}
       {hotels.map((h, i) => (
@@ -155,7 +155,7 @@ const TravelCard: FC<{ flights: FlightInfo[]; hotels: HotelInfo[] }> = ({ flight
               {h.stars ? ` · ${"★".repeat(h.stars)}` : ""}
             </div>
           </div>
-          <span style={S.priceBadge}>{h.price_per_night}</span>
+          <span className="itv-price" style={S.priceBadge}>{h.price_per_night}</span>
         </div>
       ))}
     </div>
@@ -209,7 +209,7 @@ const SlotRow: FC<{ slot: TimeSlot; isLast: boolean }> = ({ slot, isLast }) => {
         <div style={S.slotName}>{slot.name}</div>
         {slot.description && <div style={S.slotDesc}>{slot.description}</div>}
         <div style={S.slotTags}>
-          <span style={{ ...S.tag, background: cfg.bg, color: cfg.text }}>{cfg.label}</span>
+          <span data-slot={slot.slot_type} style={{ ...S.tag, background: cfg.bg, color: cfg.text }}>{cfg.label}</span>
           {(slot.estimated_cost ?? 0) > 0 && (
             <span style={S.tagNeutral}>${slot.estimated_cost}</span>
           )}
@@ -340,13 +340,13 @@ const DayMap: FC<{ day: DaySchedule; hotels: HotelInfo[] }> = ({
         {status === "loading" && (
           <div style={S.mapOverlay}>
             <div style={S.mapSpinner} />
-            <span style={{ fontSize: 12, color: "#666", marginTop: 8 }}>Finding locations…</span>
+            <span className="itv-muted" style={{ fontSize: 12, marginTop: 8 }}>Finding locations…</span>
           </div>
         )}
         {status === "no-coords" && (
           <div style={S.mapOverlay}>
             <span style={{ fontSize: 24 }}>🗺️</span>
-            <span style={{ fontSize: 12, color: "#888", marginTop: 6 }}>No location data available</span>
+            <span className="itv-muted" style={{ fontSize: 12, marginTop: 6 }}>No location data available</span>
           </div>
         )}
       </div>
@@ -380,7 +380,7 @@ export default function ItineraryViewer({
 
   if (days.length === 0) {
     return (
-      <div style={S.empty}>
+      <div style={S.empty} className="itv-root">
         <span style={{ fontSize: 28 }}>✈️</span>
         <span>Building your itinerary…</span>
       </div>
@@ -390,7 +390,7 @@ export default function ItineraryViewer({
   const day = days[current];
 
   return (
-    <div style={S.root}>
+    <div style={S.root} className="itv-root">
       <div style={S.layout}>
         <div style={S.leftCol}>
           {(flights.length > 0 || hotels.length > 0) && (
@@ -532,10 +532,30 @@ const S: Record<string, CSSProperties> = {
   },
 };
 
-// Inject spinner keyframes once
-if (typeof document !== "undefined" && !document.getElementById("itinerary-spin")) {
+// Inject styles once (spinner + dark mode)
+if (typeof document !== "undefined" && !document.getElementById("itinerary-styles")) {
   const style = document.createElement("style");
-  style.id = "itinerary-spin";
-  style.textContent = "@keyframes spin { to { transform: rotate(360deg); } }";
+  style.id = "itinerary-styles";
+  style.textContent = [
+    "@keyframes spin { to { transform: rotate(360deg); } }",
+    "@media (prefers-color-scheme: dark) {",
+    "  .itv-root {",
+    "    --color-background-primary: #1c1c1e;",
+    "    --color-background-secondary: #2c2c2e;",
+    "    --color-text-primary: #f2f2f7;",
+    "    --color-text-secondary: #aeaeb2;",
+    "    --color-text-tertiary: #636366;",
+    "    --color-border-secondary: rgba(255,255,255,0.2);",
+    "    --color-border-tertiary: rgba(255,255,255,0.08);",
+    "  }",
+    "  .itv-root [data-slot=activity]  { background: #0d3028 !important; color: #4fc99e !important; }",
+    "  .itv-root [data-slot=meal]      { background: #3a1a0e !important; color: #e8845a !important; }",
+    "  .itv-root [data-slot=transport] { background: #2a2926 !important; color: #bbbab7 !important; }",
+    "  .itv-root [data-slot=rest]      { background: #1e1b3a !important; color: #b3adee !important; }",
+    "  .itv-root [data-slot=checkin]   { background: #0e2040 !important; color: #5c9ee8 !important; }",
+    "  .itv-price { color: #4fc99e !important; }",
+    "  .itv-muted { color: #636366 !important; }",
+    "}",
+  ].join("\n");
   document.head.appendChild(style);
 }
