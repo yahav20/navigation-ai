@@ -138,6 +138,30 @@ def _build_ui_props(state: AgentState) -> dict:
                 "nights":          trip_days,
             })
 
+    # ── Coordinate lookup from already-fetched activities ────────────────────
+    _coord_idx: dict[str, tuple[float, float]] = {}
+    acts_key = next((k for k in results if k.startswith("fetch_activities")), None)
+    if acts_key:
+        acts_inner = _unwrap_result(results[acts_key])
+        for pool in ("activities", "restaurants"):
+            for a in acts_inner.get(pool, []):
+                name = a.get("name", "")
+                lat  = float(a.get("latitude") or a.get("lat") or 0)
+                lng  = float(a.get("longitude") or a.get("lng") or 0)
+                if name and (lat or lng):
+                    _coord_idx[name] = (lat, lng)
+
+    # Supplement with coords from update_day_schedule results — newly-searched
+    # replacement activities are not in fetch_activities but are stored in coord_index.
+    for k, v in results.items():
+        if k.startswith("build_day_schedule"):
+            inner = _unwrap_result(v)
+            for name, coords in (inner.get("coord_index") or {}).items():
+                if name not in _coord_idx and isinstance(coords, list) and len(coords) == 2:
+                    lat, lng = float(coords[0]), float(coords[1])
+                    if lat or lng:
+                        _coord_idx[name] = (lat, lng)
+
     # ── Days ─────────────────────────────────────────────────────────────────
     days: list[dict] = []
 
@@ -154,20 +178,37 @@ def _build_ui_props(state: AgentState) -> dict:
         day_data = _unwrap_result(results[key])
         raw_slots = day_data.get("slots", [])
 
-        # Enrich slots with lat/lng if available
+        # Enrich slots with lat/lng from the activities lookup
+        num_adults   = int(state.get("num_adults") or 1)
+        num_children = int(state.get("num_children") or 0)
         slots = []
         for s in raw_slots:
-            slot = dict(s)  # shallow copy
-            # lat/lng may already be present if schedule_engine was patched;
-            # otherwise they remain absent and the map uses bbox-only mode.
+            slot = dict(s)
+            if slot.get("lat") is None or slot.get("lng") is None:
+                coords = _coord_idx.get(slot.get("name", ""))
+                if coords:
+                    slot["lat"], slot["lng"] = coords
+            cost_pp = float(s.get("estimated_cost") or 0)
+            slot["cost_per_person"] = cost_pp
+            slot["group_cost"] = activity_group_price(cost_pp, num_adults, num_children)
             slots.append(slot)
+
+        # Derive center from mapped slots (skip transport/rest which have no fixed location)
+        mapped = [
+            (slot["lat"], slot["lng"])
+            for slot in slots
+            if slot.get("lat") and slot.get("lng")
+            and slot.get("slot_type") not in ("transport", "rest")
+        ]
+        center_lat = sum(c[0] for c in mapped) / len(mapped) if mapped else None
+        center_lng = sum(c[1] for c in mapped) / len(mapped) if mapped else None
 
         theme = day_data.get("theme", "")
         days.append({
             "day":        d,
             "label":      f"Day {d}" + (f" — {theme}" if theme else ""),
-            "center_lat": day_data.get("center_lat"),
-            "center_lng": day_data.get("center_lng"),
+            "center_lat": center_lat,
+            "center_lng": center_lng,
             "slots":      slots,
         })
 
@@ -216,7 +257,7 @@ class ItineraryFormatterNode:
             content = self._prepend_over_budget_banner(state, content)
 
         # ── NEW: build the UI message for ItineraryViewer ─────────────────────
-        ai_message = AIMessage(content=content)
+        ai_message = AIMessage(content="")
         ui_props   = _build_ui_props(state)
         ui_message = {
             "type":     "ui",

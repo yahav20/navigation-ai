@@ -26,6 +26,8 @@ interface TimeSlot {
   name: string;
   description?: string;
   estimated_cost?: number;
+  cost_per_person?: number;
+  group_cost?: number;
   transport_mode?: "walk" | "taxi";
   distance_km?: number;
   lat?: number;
@@ -123,27 +125,6 @@ function makePinIcon(L: any, color: string, label: string) {
   });
 }
 
-// Nominatim geocode cache (persists across re-renders)
-const geocodeCache = new Map<string, [number, number] | null>();
-
-async function geocode(name: string, city: string): Promise<[number, number] | null> {
-  const query = `${name}, ${city}`;
-  if (geocodeCache.has(query)) return geocodeCache.get(query)!;
-  try {
-    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=1`;
-    const res = await fetch(url, { headers: { "Accept-Language": "en" } });
-    const data = await res.json();
-    if (data?.[0]) {
-      const coord: [number, number] = [parseFloat(data[0].lat), parseFloat(data[0].lon)];
-      geocodeCache.set(query, coord);
-      return coord;
-    }
-  } catch {
-    // Geocoding is optional; cache the failed lookup below and render without a pin.
-  }
-  geocodeCache.set(query, null);
-  return null;
-}
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
@@ -162,7 +143,7 @@ const TravelCard: FC<{ flights: FlightInfo[]; hotels: HotelInfo[] }> = ({ flight
               {f.flight_number ? ` ${f.flight_number}` : ""}
             </div>
           </div>
-          <span style={S.priceBadge}>{f.price}</span>
+          <span className="itv-price" style={S.priceBadge}>{f.price}</span>
         </div>
       ))}
       {hotels.map((h, i) => (
@@ -176,7 +157,7 @@ const TravelCard: FC<{ flights: FlightInfo[]; hotels: HotelInfo[] }> = ({ flight
               {h.stars ? ` · ${"★".repeat(h.stars)}` : ""}
             </div>
           </div>
-          <span style={S.priceBadge}>{h.price_per_night}</span>
+          <span className="itv-price" style={S.priceBadge}>{h.price_per_night}</span>
         </div>
       ))}
     </div>
@@ -230,9 +211,15 @@ const SlotRow: FC<{ slot: TimeSlot; isLast: boolean }> = ({ slot, isLast }) => {
         <div style={S.slotName}>{slot.name}</div>
         {slot.description && <div style={S.slotDesc}>{slot.description}</div>}
         <div style={S.slotTags}>
-          <span style={{ ...S.tag, background: cfg.bg, color: cfg.text }}>{cfg.label}</span>
+          <span data-slot={slot.slot_type} style={{ ...S.tag, background: cfg.bg, color: cfg.text }}>{cfg.label}</span>
           {(slot.estimated_cost ?? 0) > 0 && (
             <span style={S.tagNeutral}>${slot.estimated_cost}</span>
+          )}
+          {(slot.cost_per_person ?? 0) > 0 && (
+            <span style={S.tagNeutral}>${slot.cost_per_person} pp</span>
+          )}
+          {(slot.group_cost ?? 0) > 0 && (
+            <span style={S.tagNeutral}>${slot.group_cost} group</span>
           )}
           {slot.transport_mode && (
             <span style={S.tagNeutral}>
@@ -248,10 +235,9 @@ const SlotRow: FC<{ slot: TimeSlot; isLast: boolean }> = ({ slot, isLast }) => {
 
 // ─── Map component ────────────────────────────────────────────────────────────
 
-const DayMap: FC<{ day: DaySchedule; hotels: HotelInfo[]; destination: string }> = ({
+const DayMap: FC<{ day: DaySchedule; hotels: HotelInfo[] }> = ({
   day,
   hotels,
-  destination,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
@@ -268,38 +254,19 @@ const DayMap: FC<{ day: DaySchedule; hotels: HotelInfo[]; destination: string }>
       // Destroy old map
       if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; }
 
-      // --- Resolve coordinates ---
-      // Slots with backend-provided lat/lng
+      // Use backend-provided coordinates only (resolved in formatter.py)
       const slotsWithCoords: Array<{ slot: TimeSlot; lat: number; lng: number }> = [];
-      // Slots needing geocoding
-      const slotsNeedingGeo: TimeSlot[] = [];
-
       for (const s of day.slots) {
         if (s.slot_type === "transport" || s.slot_type === "rest") continue;
         if (s.lat != null && s.lng != null) {
           slotsWithCoords.push({ slot: s, lat: s.lat, lng: s.lng });
-        } else {
-          slotsNeedingGeo.push(s);
         }
       }
 
-      // Geocode missing slots (throttle: 1 request / 300 ms to respect Nominatim ToS)
-      for (const s of slotsNeedingGeo) {
-        if (cancelled) return;
-        const coord = await geocode(s.name, destination);
-        if (coord) slotsWithCoords.push({ slot: s, lat: coord[0], lng: coord[1] });
-        await new Promise((r) => setTimeout(r, 300));
-      }
-
-      // Hotels
       const hotelMarkers: Array<{ hotel: HotelInfo; lat: number; lng: number }> = [];
       for (const h of hotels) {
         if (h.lat != null && h.lng != null) {
           hotelMarkers.push({ hotel: h, lat: h.lat, lng: h.lng });
-        } else {
-          const coord = await geocode(h.name, destination);
-          if (coord) hotelMarkers.push({ hotel: h, lat: coord[0], lng: coord[1] });
-          if (cancelled) return;
         }
       }
 
@@ -362,48 +329,49 @@ const DayMap: FC<{ day: DaySchedule; hotels: HotelInfo[]; destination: string }>
       cancelled = true;
       if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; }
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [day.day, destination]);
+  }, [day.day, day.slots]);
 
   return (
     <div style={S.mapContainer}>
-      <div style={S.mapHeader}>
-        <span>📍</span>
-        <span style={S.mapTitle}>Day {day.day} — map</span>
-        {status === "loading" && (
-          <span style={{ fontSize: 11, color: "var(--color-text-tertiary, #aaa)", marginLeft: "auto" }}>
-            locating places…
-          </span>
-        )}
-      </div>
+      <div style={S.mapInner}>
+        <div style={S.mapHeader}>
+          <span>📍</span>
+          <span style={S.mapTitle}>Day {day.day} — map</span>
+          {status === "loading" && (
+            <span style={{ fontSize: 11, color: "var(--color-text-tertiary, #aaa)", marginLeft: "auto" }}>
+              locating places…
+            </span>
+          )}
+        </div>
 
-      <div style={{ position: "relative" }}>
-        <div ref={containerRef} style={S.mapIframe} />
-        {status === "loading" && (
-          <div style={S.mapOverlay}>
-            <div style={S.mapSpinner} />
-            <span style={{ fontSize: 12, color: "#666", marginTop: 8 }}>Finding locations…</span>
-          </div>
-        )}
-        {status === "no-coords" && (
-          <div style={S.mapOverlay}>
-            <span style={{ fontSize: 24 }}>🗺️</span>
-            <span style={{ fontSize: 12, color: "#888", marginTop: 6 }}>No location data available</span>
-          </div>
-        )}
-      </div>
+        <div style={{ position: "relative" }}>
+          <div ref={containerRef} style={S.mapIframe} />
+          {status === "loading" && (
+            <div style={S.mapOverlay}>
+              <div style={S.mapSpinner} />
+              <span className="itv-muted" style={{ fontSize: 12, marginTop: 8 }}>Finding locations…</span>
+            </div>
+          )}
+          {status === "no-coords" && (
+            <div style={S.mapOverlay}>
+              <span style={{ fontSize: 24 }}>🗺️</span>
+              <span className="itv-muted" style={{ fontSize: 12, marginTop: 6 }}>No location data available</span>
+            </div>
+          )}
+        </div>
 
-      <div style={S.mapLegend}>
-        {[
-          { color: "#1D9E75", label: "Attraction" },
-          { color: "#D85A30", label: "Restaurant" },
-          { color: "#378ADD", label: "Hotel"      },
-        ].map((l) => (
-          <div key={l.label} style={S.legendItem}>
-            <div style={{ ...S.legendDot, background: l.color }} />
-            <span>{l.label}</span>
-          </div>
-        ))}
+        <div style={S.mapLegend}>
+          {[
+            { color: "#1D9E75", label: "Attraction" },
+            { color: "#D85A30", label: "Restaurant" },
+            { color: "#378ADD", label: "Hotel"      },
+          ].map((l) => (
+            <div key={l.label} style={S.legendItem}>
+              <div style={{ ...S.legendDot, background: l.color }} />
+              <span>{l.label}</span>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -422,7 +390,7 @@ export default function ItineraryViewer({
 
   if (days.length === 0) {
     return (
-      <div style={S.empty}>
+      <div style={S.empty} className="itv-root">
         <span style={{ fontSize: 28 }}>✈️</span>
         <span>Building your itinerary…</span>
       </div>
@@ -432,7 +400,7 @@ export default function ItineraryViewer({
   const day = days[current];
 
   return (
-    <div style={S.root}>
+    <div style={S.root} className="itv-root">
       <div style={S.layout}>
         <div style={S.leftCol}>
           {(flights.length > 0 || hotels.length > 0) && (
@@ -447,7 +415,7 @@ export default function ItineraryViewer({
             </div>
           </div>
         </div>
-        <DayMap day={day} hotels={hotels} destination={destination} />
+        <DayMap day={day} hotels={hotels} />
       </div>
     </div>
   );
@@ -457,7 +425,7 @@ export default function ItineraryViewer({
 
 const S: Record<string, CSSProperties> = {
   root: { fontFamily: "var(--font-sans, system-ui, sans-serif)", padding: "0.75rem 0" },
-  layout: { display: "grid", gridTemplateColumns: "1fr 310px", gap: 14, alignItems: "start" },
+  layout: { display: "grid", gridTemplateColumns: "1fr 310px", gap: 14, alignItems: "start", position: "relative" },
   leftCol: { display: "flex", flexDirection: "column", gap: 12, minWidth: 0 },
   card: {
     background: "var(--color-background-primary, #fff)",
@@ -538,9 +506,16 @@ const S: Record<string, CSSProperties> = {
     background: "var(--color-background-secondary, #f5f5f3)", color: "var(--color-text-secondary, #777)",
   },
   mapContainer: {
-    borderRadius: 12, overflow: "hidden",
     border: "0.5px solid var(--color-border-tertiary, rgba(0,0,0,0.12))",
+    borderRadius: 12,
     position: "sticky", top: 16,
+    maxHeight: "calc(100vh - 32px)",
+  },
+  mapInner: {
+    borderRadius: 12,
+    overflow: "hidden",
+    display: "flex",
+    flexDirection: "column",
   },
   mapHeader: {
     padding: "9px 13px", display: "flex", alignItems: "center", gap: 7,
@@ -574,10 +549,28 @@ const S: Record<string, CSSProperties> = {
   },
 };
 
-// Inject spinner keyframes once
-if (typeof document !== "undefined" && !document.getElementById("itinerary-spin")) {
+// Inject styles once (spinner + dark mode)
+if (typeof document !== "undefined" && !document.getElementById("itinerary-styles")) {
   const style = document.createElement("style");
-  style.id = "itinerary-spin";
-  style.textContent = "@keyframes spin { to { transform: rotate(360deg); } }";
+  style.id = "itinerary-styles";
+  style.textContent = [
+    "@keyframes spin { to { transform: rotate(360deg); } }",
+    ".itv-root {",
+    "  --color-background-primary: #1c1c1e;",
+    "  --color-background-secondary: #2c2c2e;",
+    "  --color-text-primary: #f2f2f7;",
+    "  --color-text-secondary: #aeaeb2;",
+    "  --color-text-tertiary: #636366;",
+    "  --color-border-secondary: rgba(255,255,255,0.2);",
+    "  --color-border-tertiary: rgba(255,255,255,0.08);",
+    "}",
+    ".itv-root [data-slot=activity]  { background: #0d3028 !important; color: #4fc99e !important; }",
+    ".itv-root [data-slot=meal]      { background: #3a1a0e !important; color: #e8845a !important; }",
+    ".itv-root [data-slot=transport] { background: #2a2926 !important; color: #bbbab7 !important; }",
+    ".itv-root [data-slot=rest]      { background: #1e1b3a !important; color: #b3adee !important; }",
+    ".itv-root [data-slot=checkin]   { background: #0e2040 !important; color: #5c9ee8 !important; }",
+    ".itv-price { color: #4fc99e !important; }",
+    ".itv-muted { color: #636366 !important; }",
+  ].join("\n");
   document.head.appendChild(style);
 }
