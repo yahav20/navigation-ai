@@ -26,6 +26,8 @@ interface TimeSlot {
   name: string;
   description?: string;
   estimated_cost?: number;
+  cost_per_person?: number;
+  group_cost?: number;
   transport_mode?: "walk" | "taxi";
   distance_km?: number;
   lat?: number;
@@ -213,6 +215,12 @@ const SlotRow: FC<{ slot: TimeSlot; isLast: boolean }> = ({ slot, isLast }) => {
           {(slot.estimated_cost ?? 0) > 0 && (
             <span style={S.tagNeutral}>${slot.estimated_cost}</span>
           )}
+          {(slot.cost_per_person ?? 0) > 0 && (
+            <span style={S.tagNeutral}>${slot.cost_per_person} pp</span>
+          )}
+          {(slot.group_cost ?? 0) > 0 && (
+            <span style={S.tagNeutral}>${slot.group_cost} group</span>
+          )}
           {slot.transport_mode && (
             <span style={S.tagNeutral}>
               {slot.transport_mode === "walk" ? "🚶" : "🚕"}
@@ -321,47 +329,49 @@ const DayMap: FC<{ day: DaySchedule; hotels: HotelInfo[] }> = ({
       cancelled = true;
       if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; }
     };
-  }, [day.day]);
+  }, [day.day, day.slots]);
 
   return (
     <div style={S.mapContainer}>
-      <div style={S.mapHeader}>
-        <span>📍</span>
-        <span style={S.mapTitle}>Day {day.day} — map</span>
-        {status === "loading" && (
-          <span style={{ fontSize: 11, color: "var(--color-text-tertiary, #aaa)", marginLeft: "auto" }}>
-            locating places…
-          </span>
-        )}
-      </div>
+      <div style={S.mapInner}>
+        <div style={S.mapHeader}>
+          <span>📍</span>
+          <span style={S.mapTitle}>Day {day.day} — map</span>
+          {status === "loading" && (
+            <span style={{ fontSize: 11, color: "var(--color-text-tertiary, #aaa)", marginLeft: "auto" }}>
+              locating places…
+            </span>
+          )}
+        </div>
 
-      <div style={{ position: "relative" }}>
-        <div ref={containerRef} style={S.mapIframe} />
-        {status === "loading" && (
-          <div style={S.mapOverlay}>
-            <div style={S.mapSpinner} />
-            <span className="itv-muted" style={{ fontSize: 12, marginTop: 8 }}>Finding locations…</span>
-          </div>
-        )}
-        {status === "no-coords" && (
-          <div style={S.mapOverlay}>
-            <span style={{ fontSize: 24 }}>🗺️</span>
-            <span className="itv-muted" style={{ fontSize: 12, marginTop: 6 }}>No location data available</span>
-          </div>
-        )}
-      </div>
+        <div style={{ position: "relative" }}>
+          <div ref={containerRef} style={S.mapIframe} />
+          {status === "loading" && (
+            <div style={S.mapOverlay}>
+              <div style={S.mapSpinner} />
+              <span className="itv-muted" style={{ fontSize: 12, marginTop: 8 }}>Finding locations…</span>
+            </div>
+          )}
+          {status === "no-coords" && (
+            <div style={S.mapOverlay}>
+              <span style={{ fontSize: 24 }}>🗺️</span>
+              <span className="itv-muted" style={{ fontSize: 12, marginTop: 6 }}>No location data available</span>
+            </div>
+          )}
+        </div>
 
-      <div style={S.mapLegend}>
-        {[
-          { color: "#1D9E75", label: "Attraction" },
-          { color: "#D85A30", label: "Restaurant" },
-          { color: "#378ADD", label: "Hotel"      },
-        ].map((l) => (
-          <div key={l.label} style={S.legendItem}>
-            <div style={{ ...S.legendDot, background: l.color }} />
-            <span>{l.label}</span>
-          </div>
-        ))}
+        <div style={S.mapLegend}>
+          {[
+            { color: "#1D9E75", label: "Attraction" },
+            { color: "#D85A30", label: "Restaurant" },
+            { color: "#378ADD", label: "Hotel"      },
+          ].map((l) => (
+            <div key={l.label} style={S.legendItem}>
+              <div style={{ ...S.legendDot, background: l.color }} />
+              <span>{l.label}</span>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -415,7 +425,7 @@ export default function ItineraryViewer({
 
 const S: Record<string, CSSProperties> = {
   root: { fontFamily: "var(--font-sans, system-ui, sans-serif)", padding: "0.75rem 0" },
-  layout: { display: "grid", gridTemplateColumns: "1fr 310px", gap: 14, alignItems: "start" },
+  layout: { display: "grid", gridTemplateColumns: "1fr 310px", gap: 14, alignItems: "start", position: "relative" },
   leftCol: { display: "flex", flexDirection: "column", gap: 12, minWidth: 0 },
   card: {
     background: "var(--color-background-primary, #fff)",
@@ -496,9 +506,16 @@ const S: Record<string, CSSProperties> = {
     background: "var(--color-background-secondary, #f5f5f3)", color: "var(--color-text-secondary, #777)",
   },
   mapContainer: {
-    borderRadius: 12, overflow: "hidden",
     border: "0.5px solid var(--color-border-tertiary, rgba(0,0,0,0.12))",
+    borderRadius: 12,
     position: "sticky", top: 16,
+    maxHeight: "calc(100vh - 32px)",
+  },
+  mapInner: {
+    borderRadius: 12,
+    overflow: "hidden",
+    display: "flex",
+    flexDirection: "column",
   },
   mapHeader: {
     padding: "9px 13px", display: "flex", alignItems: "center", gap: 7,
@@ -538,24 +555,22 @@ if (typeof document !== "undefined" && !document.getElementById("itinerary-style
   style.id = "itinerary-styles";
   style.textContent = [
     "@keyframes spin { to { transform: rotate(360deg); } }",
-    "@media (prefers-color-scheme: dark) {",
-    "  .itv-root {",
-    "    --color-background-primary: #1c1c1e;",
-    "    --color-background-secondary: #2c2c2e;",
-    "    --color-text-primary: #f2f2f7;",
-    "    --color-text-secondary: #aeaeb2;",
-    "    --color-text-tertiary: #636366;",
-    "    --color-border-secondary: rgba(255,255,255,0.2);",
-    "    --color-border-tertiary: rgba(255,255,255,0.08);",
-    "  }",
-    "  .itv-root [data-slot=activity]  { background: #0d3028 !important; color: #4fc99e !important; }",
-    "  .itv-root [data-slot=meal]      { background: #3a1a0e !important; color: #e8845a !important; }",
-    "  .itv-root [data-slot=transport] { background: #2a2926 !important; color: #bbbab7 !important; }",
-    "  .itv-root [data-slot=rest]      { background: #1e1b3a !important; color: #b3adee !important; }",
-    "  .itv-root [data-slot=checkin]   { background: #0e2040 !important; color: #5c9ee8 !important; }",
-    "  .itv-price { color: #4fc99e !important; }",
-    "  .itv-muted { color: #636366 !important; }",
+    ".itv-root {",
+    "  --color-background-primary: #1c1c1e;",
+    "  --color-background-secondary: #2c2c2e;",
+    "  --color-text-primary: #f2f2f7;",
+    "  --color-text-secondary: #aeaeb2;",
+    "  --color-text-tertiary: #636366;",
+    "  --color-border-secondary: rgba(255,255,255,0.2);",
+    "  --color-border-tertiary: rgba(255,255,255,0.08);",
     "}",
+    ".itv-root [data-slot=activity]  { background: #0d3028 !important; color: #4fc99e !important; }",
+    ".itv-root [data-slot=meal]      { background: #3a1a0e !important; color: #e8845a !important; }",
+    ".itv-root [data-slot=transport] { background: #2a2926 !important; color: #bbbab7 !important; }",
+    ".itv-root [data-slot=rest]      { background: #1e1b3a !important; color: #b3adee !important; }",
+    ".itv-root [data-slot=checkin]   { background: #0e2040 !important; color: #5c9ee8 !important; }",
+    ".itv-price { color: #4fc99e !important; }",
+    ".itv-muted { color: #636366 !important; }",
   ].join("\n");
   document.head.appendChild(style);
 }

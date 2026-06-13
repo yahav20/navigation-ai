@@ -179,6 +179,8 @@ def _build_ui_props(state: AgentState) -> dict:
         raw_slots = day_data.get("slots", [])
 
         # Enrich slots with lat/lng from the activities lookup
+        num_adults   = int(state.get("num_adults") or 1)
+        num_children = int(state.get("num_children") or 0)
         slots = []
         for s in raw_slots:
             slot = dict(s)
@@ -186,6 +188,9 @@ def _build_ui_props(state: AgentState) -> dict:
                 coords = _coord_idx.get(slot.get("name", ""))
                 if coords:
                     slot["lat"], slot["lng"] = coords
+            cost_pp = float(s.get("estimated_cost") or 0)
+            slot["cost_per_person"] = cost_pp
+            slot["group_cost"] = activity_group_price(cost_pp, num_adults, num_children)
             slots.append(slot)
 
         # Derive center from mapped slots (skip transport/rest which have no fixed location)
@@ -252,7 +257,7 @@ class ItineraryFormatterNode:
             content = self._prepend_over_budget_banner(state, content)
 
         # ── NEW: build the UI message for ItineraryViewer ─────────────────────
-        ai_message = AIMessage(content="content")
+        ai_message = AIMessage(content="")
         ui_props   = _build_ui_props(state)
         ui_message = {
             "type":     "ui",
