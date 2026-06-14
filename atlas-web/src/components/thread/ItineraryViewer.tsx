@@ -549,13 +549,12 @@ const S: Record<string, CSSProperties> = {
   },
 };
 
-// Inject styles once (spinner + dark mode)
-if (typeof document !== "undefined" && !document.getElementById("itinerary-styles")) {
-  const style = document.createElement("style");
-  style.id = "itinerary-styles";
-  style.textContent = [
+// Inject / update styles (spinner + theme-aware dark mode)
+if (typeof document !== "undefined") {
+  const STYLES = [
     "@keyframes spin { to { transform: rotate(360deg); } }",
-    ".itv-root {",
+    // Dark-mode variables — only when .dark ancestor is present (Tailwind class strategy)
+    ".dark .itv-root {",
     "  --color-background-primary: #1c1c1e;",
     "  --color-background-secondary: #2c2c2e;",
     "  --color-text-primary: #f2f2f7;",
@@ -564,13 +563,22 @@ if (typeof document !== "undefined" && !document.getElementById("itinerary-style
     "  --color-border-secondary: rgba(255,255,255,0.2);",
     "  --color-border-tertiary: rgba(255,255,255,0.08);",
     "}",
-    ".itv-root [data-slot=activity]  { background: #0d3028 !important; color: #4fc99e !important; }",
-    ".itv-root [data-slot=meal]      { background: #3a1a0e !important; color: #e8845a !important; }",
-    ".itv-root [data-slot=transport] { background: #2a2926 !important; color: #bbbab7 !important; }",
-    ".itv-root [data-slot=rest]      { background: #1e1b3a !important; color: #b3adee !important; }",
-    ".itv-root [data-slot=checkin]   { background: #0e2040 !important; color: #5c9ee8 !important; }",
-    ".itv-price { color: #4fc99e !important; }",
-    ".itv-muted { color: #636366 !important; }",
+    // Slot-type badge overrides — only in dark mode, scoped inside .itv-root
+    ".dark .itv-root [data-slot=activity]  { background: #0d3028 !important; color: #4fc99e !important; }",
+    ".dark .itv-root [data-slot=meal]      { background: #3a1a0e !important; color: #e8845a !important; }",
+    ".dark .itv-root [data-slot=transport] { background: #2a2926 !important; color: #bbbab7 !important; }",
+    ".dark .itv-root [data-slot=rest]      { background: #1e1b3a !important; color: #b3adee !important; }",
+    ".dark .itv-root [data-slot=checkin]   { background: #0e2040 !important; color: #5c9ee8 !important; }",
+    ".dark .itv-root .itv-price { color: #4fc99e !important; }",
+    ".dark .itv-root .itv-muted { color: #636366 !important; }",
   ].join("\n");
-  document.head.appendChild(style);
+  const existing = document.getElementById("itinerary-styles");
+  if (existing) {
+    existing.textContent = STYLES;
+  } else {
+    const style = document.createElement("style");
+    style.id = "itinerary-styles";
+    style.textContent = STYLES;
+    document.head.appendChild(style);
+  }
 }

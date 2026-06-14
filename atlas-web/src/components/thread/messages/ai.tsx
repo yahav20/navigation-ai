@@ -39,6 +39,7 @@ function resolveCustomComponents(
   allUi: ReturnType<typeof useStreamContext>["values"]["ui"],
   messageId: string | undefined,
   isLastAiMessage: boolean,
+  allowFallback: boolean,
 ) {
   const ui = allUi ?? [];
 
@@ -48,8 +49,11 @@ function resolveCustomComponents(
     : [];
   if (direct.length > 0) return direct;
 
-  // Fallback: only the LATEST ItineraryViewer, only on the last AI message
-  if (isLastAiMessage) {
+  // Fallback: only the LATEST ItineraryViewer, only on the last AI message.
+  // allowFallback is true when either the message has no text content (legacy
+  // empty-content path) OR the message is explicitly from the itinerary
+  // formatter (name="itinerary_formatter"). Advisor responses are excluded.
+  if (isLastAiMessage && allowFallback) {
     const latestItinerary = [...ui]
       .reverse()
       .find((item) => item.name === "ItineraryViewer");
@@ -72,12 +76,20 @@ function CustomComponent({
   const { values } = useStreamContext();
   const allUi = values.ui ?? [];
 
-  const lastAiMessageId = thread.messages
-    .filter((m) => m.type === "ai")
-    .at(-1)?.id;
-  const isLastAiMessage = message.id === lastAiMessageId;
+  const lastAiMessage = thread.messages.filter((m) => m.type === "ai").at(-1);
+  const isLastAiMessage = message.id === lastAiMessage?.id;
+  const lastAiMessageHasContent =
+    getContentString(lastAiMessage?.content ?? []).length > 0;
+  const lastAiMessageIsItinerary =
+    (lastAiMessage as any)?.name === "itinerary_formatter";
+  const allowFallback = !lastAiMessageHasContent || lastAiMessageIsItinerary;
 
-  const customComponents = resolveCustomComponents(allUi, message.id, isLastAiMessage);
+  const customComponents = resolveCustomComponents(
+    allUi,
+    message.id,
+    isLastAiMessage,
+    allowFallback,
+  );
 
   if (!customComponents.length) return null;
 
@@ -107,11 +119,23 @@ function useHasItineraryViewer(
   message: Message | undefined,
   isLastAiMessage: boolean,
 ): boolean {
-  const { values } = useStreamContext();
+  const { values, messages } = useStreamContext();
   const allUi = values.ui ?? [];
   if (!message) return false;
 
-  const components = resolveCustomComponents(allUi, message.id, isLastAiMessage);
+  const lastAiMessage = messages.filter((m) => m.type === "ai").at(-1);
+  const lastAiMessageHasContent =
+    getContentString(lastAiMessage?.content ?? []).length > 0;
+  const lastAiMessageIsItinerary =
+    (lastAiMessage as any)?.name === "itinerary_formatter";
+  const allowFallback = !lastAiMessageHasContent || lastAiMessageIsItinerary;
+
+  const components = resolveCustomComponents(
+    allUi,
+    message.id,
+    isLastAiMessage,
+    allowFallback,
+  );
   return components.some((c) => c.name === "ItineraryViewer");
 }
 
