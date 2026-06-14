@@ -257,7 +257,7 @@ class ItineraryFormatterNode:
             content = self._prepend_over_budget_banner(state, content)
 
         # ── NEW: build the UI message for ItineraryViewer ─────────────────────
-        ai_message = AIMessage(content="")
+        ai_message = AIMessage(content=content, name="itinerary_formatter")
         ui_props   = _build_ui_props(state)
         ui_message = {
             "type":     "ui",
