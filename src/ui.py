@@ -127,10 +127,30 @@ def _state_html(state: tuple[str, ...]) -> HTML:
     return HTML("".join(parts))
 
 
+_NETWORK_EXC_NAMES = frozenset({
+    "ConnectError", "ConnectionError", "ConnectTimeout", "ReadTimeout",
+    "TimeoutError", "HTTPStatusError", "RemoteDisconnected", "gaierror",
+    "SSLError", "ProxyError", "NetworkError",
+})
+
+
+def _is_network_error(err: Exception) -> bool:
+    return (
+        type(err).__name__ in _NETWORK_EXC_NAMES
+        or isinstance(err, (ConnectionError, TimeoutError, OSError))
+        or "api key" in str(err).lower()
+        or "authentication" in str(err).lower()
+    )
+
+
 def render_error(err: Exception) -> None:
+    if _is_network_error(err):
+        heading = "Connection failed. Check your internet connection and API key."
+    else:
+        heading = type(err).__name__
     console.print(Panel(
         Text.assemble(
-            ("Connection failed. Check your internet connection and API key.\n\n", "bold red"),
+            (heading + "\n\n", "bold red"),
             (str(err), "dim"),
         ),
         title="error",
