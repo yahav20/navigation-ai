@@ -7,6 +7,7 @@ import { BranchSwitcher, CommandBar } from "./shared";
 import { MarkdownText } from "../markdown-text";
 import { LoadExternalComponent } from "@langchain/langgraph-sdk/react-ui";
 import ItineraryViewer from "../ItineraryViewer";
+import TravelPlanViewer from "../TravelPlanViewer";
 import { cn } from "@/lib/utils";
 import { ToolCalls, ToolResult } from "./tool-calls";
 import { MessageContentComplex } from "@langchain/core/messages";
@@ -56,7 +57,7 @@ function resolveCustomComponents(
   if (isLastAiMessage && allowFallback) {
     const latestItinerary = [...ui]
       .reverse()
-      .find((item) => item.name === "ItineraryViewer");
+      .find((item) => item.name === "ItineraryViewer" || item.name === "TravelPlanViewer");
     return latestItinerary ? [latestItinerary] : [];
   }
 
@@ -101,7 +102,7 @@ function CustomComponent({
           stream={thread as unknown as ReturnType<typeof useStream>}
           message={customComponent}
           meta={{ ui: customComponent, artifact }}
-          components={{ ItineraryViewer }}
+          components={{ ItineraryViewer, TravelPlanViewer }}
         />
       ))}
     </Fragment>
@@ -136,7 +137,7 @@ function useHasItineraryViewer(
     isLastAiMessage,
     allowFallback,
   );
-  return components.some((c) => c.name === "ItineraryViewer");
+  return components.some((c) => c.name === "ItineraryViewer" || c.name === "TravelPlanViewer");
 }
 
 /** Reads the latest node activity from progress_log in stream values */
