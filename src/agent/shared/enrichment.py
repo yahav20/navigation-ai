@@ -207,7 +207,17 @@ def _build_missing_info_message(
     missing_keys: set[str],
     asked: set,
     extra: dict,
+    advisor_shown_cities: list[str] | None = None,
 ) -> dict:
+    user_content = f"Missing information: {', '.join(missing_labels)}. Please ask the user for it."
+    if "destination_city" in missing_keys and advisor_shown_cities:
+        cities_str = " or ".join(advisor_shown_cities)
+        user_content = (
+            f"Missing information: {', '.join(missing_labels)}. "
+            f"Previously presented city options: {cities_str}. "
+            "Ask the user to confirm which of these cities they had in mind "
+            "instead of asking generically where they want to go."
+        )
     msg = extraction_model.invoke([
         {
             "role": "system",
@@ -217,7 +227,7 @@ def _build_missing_info_message(
                 "Ask for the missing information in a warm, conversational way. Keep it to 1-2 sentences."
             ),
         },
-        {"role": "user", "content": f"Missing information: {', '.join(missing_labels)}. Please ask the user for it."},
+        {"role": "user", "content": user_content},
     ])
     return {
         **extra,
@@ -241,8 +251,12 @@ def _phase1_required_fields(
     extra = _classify_optional_fields(state, refusal, asked, missing_labels, missing_keys)
 
     if missing_labels:
+        advisor_shown_cities = state.get("advisor_shown_cities") or []
         return (
-            _build_missing_info_message(extraction_model, missing_labels, missing_keys, asked, extra),
+            _build_missing_info_message(
+                extraction_model, missing_labels, missing_keys, asked, extra,
+                advisor_shown_cities=advisor_shown_cities,
+            ),
             {},
         )
 
