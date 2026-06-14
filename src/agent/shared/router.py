@@ -33,15 +33,42 @@ class RouterNode:
         else:
             trip_status = "NO ACTIVE TRIP (Start from scratch)"
 
+        summary = state.get("summary", "")
+        advisor_shown_cities = state.get("advisor_shown_cities", [])
+
+        # Last AI message gives the router context for short replies ("Tel aviv",
+        # "yes", "5 days") that are answering an enrichment question.
+        last_ai_msg = next(
+            (m for m in reversed(messages[:-1]) if getattr(m, "type", "") == "ai"),
+            None,
+        )
+        agent_ctx = (
+            f'\nThe agent\'s last response was: "{last_ai_msg.content[:400]}"\n'
+            if last_ai_msg else ""
+        )
+
+        history_parts = []
+        if summary:
+            history_parts.append(f"CONVERSATION HISTORY (condensed):\n{summary}")
+        if advisor_shown_cities:
+            history_parts.append(f"CITIES PRESENTED TO USER SO FAR: {', '.join(advisor_shown_cities)}")
+        history_section = ("\n\n" + "\n\n".join(history_parts) + "\n") if history_parts else ""
+
         prompt = f"""
         Analyze the user's latest message and classify their core intent.
+        Use the conversation history (if present) to resolve references like
+        "let's go", "the first one", "that city", "sounds good" — these may
+        imply a destination or intent that is clear only from earlier turns.
+        If the user's message is a short answer to the agent's last question
+        (e.g. a city name, "yes", a number), classify it as the intent that
+        continues the active flow.
 
         Current System Context: {trip_status}
         - Origin: {state.get("current_city", "None")}
         - Destination: {state.get("destination_city", "None")}
         - Budget: {state.get("total_budget", "None")}
         - Days: {state.get("trip_days", "None")}
-
+        {agent_ctx}{history_section}
         INTENT DEFINITIONS & DIFFERENCES (when in doubt, use 'advisor'):
         1. 'advisor': The DEFAULT for all travel-related queries. Use for: destination ideas,
            comparing destinations, activities in a city, city overviews, budget exploration,
@@ -77,10 +104,12 @@ class RouterNode:
         # Exception: if we were in an advisor flow, keep it as advisor
         final_intent = classification.intent
 
-        # Guardrail 0: Preserve build_itinerary intent across enrichment turns.
-        if (state.get("intent") == "build_itinerary"
+        # Guardrail 0: Preserve active planning intents across enrichment turns so that
+        # short answers to enrichment questions ("Tel aviv", "yes", "5 days") are never
+        # misclassified as out_of_scope or a different intent mid-flow.
+        if (state.get("intent") in ("build_itinerary", "new_travel_plan")
                 and not state.get("enrichment_complete", False)):
-            final_intent = "build_itinerary"
+            final_intent = state.get("intent")
 
         # Guardrail 1: Both high-level planning and micro-planning require a destination.
         if final_intent in ["new_travel_plan", "build_itinerary"]:

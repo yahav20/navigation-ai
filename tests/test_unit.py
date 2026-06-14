@@ -2,10 +2,11 @@
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
-from agent.core.models import TravelMetadata
+from agent.core.models import IntentClassification, TravelMetadata
 from agent.itinerary.planner import _completed_step_types
 from agent.itinerary.schemas import ExecutionPlan, PlanStep
 from agent.shared.metadata import MetadataNode
+from agent.shared.router import RouterNode
 from security import validate_city, validate_input, validate_positive_number
 
 # ---------------------------------------------------------------------------
@@ -160,6 +161,125 @@ def test_metadata_trip_days_only_change_preserves_plan():
 
     assert updates["trip_days"] == 5
     assert _RESET_KEYS.isdisjoint(updates), f"trip_days change wiped plan: {updates}"
+
+
+# ---------------------------------------------------------------------------
+# RouterNode guardrail tests (no LLM call — stub returns fixed classification)
+# ---------------------------------------------------------------------------
+
+class _StubRouterClassifier:
+    """Stands in for the classification model: returns a fixed IntentClassification.
+
+    RouterNode wraps the model via silent(model.with_structured_output(...)), so
+    the stub must survive both .with_structured_output() and .with_config() chains.
+    """
+
+    def __init__(self, intent: str, has_explicit_destination: bool = True) -> None:
+        self._classification = IntentClassification(
+            intent=intent, has_explicit_destination=has_explicit_destination
+        )
+
+    def with_structured_output(self, _schema):
+        return self
+
+    def with_config(self, *_args, **_kwargs):
+        return self
+
+    def invoke(self, _prompt):
+        return self._classification
+
+
+def _router_state(**overrides) -> dict:
+    """Minimal AgentState for router tests."""
+    base = {
+        "messages": [HumanMessage(content="let's go")],
+        "current_city": None,
+        "destination_city": None,
+        "total_budget": None,
+        "trip_days": None,
+        "intent": "",
+        "summary": "",
+        "advisor_shown_cities": [],
+        "enrichment_complete": False,
+        "itinerary_plan": {},
+    }
+    base.update(overrides)
+    return base
+
+
+@pytest.mark.unit
+def test_router_update_travel_plan_downgrades_without_active_trip_even_with_summary():
+    """update_travel_plan on an empty trip must downgrade even when summary is set."""
+    node = RouterNode(_StubRouterClassifier("update_travel_plan"))
+    state = _router_state(
+        summary="User wants to go to Tokyo. Budget $2000. Prefers direct flights.",
+        advisor_shown_cities=["Tokyo", "Seoul"],
+    )
+    result = node(state)
+    assert result["intent"] in ("advisor", "new_travel_plan")
+
+
+@pytest.mark.unit
+def test_router_empty_summary_does_not_crash():
+    """Empty summary and empty advisor_shown_cities should not affect routing."""
+    node = RouterNode(_StubRouterClassifier("advisor"))
+    state = _router_state(summary="", advisor_shown_cities=[])
+    result = node(state)
+    assert result["intent"] == "advisor"
+
+
+@pytest.mark.unit
+def test_router_out_of_scope_not_overridden_by_shown_cities():
+    """out_of_scope must stay out_of_scope regardless of history context."""
+    node = RouterNode(_StubRouterClassifier("out_of_scope"))
+    state = _router_state(
+        summary="User discussed Paris and Rome.",
+        advisor_shown_cities=["Paris", "Rome"],
+    )
+    result = node(state)
+    assert result["intent"] == "out_of_scope"
+
+
+@pytest.mark.unit
+def test_router_update_itinerary_without_built_itinerary_escalates_to_build():
+    """update_itinerary with no itinerary in state must escalate to build_itinerary."""
+    node = RouterNode(_StubRouterClassifier("update_itinerary"))
+    state = _router_state(
+        destination_city="Paris",
+        current_city="Tel Aviv",
+        summary="User has an active trip to Paris with 3 days.",
+        itinerary_plan={},  # no step_results → not built
+    )
+    result = node(state)
+    assert result["intent"] == "build_itinerary"
+
+
+@pytest.mark.unit
+def test_router_new_travel_plan_preserved_across_enrichment_even_if_llm_wrong():
+    """When enrichment is in progress, Guardrail 0 must keep new_travel_plan even
+    if the LLM misclassifies a short enrichment reply (e.g. 'Tel aviv') as out_of_scope."""
+    node = RouterNode(_StubRouterClassifier("out_of_scope"))  # simulate LLM misclassification
+    state = _router_state(
+        intent="new_travel_plan",
+        enrichment_complete=False,
+        destination_city="Berlin",
+    )
+    result = node(state)
+    # out_of_scope must be overridden to new_travel_plan by Guardrail 0
+    assert result["intent"] == "new_travel_plan"
+
+
+@pytest.mark.unit
+def test_router_build_itinerary_preserved_across_enrichment_even_if_llm_wrong():
+    """Guardrail 0 must also preserve build_itinerary (existing behaviour unchanged)."""
+    node = RouterNode(_StubRouterClassifier("out_of_scope"))
+    state = _router_state(
+        intent="build_itinerary",
+        enrichment_complete=False,
+        destination_city="Rome",
+    )
+    result = node(state)
+    assert result["intent"] == "build_itinerary"
 
 
 # ---------------------------------------------------------------------------
