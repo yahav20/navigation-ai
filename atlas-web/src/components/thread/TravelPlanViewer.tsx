@@ -4,20 +4,15 @@
  * Generative-UI component rendered inside LoadExternalComponent.
  * Receives props from the backend via the "TravelPlanViewer" UI message.
  *
- * Sections:
- *   1. Hero       — destination, route, dates, budget, travelers
- *   2. Flights    — 3 option cards, cheapest highlighted as "Best Value"
- *   3. Hotels     — horizontal-scroll cards with visual stars
- *   4. Activities & Restaurants — two-column pill grid
- *   5. Insights   — best-time banner + seasonal weather chips
- *   6. CTA        — "Build my daily schedule" → submits to the stream
+ * Visual: Google Flights × Airbnb × Linear — premium, editorial, zero decorative emoji.
+ * Logic, interfaces, and submit call are unchanged from the previous version.
  */
 
-import { type FC, type CSSProperties } from "react";
+import { useState, type FC, type CSSProperties, type ReactNode } from "react";
 import { v4 as uuidv4 } from "uuid";
 import { useStreamContext } from "@/providers/Stream";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// ─── Types (unchanged) ────────────────────────────────────────────────────────
 
 interface FlightLeg {
   airline?: string;
@@ -71,7 +66,7 @@ interface TravelPlanViewerProps {
   best_time?: { months?: string[]; reason?: string };
 }
 
-// ─── Pure helpers ─────────────────────────────────────────────────────────────
+// ─── Pure helpers (unchanged) ─────────────────────────────────────────────────
 
 function fmtDuration(minutes: number | null | undefined): string {
   if (!minutes) return "";
@@ -102,17 +97,95 @@ function stopsLabel(stops: number | null | undefined): string {
   return stops === 1 ? "1 stop" : `${stops} stops`;
 }
 
-// ─── Stars ────────────────────────────────────────────────────────────────────
+// ─── SVG icons — stroke style, monochrome, no emoji ──────────────────────────
 
-const Stars: FC<{ count?: number | null }> = ({ count }) => {
+const IconPlane: FC = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M17.8 19.2 16 11l3.5-3.5C21 6 21 4 19 2c-2-2-4-2-5.5-.5L10 5 1.8 6.2l2.9 2.9
+             4-1.4 3.4 3.4-6.3 6.3 1.4 1.4 5-5 3.4 3.4-1.4 4 2.9 2.9z"/>
+  </svg>
+);
+
+const IconBed: FC = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M2 4v16"/><path d="M2 8h18a2 2 0 0 1 2 2v10"/>
+    <path d="M2 17h20"/><path d="M6 8v9"/>
+  </svg>
+);
+
+const IconMapPin: FC = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/>
+    <circle cx="12" cy="10" r="3"/>
+  </svg>
+);
+
+const IconUtensils: FC = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2"/>
+    <path d="M7 2v20"/>
+    <path d="M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3Zm0 0v7"/>
+  </svg>
+);
+
+const IconSun: FC = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="4"/>
+    <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41
+             M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>
+  </svg>
+);
+
+// ─── Square pixel stars (6×6 squares, filled vs unfilled) ────────────────────
+
+const SquareStars: FC<{ count?: number | null }> = ({ count }) => {
   if (!count) return null;
-  const n = Math.round(count);
+  const n = Math.min(5, Math.round(count));
   return (
-    <span style={{ color: "#f5a623", fontSize: 13, letterSpacing: 1 }}>
-      {"★".repeat(n)}{"☆".repeat(Math.max(0, 5 - n))}
-    </span>
+    <div style={{ display: "flex", gap: 3, alignItems: "center" }}>
+      {Array.from({ length: 5 }, (_, i) => (
+        <div key={i} style={{
+          width: 6, height: 6, borderRadius: 1,
+          background: i < n
+            ? "var(--tpv-blue, #103076)"
+            : "var(--color-border-secondary, #CBD5E1)",
+        }} />
+      ))}
+    </div>
   );
 };
+
+// ─── Rating dots ──────────────────────────────────────────────────────────────
+
+const RatingDots: FC<{ rating: number }> = ({ rating }) => {
+  const filled = Math.round(Math.min(5, rating));
+  return (
+    <div style={{ display: "flex", gap: 3, alignItems: "center" }}>
+      {Array.from({ length: 5 }, (_, i) => (
+        <div key={i} style={{
+          width: 5, height: 5, borderRadius: "50%",
+          background: i < filled
+            ? "var(--tpv-blue, #103076)"
+            : "var(--color-border-secondary, #CBD5E1)",
+        }} />
+      ))}
+    </div>
+  );
+};
+
+// ─── Section header ───────────────────────────────────────────────────────────
+
+const SectionHead: FC<{ icon: ReactNode; title: string }> = ({ icon, title }) => (
+  <div style={S.sectionHead}>
+    <span style={S.sectionIcon}>{icon}</span>
+    <span style={S.sectionTitle}>{title}</span>
+  </div>
+);
 
 // ─── 1. Hero ──────────────────────────────────────────────────────────────────
 
@@ -125,183 +198,230 @@ const Hero: FC<{
   travelers_label?: string;
   lowest_group_estimate?: number | null;
 }> = ({ destination, origin, trip_days, trip_start, total_budget,
-        travelers_label, lowest_group_estimate }) => (
-  <div className="tpv-hero" style={S.hero}>
-    <div style={S.heroOverlay} />
-    <div style={S.heroContent}>
-      {(origin || destination) && (
-        <div style={S.heroRoute}>
-          {origin && destination ? `${origin}  →  ${destination}` : (origin || destination)}
-        </div>
-      )}
-      <h1 style={S.heroTitle}>{destination || "Your Trip"}</h1>
-      <div style={S.heroBadges}>
-        {!!trip_days && (
-          <span style={S.badge}>✈  {trip_days} days</span>
-        )}
-        {trip_start && (
-          <span style={S.badge}>📅  {trip_start}</span>
-        )}
-        {total_budget != null && (
-          <span style={{ ...S.badge, ...S.badgeTeal }}>
-            💰  ${total_budget.toLocaleString()} budget
-          </span>
-        )}
-        {travelers_label && travelers_label !== "1 adult" && (
-          <span style={S.badge}>👥  {travelers_label}</span>
-        )}
-        {lowest_group_estimate != null &&
-          travelers_label && travelers_label !== "1 adult" && (
-          <span style={{ ...S.badge, ...S.badgeIndigo }}>
-            Est. ${lowest_group_estimate.toLocaleString()} group total
-          </span>
-        )}
-      </div>
-    </div>
-  </div>
-);
+        travelers_label, lowest_group_estimate }) => {
 
-// ─── 2. Flight option card ────────────────────────────────────────────────────
+  const subtitleParts: string[] = [];
+  if (origin && destination) subtitleParts.push(`${origin} → ${destination}`);
+  else if (origin || destination) subtitleParts.push(origin || destination);
+  if (trip_days) subtitleParts.push(`${trip_days} days`);
+  if (trip_start) subtitleParts.push(trip_start);
 
-const FlightLegBlock: FC<{ leg: FlightLeg; direction: "outbound" | "return" }> = ({
-  leg, direction,
-}) => {
-  if (!leg || !Object.keys(leg).length) return null;
-  const stops = leg.stops ?? null;
-  const isDirect = stops === 0;
+  const showGroup = lowest_group_estimate != null
+    && travelers_label && travelers_label !== "1 adult";
+
   return (
-    <div style={S.flightLegBlock}>
-      <div style={S.flightLegDir}>
-        {direction === "outbound" ? "🛫 Outbound" : "🛬 Return"}
-      </div>
-      {(leg.airline || leg.label) && (
-        <div style={S.flightLegAirline}>
-          {[leg.airline, leg.label].filter(Boolean).join(" · ")}
+    <div style={S.hero}>
+      {/* Thin blue accent line across the bottom edge */}
+      <div style={S.heroAccentLine} />
+      <div style={S.heroContent}>
+        {subtitleParts.length > 0 && (
+          <p style={S.heroSubtitle}>{subtitleParts.join(" · ")}</p>
+        )}
+        <h1 style={S.heroTitle}>{destination || "Your Trip"}</h1>
+        <div style={S.heroPills}>
+          {total_budget != null && (
+            <span style={S.heroPill}>Budget ${total_budget.toLocaleString()}</span>
+          )}
+          {showGroup && (
+            <span style={S.heroPill}>
+              Group ${lowest_group_estimate!.toLocaleString()} · {travelers_label}
+            </span>
+          )}
         </div>
-      )}
-      <div style={S.flightLegMeta}>
+      </div>
+      <div style={S.heroRule} />
+    </div>
+  );
+};
+
+// ─── 2. Flights — tab switcher ────────────────────────────────────────────────
+
+const FlightRow: FC<{ leg: FlightLeg; label: string }> = ({ leg, label }) => {
+  if (!leg || !Object.keys(leg).length) return null;
+  const stops     = leg.stops ?? null;
+  const isDirect  = stops === 0;
+  const isLayover = stops != null && stops > 0;
+
+  return (
+    <div style={S.flightRow}>
+      {/* Left: direction label, airline, depart time */}
+      <div style={S.flightRowLeft}>
+        <span style={S.flightRowDir}>{label}</span>
+        <div style={S.flightRowAirline}>
+          {leg.airline || "—"}
+          {leg.label && (
+            <span className="tpv-flight-num" style={S.flightNum}>{leg.label}</span>
+          )}
+        </div>
+        {leg.departure_time && (
+          <span style={S.flightDepart}>{fmtIso(leg.departure_time)}</span>
+        )}
+      </div>
+
+      {/* Centre: duration + stops */}
+      <div style={S.flightRowMeta}>
+        {!!leg.duration_minutes && (
+          <span style={S.metaDur}>{fmtDuration(leg.duration_minutes)}</span>
+        )}
         {stops != null && (
           <span
-            className={isDirect ? "tpv-stops-direct" : undefined}
-            style={{ ...S.stopsBadge, ...(isDirect ? S.stopsDirect : {}) }}
+            className={isDirect ? "tpv-stops-direct" : isLayover ? "tpv-stops-amber" : undefined}
+            style={{
+              ...S.stopsBadge,
+              ...(isDirect  ? S.stopsDirect : {}),
+              ...(isLayover ? S.stopsAmber  : {}),
+            }}
           >
             {stopsLabel(stops)}
           </span>
         )}
-        {!!leg.duration_minutes && (
-          <span style={S.metaChip}>{fmtDuration(leg.duration_minutes)}</span>
-        )}
       </div>
-      {leg.departure_time && (
-        <div style={S.flightDepart}>Departs {fmtIso(leg.departure_time)}</div>
-      )}
+
+      {/* Right: price */}
       {!!leg.price && (
-        <div style={S.flightLegPrice}>${leg.price.toLocaleString()}</div>
+        <div style={S.flightRowPrice}>${leg.price.toLocaleString()}</div>
       )}
     </div>
   );
 };
 
-const FlightCard: FC<{
-  pairing: FlightPairing;
-  index: number;
-  isCheapest: boolean;
-}> = ({ pairing, index, isCheapest }) => (
-  <div style={{ ...S.flightCard, ...(isCheapest ? S.flightCardBest : {}) }}>
-    <div style={S.flightCardTop}>
-      <span style={S.flightOptionNo}>Option {index + 1}</span>
-      {isCheapest && (
-        <span className="tpv-best-value" style={S.bestBadge}>Best Value</span>
-      )}
-    </div>
-    <div style={S.flightTotal}>${pairing.total_price.toLocaleString()}</div>
-    <div style={S.flightTotalSub}>total round-trip</div>
+const FlightsSection: FC<{ pairings: FlightPairing[]; cheapestIdx: number }> = ({
+  pairings, cheapestIdx,
+}) => {
+  const [tab, setTab] = useState(0);
+  const pairing = pairings[tab];
+  if (!pairing) return null;
 
-    <FlightLegBlock leg={pairing.outbound} direction="outbound" />
-    <div style={S.flightDivider} />
-    <FlightLegBlock leg={pairing.return_flight} direction="return" />
-  </div>
-);
+  return (
+    <div>
+      {/* Tab bar */}
+      <div style={S.tabBar}>
+        {pairings.map((_, i) => (
+          <button
+            key={i}
+            onClick={() => setTab(i)}
+            className={`tpv-tab${tab === i ? " tpv-tab-active" : ""}`}
+            style={{ ...S.tab, ...(tab === i ? S.tabActive : {}) }}
+          >
+            Option {i + 1}
+            {i === cheapestIdx && <span style={S.tabDot} />}
+          </button>
+        ))}
+      </div>
+
+      {/* Panel */}
+      <div style={S.flightPanel}>
+        <FlightRow leg={pairing.outbound}      label="Outbound" />
+        <div style={S.flightPanelDivider} />
+        <FlightRow leg={pairing.return_flight} label="Return" />
+        <div style={S.flightTotalRow}>
+          <span style={S.flightTotalLabel}>Round-trip total</span>
+          <span style={S.flightTotalPrice}>${pairing.total_price.toLocaleString()}</span>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 // ─── 3. Hotel card ────────────────────────────────────────────────────────────
 
-const HotelCard: FC<{ hotel: Hotel }> = ({ hotel }) => (
-  <div style={S.hotelCard}>
+const HotelCard: FC<{ hotel: Hotel; isCheapest: boolean }> = ({ hotel, isCheapest }) => (
+  <div style={{ ...S.hotelCard, ...(isCheapest ? S.hotelCardCheapest : {}) }}>
     <div style={S.hotelName}>{hotel.name}</div>
-    <Stars count={hotel.stars} />
-    <div style={S.hotelPrice}>
-      ${hotel.price_per_night.toLocaleString()}
+    <SquareStars count={hotel.stars} />
+    <div style={S.hotelPriceRow}>
+      <span style={S.hotelPrice}>${hotel.price_per_night.toLocaleString()}</span>
       <span style={S.hotelPriceUnit}>/night</span>
     </div>
     {hotel.description && (
-      <div style={S.pillDesc}>{hotel.description}</div>
+      <div style={S.hotelDesc}>{hotel.description}</div>
     )}
   </div>
 );
 
-// ─── 4. Activity / Restaurant pills ──────────────────────────────────────────
+// ─── 4a. Activity row ─────────────────────────────────────────────────────────
 
-const ActivityPill: FC<{ item: Activity }> = ({ item }) => (
-  <div style={S.pill}>
-    <div style={S.pillName}><span style={S.pillIcon}>🎯</span>{item.name}</div>
-    {item.description && <div style={S.pillDesc}>{item.description}</div>}
-  </div>
-);
-
-const RestaurantPill: FC<{ item: Restaurant }> = ({ item }) => (
-  <div style={S.pill}>
-    <div style={S.pillName}><span style={S.pillIcon}>🍽️</span>{item.name}</div>
-    <div style={S.pillMeta}>
-      {item.price_tier && <span style={S.pillTag}>{item.price_tier}</span>}
-      {item.rating != null && <span style={S.pillTag}>{item.rating}★</span>}
+const ActivityRow: FC<{ item: Activity; index: number }> = ({ item, index }) => (
+  <div style={S.activityRow}>
+    <span style={S.activityNum}>{index + 1}</span>
+    <div style={S.activityBody}>
+      <div style={S.activityName}>{item.name}</div>
+      {item.description && (
+        <div style={S.activityDesc}>{item.description}</div>
+      )}
     </div>
-    {item.description && <div style={S.pillDesc}>{item.description}</div>}
   </div>
 );
 
-// ─── 5. Destination Insights ─────────────────────────────────────────────────
+// ─── 4b. Restaurant card ──────────────────────────────────────────────────────
 
-const SEASON_ICONS: Record<string, string> = {
-  Spring: "🌸", Summer: "☀️", Autumn: "🍂", Winter: "❄️",
-};
+const RestaurantCard: FC<{ item: Restaurant }> = ({ item }) => (
+  <div style={S.restCard}>
+    <div style={S.restName}>{item.name}</div>
+    <div style={S.restMeta}>
+      {item.rating != null && (
+        <>
+          <span style={S.restRating}>{item.rating}</span>
+          <RatingDots rating={item.rating} />
+        </>
+      )}
+      {item.price_tier && (
+        <span className="tpv-price-tier" style={S.priceTier}>{item.price_tier}</span>
+      )}
+    </div>
+    {item.description && (
+      <div style={S.restDesc}>{item.description}</div>
+    )}
+  </div>
+);
+
+// ─── 5. Insights ─────────────────────────────────────────────────────────────
+
+const SEASONS = ["Spring", "Summer", "Autumn", "Winter"] as const;
 
 const InsightsSection: FC<{
   weather: Record<string, string>;
   best_time: { months?: string[]; reason?: string };
 }> = ({ weather, best_time }) => {
   const hasBestTime = !!(best_time?.months?.length || best_time?.reason);
-  const seasons = (["Spring", "Summer", "Autumn", "Winter"] as const)
-    .filter((s) => weather[s]);
+  const seasons     = SEASONS.filter((s) => weather[s]);
   if (!hasBestTime && !seasons.length) return null;
 
   return (
     <div style={S.insightsCard}>
-      <div style={S.sectionLabel}>🌤  Destination Insights</div>
+      <SectionHead icon={<IconSun />} title="Insights" />
 
       {hasBestTime && (
         <div style={S.bestTimeBanner}>
-          <div style={S.bestTimeTitle}>Best time to visit</div>
-          {best_time.months && best_time.months.length > 0 && (
-            <div style={S.bestTimeMonths}>
-              {best_time.months.map((m) => (
-                <span key={m} style={S.bestTimeChip}>{m}</span>
-              ))}
-            </div>
-          )}
-          {best_time.reason && (
-            <div style={S.bestTimeReason}>{best_time.reason}</div>
-          )}
+          <span style={S.bestTimeSpark}>✦</span>
+          <span style={S.bestTimeBody}>
+            <span style={S.bestTimeHead}>Best time: </span>
+            {best_time.months && best_time.months.length > 0 && (
+              <span style={S.bestTimeMonths}>{best_time.months.join(", ")}</span>
+            )}
+            {best_time.reason && (
+              <span style={S.bestTimeReason}> — {best_time.reason}</span>
+            )}
+          </span>
         </div>
       )}
 
       {seasons.length > 0 && (
         <div className="tpv-season-grid" style={S.seasonGrid}>
           {seasons.map((season) => (
-            <div key={season} style={S.seasonChip}>
-              <span style={S.seasonIcon}>{SEASON_ICONS[season]}</span>
-              <div>
-                <div style={S.seasonName}>{season}</div>
-                <div style={S.seasonVal}>{weather[season]}</div>
+            <div
+              key={season}
+              style={{
+                ...S.seasonCard,
+                ...(season === "Summer" ? S.seasonCardHighlight : {}),
+              }}
+            >
+              <div style={S.seasonName}>{season}</div>
+              <div style={{
+                ...S.seasonVal,
+                ...(season === "Summer" ? S.seasonValHighlight : {}),
+              }}>
+                {weather[season]}
               </div>
             </div>
           ))}
@@ -311,7 +431,7 @@ const InsightsSection: FC<{
   );
 };
 
-// ─── Main export ──────────────────────────────────────────────────────────────
+// ─── Main export — logic unchanged ───────────────────────────────────────────
 
 export default function TravelPlanViewer({
   destination = "",
@@ -355,6 +475,18 @@ export default function TravelPlanViewer({
       )
     : -1;
 
+  const cheapestHotelIdx = hotels.length > 0
+    ? hotels.reduce(
+        (minI, h, i, arr) => (h.price_per_night < arr[minI].price_per_night ? i : minI),
+        0,
+      )
+    : -1;
+
+  const budgetPct =
+    lowest_group_estimate != null && total_budget != null && total_budget > 0
+      ? Math.min(100, (lowest_group_estimate / total_budget) * 100)
+      : null;
+
   return (
     <div style={S.root} className="tpv-root">
 
@@ -371,28 +503,19 @@ export default function TravelPlanViewer({
 
       {/* ── 2. Flights ── */}
       {flight_pairings.length > 0 && (
-        <div style={S.section}>
-          <div style={S.sectionLabel}>✈  Flight Options</div>
-          <div className="tpv-flight-grid" style={S.flightGrid}>
-            {flight_pairings.map((p, i) => (
-              <FlightCard
-                key={i}
-                pairing={p}
-                index={i}
-                isCheapest={i === cheapestIdx}
-              />
-            ))}
-          </div>
+        <div style={S.sectionCard}>
+          <SectionHead icon={<IconPlane />} title="Flights" />
+          <FlightsSection pairings={flight_pairings} cheapestIdx={cheapestIdx} />
         </div>
       )}
 
       {/* ── 3. Hotels ── */}
       {hotels.length > 0 && (
         <div style={S.section}>
-          <div style={S.sectionLabel}>🏨  Hotels</div>
+          <SectionHead icon={<IconBed />} title="Hotels" />
           <div className="tpv-hotel-scroll" style={S.hotelScroll}>
             {hotels.map((h, i) => (
-              <HotelCard key={i} hotel={h} />
+              <HotelCard key={i} hotel={h} isCheapest={i === cheapestHotelIdx} />
             ))}
           </div>
         </div>
@@ -402,18 +525,22 @@ export default function TravelPlanViewer({
       {(activities.length > 0 || restaurants.length > 0) && (
         <div className="tpv-two-col" style={S.twoCol}>
           {activities.length > 0 && (
-            <div style={S.section}>
-              <div style={S.sectionLabel}>🎯  Activities</div>
-              <div style={S.pillList}>
-                {activities.map((a, i) => <ActivityPill key={i} item={a} />)}
+            <div style={S.sectionCard}>
+              <SectionHead icon={<IconMapPin />} title="Activities" />
+              <div style={S.activityList}>
+                {activities.map((a, i) => (
+                  <ActivityRow key={i} item={a} index={i} />
+                ))}
               </div>
             </div>
           )}
           {restaurants.length > 0 && (
-            <div style={S.section}>
-              <div style={S.sectionLabel}>🍽  Restaurants</div>
-              <div style={S.pillList}>
-                {restaurants.map((r, i) => <RestaurantPill key={i} item={r} />)}
+            <div style={S.sectionCard}>
+              <SectionHead icon={<IconUtensils />} title="Restaurants" />
+              <div style={S.restList}>
+                {restaurants.map((r, i) => (
+                  <RestaurantCard key={i} item={r} />
+                ))}
               </div>
             </div>
           )}
@@ -424,442 +551,587 @@ export default function TravelPlanViewer({
       <InsightsSection weather={weather} best_time={best_time} />
 
       {/* ── 6. CTA ── */}
-      <div style={S.ctaWrap}>
+      <div style={S.ctaSection}>
         <button className="tpv-cta" style={S.ctaBtn} onClick={handleSchedule}>
           Build my daily schedule →
         </button>
-        <div style={S.ctaHint}>
-          Starts the full day-by-day itinerary builder
-        </div>
+        {(total_budget != null || lowest_group_estimate != null) && (
+          <div style={S.ctaBudget}>
+            <div style={S.ctaBudgetText}>
+              {lowest_group_estimate != null && total_budget != null
+                ? `Estimated group cost: $${lowest_group_estimate.toLocaleString()} of $${total_budget.toLocaleString()} budget`
+                : total_budget != null
+                  ? `Budget: $${total_budget.toLocaleString()}`
+                  : `Estimated cost: $${lowest_group_estimate?.toLocaleString()}`}
+            </div>
+            {budgetPct !== null && (
+              <div style={S.progressTrack}>
+                <div style={{ ...S.progressFill, width: `${budgetPct}%` }} />
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
     </div>
   );
 }
 
-// ─── Inline style map ─────────────────────────────────────────────────────────
+// ─── Style map ────────────────────────────────────────────────────────────────
 
 const S: Record<string, CSSProperties> = {
   root: {
-    fontFamily: "var(--font-sans, system-ui, sans-serif)",
-    padding:    "0.75rem 0",
-    display:    "flex",
+    fontFamily:    "var(--font-sans, system-ui, -apple-system, sans-serif)",
+    padding:       "0.5rem 0 1rem",
+    display:       "flex",
     flexDirection: "column",
-    gap: 16,
+    gap:           12,
+    color:         "var(--color-text-primary, #0F172A)",
   },
 
-  // ── Hero ──
+  // ── Hero ──────────────────────────────────────────────────────────────────
   hero: {
-    borderRadius: 16,
+    borderRadius: 14,
     overflow:     "hidden",
     position:     "relative",
-    padding:      "2.5rem 2rem 2rem",
-    background:   "linear-gradient(135deg, #0a6e72 0%, #0f5e4a 40%, #2d2680 100%)",
-    backgroundSize: "200% 200%",
-    animation:    "tpv-shift 10s ease infinite",
+    background:   "linear-gradient(150deg, #0F172A 0%, #1E293B 55%, #0c1629 100%)",
+    padding:      "2.25rem 2rem 0",
   },
-  heroOverlay: {
-    position: "absolute",
-    inset:    0,
-    background: "rgba(0,0,0,0.22)",
+  heroAccentLine: {
+    position:   "absolute",
+    bottom:     0,
+    left:       "6%",
+    right:      "6%",
+    height:     1,
+    background: "linear-gradient(90deg, transparent, rgba(37,99,235,0.65), transparent)",
   },
   heroContent: {
     position: "relative",
     zIndex:   1,
   },
-  heroRoute: {
-    fontSize:   13,
-    color:      "rgba(255,255,255,0.72)",
-    fontWeight: 500,
-    letterSpacing: "0.04em",
-    marginBottom: 6,
+  heroSubtitle: {
+    margin:        0,
+    fontSize:      12,
+    fontWeight:    500,
+    color:         "rgba(255,255,255,0.45)",
+    letterSpacing: "0.03em",
+    marginBottom:  8,
   },
   heroTitle: {
-    fontSize:      38,
-    fontWeight:    900,
-    color:         "#ffffff",
     margin:        0,
-    letterSpacing: "-0.02em",
-    lineHeight:    1.1,
-    marginBottom:  18,
-    textTransform: "uppercase",
+    fontSize:      48,
+    fontWeight:    800,
+    color:         "#ffffff",
+    letterSpacing: "-0.03em",
+    lineHeight:    1.05,
+    marginBottom:  20,
+    overflowWrap:  "anywhere",
   },
-  heroBadges: {
-    display:   "flex",
-    flexWrap:  "wrap",
-    gap:       8,
+  heroPills: {
+    display:      "flex",
+    gap:          8,
+    flexWrap:     "wrap",
+    marginBottom: 24,
   },
-  badge: {
-    fontSize:   12,
-    fontWeight: 500,
-    padding:    "5px 12px",
-    borderRadius: 20,
-    background: "rgba(255,255,255,0.17)",
-    color:      "#ffffff",
-    border:     "1px solid rgba(255,255,255,0.28)",
-    backdropFilter: "blur(4px)",
+  heroPill: {
+    fontSize:       12,
+    fontWeight:     500,
+    color:          "rgba(255,255,255,0.82)",
+    background:     "rgba(255,255,255,0.1)",
+    border:         "1px solid rgba(255,255,255,0.18)",
+    borderRadius:   20,
+    padding:        "5px 13px",
+    backdropFilter: "blur(6px)",
+    letterSpacing:  "0.01em",
   },
-  badgeTeal: {
-    background: "rgba(29,158,117,0.5)",
-    border:     "1px solid rgba(29,158,117,0.65)",
-  },
-  badgeIndigo: {
-    background: "rgba(99,91,221,0.5)",
-    border:     "1px solid rgba(99,91,221,0.65)",
+  heroRule: {
+    height:     1,
+    background: "rgba(255,255,255,0.07)",
+    margin:     "0 -2rem",
+    position:   "relative",
+    zIndex:     1,
   },
 
-  // ── Generic section wrapper ──
+  // ── Generic containers ─────────────────────────────────────────────────────
   section: {
     display:       "flex",
     flexDirection: "column",
     gap:           10,
   },
-  sectionLabel: {
-    fontSize:      11,
-    fontWeight:    600,
-    color:         "var(--color-text-tertiary, #999)",
-    textTransform: "uppercase",
-    letterSpacing: "0.07em",
-  },
-
-  // ── Flights ──
-  flightGrid: {
-    display:             "grid",
-    gridTemplateColumns: "repeat(3, 1fr)",
-    gap:                 10,
-  },
-  flightCard: {
-    background:    "var(--color-background-primary, #fff)",
-    border:        "1px solid var(--color-border-tertiary, rgba(0,0,0,0.12))",
+  sectionCard: {
+    background:    "var(--color-background-primary, #ffffff)",
+    border:        "1px solid var(--color-border-tertiary, #E2E8F0)",
     borderRadius:  12,
-    padding:       "1rem",
+    padding:       "1.25rem",
     display:       "flex",
     flexDirection: "column",
-    gap:           6,
+    gap:           16,
   },
-  flightCardBest: {
-    border:     "1.5px solid #1D9E75",
-    boxShadow:  "0 0 0 3px rgba(29,158,117,0.1)",
+  sectionHead: {
+    display:    "flex",
+    alignItems: "center",
+    gap:        7,
+    color:      "var(--color-text-tertiary, #64748B)",
   },
-  flightCardTop: {
-    display:        "flex",
-    alignItems:     "center",
-    justifyContent: "space-between",
-    marginBottom:   2,
+  sectionIcon: {
+    display:    "flex",
+    alignItems: "center",
+    flexShrink: 0,
   },
-  flightOptionNo: {
+  sectionTitle: {
     fontSize:      11,
     fontWeight:    600,
-    color:         "var(--color-text-tertiary, #999)",
-    textTransform: "uppercase",
-    letterSpacing: "0.06em",
+    letterSpacing: "0.07em",
+    textTransform: "uppercase" as const,
   },
-  bestBadge: {
-    fontSize:      10,
-    fontWeight:    700,
-    color:         "#0F6E56",
-    background:    "#E1F5EE",
-    padding:       "2px 8px",
-    borderRadius:  10,
-    textTransform: "uppercase",
-    letterSpacing: "0.04em",
+
+  // ── Flights: tab bar ───────────────────────────────────────────────────────
+  tabBar: {
+    display:      "flex",
+    borderBottom: "1px solid var(--color-border-tertiary, #E2E8F0)",
+    marginBottom: 4,
   },
-  flightTotal: {
-    fontSize:   28,
-    fontWeight: 800,
-    color:      "var(--color-text-primary, #111)",
-    lineHeight: 1.1,
+  tab: {
+    position:   "relative",
+    padding:    "8px 16px",
+    fontSize:   13,
+    fontWeight: 500,
+    color:      "var(--color-text-secondary, #64748B)",
+    background: "none",
+    border:     "none",
+    cursor:     "pointer",
+    display:    "flex",
+    alignItems: "center",
+    gap:        6,
+    outline:    "none",
+    transition: "color 0.15s",
   },
-  flightTotalSub: {
-    fontSize:     11,
-    color:        "var(--color-text-tertiary, #aaa)",
-    marginBottom: 6,
+  tabActive: {
+    color:      "var(--tpv-blue, #103076)",
+    fontWeight: 600,
   },
-  flightLegBlock: {
+  tabDot: {
+    width:        5,
+    height:       5,
+    borderRadius: "50%",
+    background:   "var(--tpv-blue, #103076)",
+    flexShrink:   0,
+  },
+
+  // ── Flights: rows ──────────────────────────────────────────────────────────
+  flightPanel: {
+    display:       "flex",
+    flexDirection: "column",
+  },
+  flightRow: {
+    display:    "flex",
+    alignItems: "flex-start",
+    gap:        12,
+    padding:    "14px 0",
+  },
+  flightRowLeft: {
+    flex:          1,
     display:       "flex",
     flexDirection: "column",
     gap:           3,
+    minWidth:      0,
   },
-  flightLegDir: {
-    fontSize:   12,
-    fontWeight: 600,
-    color:      "var(--color-text-secondary, #666)",
+  flightRowDir: {
+    fontSize:      10,
+    fontWeight:    700,
+    color:         "var(--color-text-tertiary, #94A3B8)",
+    textTransform: "uppercase" as const,
+    letterSpacing: "0.08em",
   },
-  flightLegAirline: {
-    fontSize:   13,
-    fontWeight: 500,
-    color:      "var(--color-text-primary, #111)",
+  flightRowAirline: {
+    fontSize:    14,
+    fontWeight:  600,
+    color:       "var(--color-text-primary, #0F172A)",
+    display:     "flex",
+    alignItems:  "center",
+    gap:         7,
+    flexWrap:    "wrap" as any,
+    lineHeight:  1.3,
   },
-  flightLegMeta: {
-    display:    "flex",
-    gap:        5,
-    flexWrap:   "wrap",
-    alignItems: "center",
-  },
-  stopsBadge: {
-    fontSize:     11,
-    fontWeight:   500,
-    padding:      "2px 7px",
-    borderRadius: 4,
-    background:   "var(--color-background-secondary, #f0efec)",
-    color:        "var(--color-text-secondary, #666)",
-  },
-  stopsDirect: {
-    background: "#E1F5EE",
-    color:      "#0F6E56",
-  },
-  metaChip: {
-    fontSize: 11,
-    color:    "var(--color-text-secondary, #777)",
+  flightNum: {
+    fontSize:    11,
+    fontFamily:  "ui-monospace, 'SF Mono', Monaco, monospace",
+    color:       "var(--color-text-tertiary, #94A3B8)",
+    background:  "var(--color-background-secondary, #F1F5F9)",
+    padding:     "1px 6px",
+    borderRadius: 3,
+    fontWeight:  400,
+    letterSpacing: "0.04em",
   },
   flightDepart: {
     fontSize: 11,
-    color:    "var(--color-text-secondary, #888)",
+    color:    "var(--color-text-tertiary, #94A3B8)",
   },
-  flightLegPrice: {
-    fontSize:   13,
-    fontWeight: 600,
-    color:      "#1D9E75",
-    marginTop:  2,
+  flightRowMeta: {
+    display:    "flex",
+    alignItems: "center",
+    gap:        6,
+    flexShrink: 0,
   },
-  flightDivider: {
+  metaDur: {
+    fontSize:   12,
+    fontWeight: 500,
+    color:      "var(--color-text-secondary, #475569)",
+  },
+  stopsBadge: {
+    fontSize:     11,
+    fontWeight:   600,
+    padding:      "2px 8px",
+    borderRadius: 4,
+    background:   "var(--color-background-secondary, #F1F5F9)",
+    color:        "var(--color-text-secondary, #475569)",
+  },
+  stopsDirect: {
+    background: "#F0FDF4",
+    color:      "#16A34A",
+  },
+  stopsAmber: {
+    background: "#FFFBEB",
+    color:      "#D97706",
+  },
+  flightRowPrice: {
+    fontSize:           16,
+    fontWeight:         700,
+    color:              "var(--color-text-primary, #0F172A)",
+    fontVariantNumeric: "tabular-nums" as any,
+    flexShrink:         0,
+    minWidth:           52,
+    textAlign:          "right" as const,
+  },
+  flightPanelDivider: {
     height:     1,
-    background: "var(--color-border-tertiary, rgba(0,0,0,0.08))",
-    margin:     "4px 0",
+    background: "var(--color-border-tertiary, #F1F5F9)",
+  },
+  flightTotalRow: {
+    display:         "flex",
+    alignItems:      "center",
+    justifyContent:  "space-between",
+    paddingTop:      14,
+    marginTop:       6,
+    borderTop:       "1px solid var(--color-border-tertiary, #E2E8F0)",
+  },
+  flightTotalLabel: {
+    fontSize:   12,
+    fontWeight: 500,
+    color:      "var(--color-text-tertiary, #94A3B8)",
+  },
+  flightTotalPrice: {
+    fontSize:           22,
+    fontWeight:         800,
+    color:              "var(--tpv-blue, #103076)",
+    fontVariantNumeric: "tabular-nums" as any,
+    letterSpacing:      "-0.02em",
   },
 
-  // ── Hotels ──
+  // ── Hotels ─────────────────────────────────────────────────────────────────
   hotelScroll: {
-    display:       "flex",
-    gap:           12,
-    overflowX:     "auto",
-    paddingBottom: 6,
+    display:        "flex",
+    gap:            10,
+    overflowX:      "auto",
+    paddingBottom:  4,
     scrollbarWidth: "thin" as any,
   },
   hotelCard: {
-    flex:          "0 0 220px",
-    background:    "var(--color-background-primary, #fff)",
-    border:        "0.5px solid var(--color-border-tertiary, rgba(0,0,0,0.12))",
-    borderRadius:  12,
+    flex:          "0 0 215px",
+    background:    "var(--color-background-primary, #ffffff)",
+    border:        "1px solid var(--color-border-tertiary, #E2E8F0)",
+    borderRadius:  10,
     padding:       "1rem",
     display:       "flex",
     flexDirection: "column",
-    gap:           6,
+    gap:           7,
+  },
+  hotelCardCheapest: {
+    borderLeft: "3px solid var(--tpv-blue, #103076)",
   },
   hotelName: {
     fontSize:   14,
     fontWeight: 600,
-    color:      "var(--color-text-primary, #111)",
+    color:      "var(--color-text-primary, #0F172A)",
     lineHeight: 1.3,
   },
+  hotelPriceRow: {
+    display:    "flex",
+    alignItems: "baseline",
+    gap:        3,
+    marginTop:  2,
+  },
   hotelPrice: {
-    fontSize:   20,
-    fontWeight: 700,
-    color:      "#1D9E75",
-    marginTop:  4,
+    fontSize:           22,
+    fontWeight:         800,
+    color:              "var(--tpv-blue, #103076)",
+    letterSpacing:      "-0.02em",
+    fontVariantNumeric: "tabular-nums" as any,
   },
   hotelPriceUnit: {
+    fontSize: 12,
+    color:    "var(--color-text-tertiary, #94A3B8)",
+  },
+  hotelDesc: {
     fontSize:   12,
-    fontWeight: 400,
-    color:      "var(--color-text-tertiary, #aaa)",
-    marginLeft: 2,
+    color:      "var(--color-text-secondary, #64748B)",
+    lineHeight: 1.45,
   },
 
-  // ── Two-column grid (Activities + Restaurants) ──
+  // ── Activities + Restaurants side-by-side ──────────────────────────────────
   twoCol: {
     display:             "grid",
     gridTemplateColumns: "1fr 1fr",
-    gap:                 16,
+    gap:                 12,
   },
-  pillList: {
+  activityList: {
+    display:       "flex",
+    flexDirection: "column",
+  },
+  activityRow: {
+    display:       "flex",
+    gap:           12,
+    padding:       "10px 0",
+    borderBottom:  "1px solid var(--color-border-tertiary, #F1F5F9)",
+    alignItems:    "flex-start",
+  },
+  activityNum: {
+    fontSize:   12,
+    fontWeight: 700,
+    color:      "var(--tpv-blue, #103076)",
+    minWidth:   16,
+    paddingTop: 1,
+    flexShrink: 0,
+  },
+  activityBody: {
+    flex:     1,
+    minWidth: 0,
+  },
+  activityName: {
+    fontSize:   13,
+    fontWeight: 600,
+    color:      "var(--color-text-primary, #0F172A)",
+    lineHeight: 1.3,
+  },
+  activityDesc: {
+    fontSize:   12,
+    color:      "var(--color-text-secondary, #64748B)",
+    lineHeight: 1.4,
+    marginTop:  2,
+  },
+  restList: {
     display:       "flex",
     flexDirection: "column",
     gap:           8,
   },
-  pill: {
-    background:    "var(--color-background-secondary, #f5f5f3)",
-    borderRadius:  10,
+  restCard: {
+    background:    "var(--color-background-secondary, #F8FAFC)",
+    border:        "1px solid var(--color-border-tertiary, #E2E8F0)",
+    borderRadius:  8,
     padding:       "10px 12px",
     display:       "flex",
     flexDirection: "column",
-    gap:           4,
+    gap:           5,
   },
-  pillName: {
+  restName: {
     fontSize:   13,
     fontWeight: 600,
-    color:      "var(--color-text-primary, #111)",
+    color:      "var(--color-text-primary, #0F172A)",
+  },
+  restMeta: {
     display:    "flex",
     alignItems: "center",
+    gap:        7,
+    flexWrap:   "wrap" as any,
   },
-  pillIcon: {
-    marginRight: 6,
-    fontSize:    14,
-    flexShrink:  0,
+  restRating: {
+    fontSize:           13,
+    fontWeight:         700,
+    color:              "var(--tpv-blue, #103076)",
+    fontVariantNumeric: "tabular-nums" as any,
   },
-  pillMeta: {
-    display:  "flex",
-    gap:      5,
-    flexWrap: "wrap",
-  },
-  pillTag: {
-    fontSize:     11,
-    fontWeight:   500,
-    padding:      "1px 6px",
-    borderRadius: 4,
-    background:   "var(--color-background-primary, #fff)",
-    color:        "var(--color-text-secondary, #777)",
-    border:       "0.5px solid var(--color-border-tertiary, rgba(0,0,0,0.1))",
-  },
-  pillDesc: {
+  priceTier: {
     fontSize:   12,
-    color:      "var(--color-text-secondary, #777)",
+    fontWeight: 600,
+    color:      "var(--tpv-blue, #103076)",
+  },
+  restDesc: {
+    fontSize:   11,
+    color:      "var(--color-text-secondary, #64748B)",
     lineHeight: 1.4,
   },
 
-  // ── Insights ──
+  // ── Insights ───────────────────────────────────────────────────────────────
   insightsCard: {
-    background:    "var(--color-background-primary, #fff)",
-    border:        "0.5px solid var(--color-border-tertiary, rgba(0,0,0,0.12))",
+    background:    "var(--color-background-primary, #ffffff)",
+    border:        "1px solid var(--color-border-tertiary, #E2E8F0)",
     borderRadius:  12,
-    padding:       "1rem 1.25rem",
+    padding:       "1.25rem",
     display:       "flex",
     flexDirection: "column",
     gap:           14,
   },
   bestTimeBanner: {
-    background:    "linear-gradient(135deg, rgba(29,158,117,0.07) 0%, rgba(29,100,158,0.05) 100%)",
-    border:        "1px solid rgba(29,158,117,0.2)",
-    borderRadius:  10,
-    padding:       "12px 14px",
-    display:       "flex",
-    flexDirection: "column",
-    gap:           8,
+    display:      "flex",
+    alignItems:   "flex-start",
+    gap:          8,
+    background:   "var(--tpv-blue-bg, rgba(37,99,235,0.05))",
+    border:       "1px solid var(--tpv-blue-border, rgba(37,99,235,0.15))",
+    borderRadius: 8,
+    padding:      "10px 13px",
   },
-  bestTimeTitle: {
-    fontSize:      11,
-    fontWeight:    700,
-    color:         "#0F6E56",
-    textTransform: "uppercase",
-    letterSpacing: "0.06em",
+  bestTimeSpark: {
+    fontSize:   12,
+    color:      "var(--tpv-blue, #103076)",
+    flexShrink: 0,
+    marginTop:  2,
+    fontWeight: 700,
+  },
+  bestTimeBody: {
+    fontSize:   13,
+    lineHeight: 1.55,
+  },
+  bestTimeHead: {
+    fontWeight: 600,
+    color:      "var(--color-text-primary, #0F172A)",
   },
   bestTimeMonths: {
-    display:  "flex",
-    gap:      6,
-    flexWrap: "wrap",
-  },
-  bestTimeChip: {
-    fontSize:     12,
-    fontWeight:   600,
-    color:        "#0F6E56",
-    background:   "rgba(29,158,117,0.12)",
-    padding:      "3px 10px",
-    borderRadius: 12,
+    fontWeight: 600,
+    color:      "var(--tpv-blue, #1a45a3)",
   },
   bestTimeReason: {
-    fontSize:   13,
-    color:      "var(--color-text-secondary, #555)",
-    lineHeight: 1.4,
+    fontWeight: 400,
+    color:      "var(--color-text-secondary, #475569)",
   },
   seasonGrid: {
     display:             "grid",
     gridTemplateColumns: "repeat(4, 1fr)",
     gap:                 8,
   },
-  seasonChip: {
-    background:    "var(--color-background-secondary, #f5f5f3)",
-    borderRadius:  10,
+  seasonCard: {
+    background:    "var(--color-background-secondary, #F8FAFC)",
+    border:        "1px solid var(--color-border-tertiary, #E2E8F0)",
+    borderRadius:  8,
     padding:       "10px 12px",
     display:       "flex",
-    alignItems:    "flex-start",
-    gap:           8,
+    flexDirection: "column",
+    gap:           4,
   },
-  seasonIcon: {
-    fontSize:   18,
-    flexShrink: 0,
-    marginTop:  2,
+  seasonCardHighlight: {
+    background: "var(--tpv-blue-bg, rgba(37,99,235,0.06))",
+    border:     "1px solid var(--tpv-blue-border, rgba(37,99,235,0.2))",
   },
   seasonName: {
-    fontSize:      11,
+    fontSize:      10,
     fontWeight:    700,
-    color:         "var(--color-text-tertiary, #999)",
-    textTransform: "uppercase",
-    letterSpacing: "0.05em",
+    color:         "var(--color-text-tertiary, #94A3B8)",
+    textTransform: "uppercase" as const,
+    letterSpacing: "0.07em",
   },
   seasonVal: {
-    fontSize:   12,
-    color:      "var(--color-text-primary, #111)",
-    marginTop:  2,
+    fontSize:   13,
+    fontWeight: 500,
+    color:      "var(--color-text-primary, #0F172A)",
     lineHeight: 1.3,
   },
+  seasonValHighlight: {
+    color:      "var(--tpv-blue, #103076)",
+    fontWeight: 600,
+  },
 
-  // ── CTA ──
-  ctaWrap: {
+  // ── CTA ────────────────────────────────────────────────────────────────────
+  ctaSection: {
     display:       "flex",
     flexDirection: "column",
-    alignItems:    "center",
-    gap:           8,
+    gap:           10,
     paddingTop:    4,
   },
   ctaBtn: {
-    width:        "100%",
-    padding:      "14px 24px",
-    fontSize:     15,
-    fontWeight:   700,
-    color:        "#ffffff",
-    background:   "linear-gradient(135deg, #1D9E75 0%, #1a60a8 100%)",
-    border:       "none",
-    borderRadius: 12,
-    cursor:       "pointer",
-    letterSpacing: "0.01em",
-    transition:   "opacity 0.2s, transform 0.1s",
+    width:         "100%",
+    height:        48,
+    fontSize:      15,
+    fontWeight:    600,
+    color:         "#ffffff",
+    background:    "var(--tpv-blue, #103076)",
+    border:        "none",
+    borderRadius:  10,
+    cursor:        "pointer",
+    letterSpacing: "-0.01em",
+    transition:    "box-shadow 0.2s, transform 0.12s",
   },
-  ctaHint: {
-    fontSize:  11,
-    color:     "var(--color-text-tertiary, #aaa)",
+  ctaBudget: {
+    display:       "flex",
+    flexDirection: "column",
+    gap:           6,
+  },
+  ctaBudgetText: {
+    fontSize:  12,
+    color:     "var(--color-text-secondary, #64748B)",
     textAlign: "center" as const,
+  },
+  progressTrack: {
+    height:       4,
+    borderRadius: 2,
+    background:   "var(--color-border-tertiary, #E2E8F0)",
+    overflow:     "hidden",
+  },
+  progressFill: {
+    height:     "100%",
+    borderRadius: 2,
+    background:   "var(--tpv-blue, #103076)",
+    transition:   "width 0.5s ease",
   },
 };
 
-// ─── Injected styles (animation + dark mode + responsive) ────────────────────
+// ─── Injected CSS — dark mode, pseudo-elements, hover, responsive ─────────────
 
 if (typeof document !== "undefined") {
   const STYLES = [
-    // Hero gradient animation
-    "@keyframes tpv-shift {",
-    "  0%   { background-position: 0%   50%; }",
-    "  50%  { background-position: 100% 50%; }",
-    "  100% { background-position: 0%   50%; }",
+    // Tab active underline via ::after (can't do pseudo in inline styles)
+    ".tpv-tab { position: relative; }",
+    ".tpv-tab:hover { color: var(--color-text-primary, #0F172A); }",
+    ".tpv-tab-active::after {",
+    "  content: '';",
+    "  position: absolute;",
+    "  bottom: -1px; left: 0; right: 0;",
+    "  height: 2px;",
+    "  background: var(--tpv-blue, #103076);",
+    "  border-radius: 1px 1px 0 0;",
     "}",
 
-    // Dark-mode CSS variables (Tailwind .dark class strategy, same as ItineraryViewer)
+    // CTA hover glow
+    ".tpv-cta:hover  { box-shadow: 0 0 0 4px rgba(16,48,118,0.22); transform: translateY(-1px); }",
+    ".tpv-cta:active { box-shadow: none; transform: translateY(0); }",
+
+    // Dark mode CSS variable overrides (Tailwind .dark class — same as ItineraryViewer)
     ".dark .tpv-root {",
-    "  --color-background-primary:  #1c1c1e;",
-    "  --color-background-secondary: #2c2c2e;",
-    "  --color-text-primary:  #f2f2f7;",
-    "  --color-text-secondary: #aeaeb2;",
-    "  --color-text-tertiary:  #636366;",
-    "  --color-border-secondary: rgba(255,255,255,0.2);",
+    "  --tpv-blue:        #3B82F6;",
+    "  --tpv-blue-bg:     rgba(59,130,246,0.08);",
+    "  --tpv-blue-border: rgba(59,130,246,0.22);",
+    "  --color-background-primary:    #111827;",
+    "  --color-background-secondary:  #1F2937;",
+    "  --color-text-primary:    #F1F5F9;",
+    "  --color-text-secondary:  #94A3B8;",
+    "  --color-text-tertiary:   #4B5563;",
+    "  --color-border-secondary: rgba(255,255,255,0.14);",
     "  --color-border-tertiary:  rgba(255,255,255,0.08);",
     "}",
 
-    // Dark-mode badge overrides
-    ".dark .tpv-root .tpv-best-value   { background: #0d3028 !important; color: #4fc99e !important; }",
-    ".dark .tpv-root .tpv-stops-direct { background: #0d3028 !important; color: #4fc99e !important; }",
-    ".dark .tpv-root .tpv-cta          { opacity: 0.93; }",
+    // Dark: badge overrides
+    ".dark .tpv-root .tpv-stops-direct { background: rgba(22,163,74,0.15)  !important; color: #4ADE80 !important; }",
+    ".dark .tpv-root .tpv-stops-amber  { background: rgba(217,119,6,0.15)  !important; color: #FCD34D !important; }",
+    ".dark .tpv-root .tpv-flight-num   { background: rgba(255,255,255,0.07) !important; color: #4B5563 !important; }",
+    ".dark .tpv-root .tpv-price-tier   { color: #FCD34D !important; }",
+    ".dark .tpv-root .tpv-cta:hover    { box-shadow: 0 0 0 4px rgba(59,130,246,0.28); }",
 
     // Hotel scrollbar
-    ".tpv-hotel-scroll::-webkit-scrollbar              { height: 4px; }",
+    ".tpv-hotel-scroll::-webkit-scrollbar              { height: 3px; }",
     ".tpv-hotel-scroll::-webkit-scrollbar-track        { background: transparent; }",
-    ".tpv-hotel-scroll::-webkit-scrollbar-thumb        { background: rgba(0,0,0,0.18); border-radius: 2px; }",
-    ".dark .tpv-hotel-scroll::-webkit-scrollbar-thumb  { background: rgba(255,255,255,0.18); }",
+    ".tpv-hotel-scroll::-webkit-scrollbar-thumb        { background: rgba(0,0,0,0.14); border-radius: 2px; }",
+    ".dark .tpv-hotel-scroll::-webkit-scrollbar-thumb  { background: rgba(255,255,255,0.12); }",
 
-    // CTA hover feedback (can't do :hover in inline styles)
-    ".tpv-cta:hover  { opacity: 0.88; transform: translateY(-1px); }",
-    ".tpv-cta:active { opacity: 1;    transform: translateY(0); }",
-
-    // Mobile: stack grids vertically on narrow screens
+    // Responsive: stack columns on narrow screens
     "@media (max-width: 640px) {",
-    "  .tpv-flight-grid { grid-template-columns: 1fr !important; }",
     "  .tpv-two-col     { grid-template-columns: 1fr !important; }",
     "  .tpv-season-grid { grid-template-columns: repeat(2, 1fr) !important; }",
     "}",
@@ -870,7 +1142,7 @@ if (typeof document !== "undefined") {
     existing.textContent = STYLES;
   } else {
     const style = document.createElement("style");
-    style.id    = "travelplan-styles";
+    style.id          = "travelplan-styles";
     style.textContent = STYLES;
     document.head.appendChild(style);
   }
