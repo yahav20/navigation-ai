@@ -33,7 +33,7 @@ import math
 from typing import Optional
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from agent.core.llm import silent
 from agent.itinerary.schemas import DayUpdateInstruction, ExecutionPlan, PlanStep
