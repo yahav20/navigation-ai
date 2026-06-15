@@ -98,8 +98,11 @@ class _StubExtractor:
 
 
 def _state_with_plan(**overrides) -> dict:
-    """An AgentState that already holds a complete travel plan + a rendered plan
-    AI message in history (what extract_metadata re-reads)."""
+    """Build an AgentState with a complete travel plan already in place.
+
+    Also includes a rendered-plan AI message in history (what extract_metadata
+    re-reads).
+    """
     state = {
         "messages": [
             HumanMessage(content="build my daily schedule"),
