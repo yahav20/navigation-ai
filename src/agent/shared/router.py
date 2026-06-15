@@ -106,9 +106,12 @@ class RouterNode:
 
         # Guardrail 0: Preserve active planning intents across enrichment turns so that
         # short answers to enrichment questions ("Tel aviv", "yes", "5 days") are never
-        # misclassified as out_of_scope or a different intent mid-flow.
+        # misclassified mid-flow. An explicit advisory question is allowed to interrupt
+        # enrichment, otherwise questions such as "when should I go?" get trapped in the
+        # missing-information loop.
         if (state.get("intent") in ("build_itinerary", "new_travel_plan")
-                and not state.get("enrichment_complete", False)):
+                and not state.get("enrichment_complete", False)
+                and final_intent != "advisor"):
             final_intent = state.get("intent")
 
         # Guardrail 1: Both high-level planning and micro-planning require a destination.

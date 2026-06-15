@@ -445,6 +445,31 @@ def test_router_multiturn_enrichment_short_answer_stays_new_travel_plan():
 
 
 @pytest.mark.unit
+def test_router_multiturn_advisor_question_interrupts_incomplete_enrichment():
+    """A travel-advice question must not be forced back into the intake loop."""
+    node = RouterNode(_StubRouterClassifier("advisor", has_explicit_destination=False))
+    state = _router_state(
+        messages=[
+            HumanMessage(content="I want to travel from Israel to Japan"),
+            AIMessage(content=(
+                "What is your budget, trip length, preferred month, and number "
+                "of adults and children?"
+            )),
+            HumanMessage(content="when should I go?"),
+        ],
+        current_city="Israel",
+        destination_city="Japan",
+        intent="new_travel_plan",
+        enrichment_complete=False,
+        enrichment_asked_fields=[
+            "total_budget", "trip_days", "trip_start", "num_adults",
+        ],
+    )
+    result = node(state)
+    assert result["intent"] == "advisor"
+
+
+@pytest.mark.unit
 def test_router_multiturn_update_itinerary_with_built_itinerary_stays():
     """Multi-turn: update_itinerary on a built itinerary must pass through unchanged."""
     node = RouterNode(_StubRouterClassifier("update_itinerary"))
