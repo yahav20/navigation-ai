@@ -43,24 +43,26 @@ def test_plan_step_rejects_invalid_type():
 
 @pytest.mark.unit
 def test_completed_step_types_skips_failed_steps():
+    # Keys use real itinerary step types (see planner.VALID_STEP_TYPES) with the
+    # numeric suffix the planner appends per step.
     step_results = {
-        "fetch_flights_1": {"status": "failed", "error": "No flights found"},
-        "fetch_hotels_1": {"status": "success", "data": {"hotels": []}},
+        "fetch_activities_1": {"status": "failed", "error": "No activities found"},
+        "fetch_weather_1": {"status": "success", "data": {"forecast": []}},
     }
     completed = _completed_step_types(step_results)
-    assert "fetch_flights" not in completed
-    assert "fetch_hotels" in completed
+    assert "fetch_activities" not in completed
+    assert "fetch_weather" in completed
 
 
 @pytest.mark.unit
 def test_completed_step_types_all_success():
     step_results = {
-        "fetch_flights_1": {"status": "success", "data": {}},
-        "fetch_return_flights_1": {"status": "success", "data": {}},
+        "fetch_activities_1": {"status": "success", "data": {}},
+        "build_day_schedule_1": {"status": "success", "data": {}},
     }
     completed = _completed_step_types(step_results)
-    assert "fetch_flights" in completed
-    assert "fetch_return_flights" in completed
+    assert "fetch_activities" in completed
+    assert "build_day_schedule" in completed
 
 
 # ---------------------------------------------------------------------------
@@ -150,16 +152,48 @@ def test_metadata_new_plan_still_invalidates_on_destination_change():
 
 
 @pytest.mark.unit
-def test_metadata_trip_days_only_change_preserves_plan():
+@pytest.mark.parametrize("intent", ["new_travel_plan", "build_itinerary"])
+def test_metadata_trip_days_only_change_preserves_plan(intent):
     # A trip_days-only change keeps the same route/hotel — must NOT invalidate,
     # matching AdjustmentsNode. True regardless of intent.
     node = MetadataNode(_StubExtractor(TravelMetadata(trip_days=5)))
-    state = _state_with_plan(intent="new_travel_plan")
+    state = _state_with_plan(intent=intent)
 
     updates = node(state)
 
     assert updates["trip_days"] == 5
     assert _RESET_KEYS.isdisjoint(updates), f"trip_days change wiped plan: {updates}"
+
+
+@pytest.mark.unit
+def test_metadata_month_refinement_does_not_reschedule():
+    # _same_month_refinement guard: state holds a month-level start ("2026-06")
+    # and the extractor re-reads a concrete date in the SAME month ("2026-06-14")
+    # from the rendered plan. This is a precision refinement, not a reschedule —
+    # trip_start must be left untouched and flights/hotels must survive, even on
+    # a new_travel_plan turn (where suppress_invalidation is off).
+    node = MetadataNode(_StubExtractor(TravelMetadata(trip_start="2026-06-14")))
+    state = _state_with_plan(intent="new_travel_plan", trip_start="2026-06")
+
+    updates = node(state)
+
+    assert "trip_start" not in updates, f"month refinement rescheduled trip: {updates}"
+    assert _RESET_KEYS.isdisjoint(updates), f"month refinement wiped plan: {updates}"
+
+
+@pytest.mark.unit
+def test_metadata_cross_month_change_still_invalidates():
+    # Counterpart to the refinement guard: a genuine reschedule into a different
+    # month ("2026-06" -> "2026-08-03") is NOT a refinement, so on a
+    # new_travel_plan turn it must update trip_start and invalidate the plan.
+    node = MetadataNode(_StubExtractor(TravelMetadata(trip_start="2026-08-03")))
+    state = _state_with_plan(intent="new_travel_plan", trip_start="2026-06")
+
+    updates = node(state)
+
+    assert updates["trip_start"] == "2026-08-03"
+    assert updates["flight_options"] == []
+    assert updates["has_flights"] is False
 
 
 # ---------------------------------------------------------------------------
@@ -186,6 +220,20 @@ def test_security_passes_normal_query():
 
 
 @pytest.mark.unit
+@pytest.mark.xfail(
+    reason="BUG_REPORT backend #16: validate_input rejects all non-ASCII, "
+    "blocking legitimate accented place names / currency symbols.",
+    strict=True,
+)
+def test_security_passes_non_ascii_query():
+    # Desired behavior: a legitimate query with accented characters should pass.
+    # Currently validate_input enforces ASCII-only and raises — xfail until #16
+    # is fixed (flip to a normal assertion then).
+    result = validate_input("Plan a trip to São Paulo")
+    assert result == "Plan a trip to São Paulo"
+
+
+@pytest.mark.unit
 def test_validate_city_accepts_valid_names():
     assert validate_city("Paris") == "Paris"
     assert validate_city("Tel Aviv") == "Tel Aviv"
@@ -203,6 +251,12 @@ def test_validate_city_rejects_invalid_names():
 @pytest.mark.unit
 def test_validate_positive_number_accepts_positive():
     assert validate_positive_number(1500.0) == 1500.0
+
+
+@pytest.mark.unit
+def test_validate_positive_number_accepts_zero():
+    # Boundary: validate_positive_number rejects only value < 0, so zero is a
+    # valid input (non-negative semantics) and is coerced to float.
     assert validate_positive_number(0) == 0.0
 
 
