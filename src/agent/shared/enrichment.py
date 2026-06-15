@@ -57,8 +57,8 @@ DEFAULT_TRIP_DAYS = 3
 
 
 def _default_trip_start() -> str:
-    """Fall back to next month (YYYY-MM) if the user skips picking a date."""
-    return (date.today() + timedelta(days=30)).strftime("%Y-%m")
+    """Fall back to roughly one month from today (YYYY-MM-DD) if the user skips picking a date."""
+    return (date.today() + timedelta(days=30)).strftime("%Y-%m-%d")
 
 
 def _count_travel_options(origin: str, destination: str) -> tuple[list, list]:
@@ -149,29 +149,36 @@ def _classify_optional_fields(
 ) -> dict:
     extra: dict = {}
 
+    budget_is_resolved = False
     if not state.get("total_budget") and not state.get("budget_optional"):
         if refusal and refusal.refusing_budget:
             extra["budget_optional"] = True
+            budget_is_resolved = True
         else:
             missing_labels.append("travel budget")
             missing_keys.add("total_budget")
+    else:
+        budget_is_resolved = True
 
+    # Optional fields are only silently defaulted once budget is resolved. Until
+    # then they stay in missing_labels so the user is asked alongside budget —
+    # preventing silent defaults before the user has seen a dedicated question.
     if not state.get("trip_days"):
-        if "trip_days" in asked:
+        if "trip_days" in asked and budget_is_resolved:
             extra["trip_days"] = DEFAULT_TRIP_DAYS
         else:
             missing_labels.append("number of days for the trip")
             missing_keys.add("trip_days")
 
     if not state.get("trip_start"):
-        if "trip_start" in asked:
+        if "trip_start" in asked and budget_is_resolved:
             extra["trip_start"] = _default_trip_start()
         else:
             missing_labels.append("approximate trip start (a month is fine, e.g. 'June')")
             missing_keys.add("trip_start")
 
     if state.get("num_adults") is None:
-        if "num_adults" in asked:
+        if "num_adults" in asked and budget_is_resolved:
             extra["num_adults"] = 1
             extra.setdefault("num_children", 0)
         else:
@@ -207,7 +214,17 @@ def _build_missing_info_message(
     missing_keys: set[str],
     asked: set,
     extra: dict,
+    advisor_shown_cities: list[str] | None = None,
 ) -> dict:
+    user_content = f"Missing information: {', '.join(missing_labels)}. Please ask the user for it."
+    if "destination_city" in missing_keys and advisor_shown_cities:
+        cities_str = " or ".join(advisor_shown_cities)
+        user_content = (
+            f"Missing information: {', '.join(missing_labels)}. "
+            f"Previously presented city options: {cities_str}. "
+            "Ask the user to confirm which of these cities they had in mind "
+            "instead of asking generically where they want to go."
+        )
     msg = extraction_model.invoke([
         {
             "role": "system",
@@ -217,7 +234,7 @@ def _build_missing_info_message(
                 "Ask for the missing information in a warm, conversational way. Keep it to 1-2 sentences."
             ),
         },
-        {"role": "user", "content": f"Missing information: {', '.join(missing_labels)}. Please ask the user for it."},
+        {"role": "user", "content": user_content},
     ])
     return {
         **extra,
@@ -241,8 +258,12 @@ def _phase1_required_fields(
     extra = _classify_optional_fields(state, refusal, asked, missing_labels, missing_keys)
 
     if missing_labels:
+        advisor_shown_cities = state.get("advisor_shown_cities") or []
         return (
-            _build_missing_info_message(extraction_model, missing_labels, missing_keys, asked, extra),
+            _build_missing_info_message(
+                extraction_model, missing_labels, missing_keys, asked, extra,
+                advisor_shown_cities=advisor_shown_cities,
+            ),
             {},
         )
 

@@ -73,8 +73,11 @@ class MetadataNode:
                 {existing_summary or "No previous context."}
 
                 Use this memory to resolve references like "there", "that city", "the same place",
-                or "the first one" — e.g. if memory says the agent recommended Berlin and the user
-                says "let's go there", extract destination_city as "Berlin".
+                or "the first one" — BUT ONLY when the memory points to a SINGLE unambiguous
+                destination. If the memory mentions MULTIPLE possible destinations (e.g. the agent
+                recommended Berlin and London as options) and the user's message uses a vague
+                reference without naming a specific city, return null for destination_city so
+                the system can ask the user to clarify which one they meant.
 
                 IMPORTANT — trip_days resolution:
                 The current trip duration in state is: {current_trip_days} days.

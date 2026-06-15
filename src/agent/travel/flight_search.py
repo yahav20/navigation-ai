@@ -26,7 +26,12 @@ def _return_date(trip_start: str, trip_days: int) -> str:
     try:
         start = datetime.strptime(trip_start, "%Y-%m-%d").date()
     except ValueError:
-        return trip_start  # month-wide
+        try:
+            # "YYYY-MM" month-only format — treat the 1st as the base date
+            start = datetime.strptime(trip_start + "-01", "%Y-%m-%d").date()
+            return (start + timedelta(days=max(trip_days, 1))).strftime("%Y-%m-%d")
+        except ValueError:
+            return trip_start  # unrecognised format — pass through unchanged
     return (start + timedelta(days=max(trip_days, 1))).strftime("%Y-%m-%d")
 
 

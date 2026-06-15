@@ -2,10 +2,11 @@
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
-from agent.core.models import TravelMetadata
+from agent.core.models import IntentClassification, TravelMetadata
 from agent.itinerary.planner import _completed_step_types
 from agent.itinerary.schemas import ExecutionPlan, PlanStep
 from agent.shared.metadata import MetadataNode
+from agent.shared.router import RouterNode
 from security import validate_city, validate_input, validate_positive_number
 
 # ---------------------------------------------------------------------------
@@ -197,6 +198,297 @@ def test_metadata_cross_month_change_still_invalidates():
     assert updates["trip_start"] == "2026-08-03"
     assert updates["flight_options"] == []
     assert updates["has_flights"] is False
+
+
+# ---------------------------------------------------------------------------
+# RouterNode guardrail tests (no LLM call — stub returns fixed classification)
+# ---------------------------------------------------------------------------
+
+class _StubRouterClassifier:
+    """Stands in for the classification model: returns a fixed IntentClassification.
+
+    RouterNode wraps the model via silent(model.with_structured_output(...)), so
+    the stub must survive both .with_structured_output() and .with_config() chains.
+    """
+
+    def __init__(self, intent: str, has_explicit_destination: bool = True) -> None:
+        self._classification = IntentClassification(
+            intent=intent, has_explicit_destination=has_explicit_destination
+        )
+
+    def with_structured_output(self, _schema):
+        return self
+
+    def with_config(self, *_args, **_kwargs):
+        return self
+
+    def invoke(self, _prompt):
+        return self._classification
+
+
+def _router_state(**overrides) -> dict:
+    """Minimal AgentState for router tests."""
+    base = {
+        "messages": [HumanMessage(content="let's go")],
+        "current_city": None,
+        "destination_city": None,
+        "total_budget": None,
+        "trip_days": None,
+        "intent": "",
+        "summary": "",
+        "advisor_shown_cities": [],
+        "enrichment_complete": False,
+        "itinerary_plan": {},
+    }
+    base.update(overrides)
+    return base
+
+
+@pytest.mark.unit
+def test_router_update_travel_plan_downgrades_without_active_trip_even_with_summary():
+    """update_travel_plan on an empty trip must downgrade even when summary is set."""
+    node = RouterNode(_StubRouterClassifier("update_travel_plan"))
+    state = _router_state(
+        summary="User wants to go to Tokyo. Budget $2000. Prefers direct flights.",
+        advisor_shown_cities=["Tokyo", "Seoul"],
+    )
+    result = node(state)
+    assert result["intent"] in ("advisor", "new_travel_plan")
+
+
+@pytest.mark.unit
+def test_router_empty_summary_does_not_crash():
+    """Empty summary and empty advisor_shown_cities should not affect routing."""
+    node = RouterNode(_StubRouterClassifier("advisor"))
+    state = _router_state(summary="", advisor_shown_cities=[])
+    result = node(state)
+    assert result["intent"] == "advisor"
+
+
+@pytest.mark.unit
+def test_router_out_of_scope_not_overridden_by_shown_cities():
+    """out_of_scope must stay out_of_scope regardless of history context."""
+    node = RouterNode(_StubRouterClassifier("out_of_scope"))
+    state = _router_state(
+        summary="User discussed Paris and Rome.",
+        advisor_shown_cities=["Paris", "Rome"],
+    )
+    result = node(state)
+    assert result["intent"] == "out_of_scope"
+
+
+@pytest.mark.unit
+def test_router_update_itinerary_without_built_itinerary_escalates_to_build():
+    """update_itinerary with no itinerary in state must escalate to build_itinerary."""
+    node = RouterNode(_StubRouterClassifier("update_itinerary"))
+    state = _router_state(
+        destination_city="Paris",
+        current_city="Tel Aviv",
+        summary="User has an active trip to Paris with 3 days.",
+        itinerary_plan={},  # no step_results → not built
+    )
+    result = node(state)
+    assert result["intent"] == "build_itinerary"
+
+
+@pytest.mark.unit
+def test_router_new_travel_plan_preserved_across_enrichment_even_if_llm_wrong():
+    """When enrichment is in progress, Guardrail 0 must keep new_travel_plan even
+    if the LLM misclassifies a short enrichment reply (e.g. 'Tel aviv') as out_of_scope."""
+    node = RouterNode(_StubRouterClassifier("out_of_scope"))  # simulate LLM misclassification
+    state = _router_state(
+        intent="new_travel_plan",
+        enrichment_complete=False,
+        destination_city="Berlin",
+    )
+    result = node(state)
+    # out_of_scope must be overridden to new_travel_plan by Guardrail 0
+    assert result["intent"] == "new_travel_plan"
+
+
+@pytest.mark.unit
+def test_router_build_itinerary_preserved_across_enrichment_even_if_llm_wrong():
+    """Guardrail 0 must also preserve build_itinerary (existing behaviour unchanged)."""
+    node = RouterNode(_StubRouterClassifier("out_of_scope"))
+    state = _router_state(
+        intent="build_itinerary",
+        enrichment_complete=False,
+        destination_city="Rome",
+    )
+    result = node(state)
+    assert result["intent"] == "build_itinerary"
+
+
+# ---------------------------------------------------------------------------
+# Additional RouterNode guardrail tests — Guardrails 1, 2, 4, 4b, 4c, 6
+# ---------------------------------------------------------------------------
+
+@pytest.mark.unit
+def test_router_guardrail1_new_travel_plan_no_destination_downgrades_to_advisor():
+    """Guardrail 1: new_travel_plan with no explicit destination and none in state must downgrade to advisor."""
+    node = RouterNode(_StubRouterClassifier("new_travel_plan", has_explicit_destination=False))
+    state = _router_state(
+        messages=[HumanMessage(content="I want to plan a trip")],
+        destination_city=None,
+    )
+    result = node(state)
+    assert result["intent"] == "advisor"
+
+
+@pytest.mark.unit
+def test_router_guardrail2_update_without_active_trip_and_no_advisor_converts_to_new_plan():
+    """Guardrail 2: update_travel_plan with no active trip and non-advisor prior intent must become new_travel_plan."""
+    node = RouterNode(_StubRouterClassifier("update_travel_plan"))
+    state = _router_state(
+        messages=[HumanMessage(content="change my budget to $1500")],
+        destination_city=None,
+        current_city=None,
+        intent="",
+    )
+    result = node(state)
+    assert result["intent"] == "new_travel_plan"
+
+
+@pytest.mark.unit
+def test_router_guardrail4_itinerary_keyword_escalates_update_to_build():
+    """Guardrail 4: 'itinerary' in message must escalate update_travel_plan → build_itinerary.
+    NOTE: Currently FAILS — trigger word has a leading double-space typo ('  itinerary')."""
+    node = RouterNode(_StubRouterClassifier("update_travel_plan"))
+    state = _router_state(
+        messages=[HumanMessage(content="build an itinerary for Rome")],
+        destination_city="Rome",
+        current_city="Tel Aviv",
+    )
+    result = node(state)
+    assert result["intent"] == "build_itinerary"
+
+
+@pytest.mark.unit
+def test_router_guardrail4_plan_word_alone_must_not_escalate_update():
+    """Guardrail 4: 'change my plan to 5 days' must stay update_travel_plan, not escalate to build_itinerary.
+    NOTE: Currently FAILS — 'plan' is in the trigger list and is too broad a match."""
+    node = RouterNode(_StubRouterClassifier("update_travel_plan"))
+    state = _router_state(
+        messages=[HumanMessage(content="change my plan to 5 days")],
+        destination_city="Rome",
+        current_city="Tel Aviv",
+    )
+    result = node(state)
+    assert result["intent"] == "update_travel_plan"
+
+
+@pytest.mark.unit
+def test_router_guardrail4b_add_a_day_redirects_update_itinerary_to_update_travel_plan():
+    """Guardrail 4b: 'add a day' classified as update_itinerary must redirect to update_travel_plan."""
+    node = RouterNode(_StubRouterClassifier("update_itinerary"))
+    state = _router_state(
+        messages=[HumanMessage(content="add a day to my trip")],
+        destination_city="Paris",
+        current_city="Tel Aviv",
+        itinerary_plan={"step_results": {"build_day_schedule_1": {"status": "success"}}},
+    )
+    result = node(state)
+    assert result["intent"] == "update_travel_plan"
+
+
+@pytest.mark.unit
+def test_router_guardrail4c_hotel_star_preference_on_active_trip_redirects_to_update_travel_plan():
+    """Guardrail 4c: hotel star preference on active trip must redirect advisor → update_travel_plan."""
+    node = RouterNode(_StubRouterClassifier("advisor"))
+    state = _router_state(
+        messages=[HumanMessage(content="I want a 5-star hotel instead")],
+        destination_city="Paris",
+        current_city="Tel Aviv",
+    )
+    result = node(state)
+    assert result["intent"] == "update_travel_plan"
+
+
+# ---------------------------------------------------------------------------
+# Multi-turn conversation scenario tests (state simulates ongoing conversation)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.unit
+def test_router_multiturn_advisor_commit_transitions_to_new_travel_plan():
+    """Multi-turn: commit phrase after advisor flow with shown cities passes through as new_travel_plan."""
+    node = RouterNode(_StubRouterClassifier("new_travel_plan", has_explicit_destination=True))
+    state = _router_state(
+        messages=[
+            HumanMessage(content="Where should I go in Asia?"),
+            AIMessage(content="I recommend Tokyo or Seoul for summer travel. Which one interests you?"),
+            HumanMessage(content="Let's go to Tokyo"),
+        ],
+        intent="advisor",
+        summary="User asked about summer destinations in Asia. Agent presented Tokyo and Seoul.",
+        advisor_shown_cities=["Tokyo", "Seoul"],
+    )
+    result = node(state)
+    assert result["intent"] == "new_travel_plan"
+
+
+@pytest.mark.unit
+def test_router_multiturn_enrichment_short_answer_stays_new_travel_plan():
+    """Multi-turn: short enrichment answer ('7') must stay new_travel_plan via Guardrail 0."""
+    node = RouterNode(_StubRouterClassifier("out_of_scope"))  # LLM confused by bare number
+    state = _router_state(
+        messages=[
+            HumanMessage(content="I want to go to Tokyo"),
+            AIMessage(content="Great! How many days are you planning to stay?"),
+            HumanMessage(content="7"),
+        ],
+        intent="new_travel_plan",
+        enrichment_complete=False,
+        destination_city="Tokyo",
+    )
+    result = node(state)
+    assert result["intent"] == "new_travel_plan"
+
+
+@pytest.mark.unit
+def test_router_multiturn_update_itinerary_with_built_itinerary_stays():
+    """Multi-turn: update_itinerary on a built itinerary must pass through unchanged."""
+    node = RouterNode(_StubRouterClassifier("update_itinerary"))
+    state = _router_state(
+        messages=[HumanMessage(content="remove the Louvre from day 2")],
+        destination_city="Paris",
+        current_city="Tel Aviv",
+        itinerary_plan={"step_results": {"build_day_schedule_1": {"status": "success"}}},
+    )
+    result = node(state)
+    assert result["intent"] == "update_itinerary"
+
+
+@pytest.mark.unit
+def test_router_multiturn_update_itinerary_empty_step_results_escalates_to_build():
+    """Guardrail 6 edge case: step_results key present but empty dict is still 'not built'."""
+    node = RouterNode(_StubRouterClassifier("update_itinerary"))
+    state = _router_state(
+        messages=[HumanMessage(content="swap the museum visit on day 1")],
+        destination_city="Paris",
+        current_city="Tel Aviv",
+        itinerary_plan={"step_results": {}},  # key exists but is empty → not built
+    )
+    result = node(state)
+    assert result["intent"] == "build_itinerary"
+
+
+@pytest.mark.unit
+def test_router_multiturn_out_of_scope_locked_after_advisor_history():
+    """Multi-turn: out_of_scope stays locked even after a rich advisor conversation (Guardrail 5)."""
+    node = RouterNode(_StubRouterClassifier("out_of_scope"))
+    state = _router_state(
+        messages=[
+            HumanMessage(content="Where should I go in Europe?"),
+            AIMessage(content="I recommend Paris, Rome, or Barcelona."),
+            HumanMessage(content="Tell me more about Paris"),
+            AIMessage(content="Paris has the Eiffel Tower, the Louvre, and amazing food."),
+            HumanMessage(content="What is 2 + 2?"),
+        ],
+        summary="User has discussed Paris, Rome, and Barcelona as European destinations.",
+        advisor_shown_cities=["Paris", "Rome", "Barcelona"],
+    )
+    result = node(state)
+    assert result["intent"] == "out_of_scope"
 
 
 # ---------------------------------------------------------------------------

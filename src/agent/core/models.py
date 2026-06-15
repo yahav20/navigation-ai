@@ -274,9 +274,13 @@ class IntentClassification(BaseModel):
     has_explicit_destination: bool = Field(
         default=False,
         description=(
-            "True ONLY if the user explicitly names a DESTINATION city (where they want TO GO or VISIT), "
-            "not their origin/current/departure city. "
-            "Example: 'I want to fly to Rome' → True (Rome is destination). "
+            "True if the user names OR clearly implies a specific DESTINATION city "
+            "(where they want TO GO or VISIT) — either directly in their message OR "
+            "by referencing a city from the conversation history that is unambiguous "
+            "(e.g. 'let's go with Tokyo' after the history shows Tokyo was discussed, "
+            "or 'book the second option' when the history lists the city as option 2). "
+            "False for origin/departure city references. "
+            "Example: 'I want to fly to Rome' → True. "
             "'I\\'m flying FROM Tel Aviv' → False (Tel Aviv is origin, not destination)."
         )
     )
