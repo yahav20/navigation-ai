@@ -31,6 +31,7 @@ from agent.itinerary.activity_selector import select_activities_per_day, resolve
 from agent.itinerary.schemas import PlanStep
 from agent.shared.travelers import compute_default_rooms
 from tools.activities import fetch_attractions, fetch_restaurants
+from tools.dependencies import data_provider
 from tools.weather import get_average_weather
 from providers.google_maps import search_places
 
@@ -297,16 +298,21 @@ def handle_fetch_activities(
         pass
 
     if _is_empty(raw_attractions):
+        # Google Maps returned nothing — fall back to local SQLite activities so
+        # the itinerary can still be built without a working Maps API key.
+        raw_attractions = data_provider.fetch_activities(destination, approach="local")
+
+    if _is_empty(raw_attractions):
         return _wrap_result(
             status="failed",
             data=None,
             error=f"fetch_attractions returned nothing for '{destination}'.",
             replan_hint=(
-                f"Google Maps returned no attractions for '{destination}'. "
+                f"No activities found for '{destination}' in Google Maps or local DB. "
                 "Check the city name and GOOGLE_MAPS_API_KEY."
             ),
             trace=_minimal_trace("fetch_activities", cache_args,
-                                 "Empty attractions list.",
+                                 "Empty attractions list (Maps + local DB).",
                                  "Cannot build schedule without activities."),
         )
 
