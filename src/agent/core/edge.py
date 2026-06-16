@@ -72,6 +72,26 @@ def after_router(state: AgentState) -> str:
         return END
 
 
+def after_travel_formatter(state: AgentState) -> str:
+    """Show the HITL confirmation when a full travel plan exists; skip to summary otherwise."""
+    travel_plan = state.get("travel_plan") or {}
+    if travel_plan.get("hotels") and state.get("has_flights"):
+        return "travel_confirmation"
+    return "summary"
+
+
+def after_travel_confirmation(state: AgentState) -> str:
+    """Route based on what the user chose in TravelConfirmationNode.
+
+    intent="build_itinerary" is written by the node on "yes" — plan_check
+    then resolves hotel/flight selections and launches the itinerary builder.
+    Anything else (including an unanswered or "no" choice) ends the turn.
+    """
+    if state.get("intent") == "build_itinerary":
+        return "plan_check"
+    return "summary"
+
+
 def after_advisor_planner(state: AgentState) -> str:
     """Route to out_of_scope when planner detected a non-travel question, else to executor."""
     if state.get("advisor_out_of_scope"):

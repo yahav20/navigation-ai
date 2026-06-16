@@ -110,8 +110,14 @@ class AdjustmentsNode:
         if needs_travel_reset:
             updates["summary"] = f"USER ADJUSTMENTS MADE: {update_reasons}. SYSTEM MUST SEARCH FOR NEW FLIGHTS AND HOTELS."
             updates["flight_options"] = []
+            updates["return_flight_options"] = []
             updates["has_flights"] = False
             updates["travel_plan"] = {}
+            # Clear itinerary_mode so after_enrichment routes to flight_search, not
+            # plan_check. Without this, users who already had an itinerary and then
+            # change destination get silently re-routed to plan_check, bypassing the
+            # flight search and the no-flights → alternatives path entirely.
+            updates["itinerary_mode"] = None
         else:
             updates["summary"] = f"USER ADJUSTMENTS MADE: {update_reasons}."
 

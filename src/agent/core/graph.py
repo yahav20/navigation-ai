@@ -11,6 +11,8 @@ from agent.core.edge import (
     after_router,
     after_advisor_planner,
     after_travel_agent,
+    after_travel_formatter,
+    after_travel_confirmation,
     after_security_gate,
 )
 from agent.core.llm import get_generation_model, get_models
@@ -20,6 +22,7 @@ from agent.shared.general_chat import GeneralChatNode
 from agent.shared.metadata import MetadataNode
 from agent.shared.router import RouterNode
 from agent.shared.save_plan import SavePlanPromptNode
+from agent.travel.confirmation import TravelConfirmationNode
 from agent.shared.security_gate import security_gate_node
 from agent.shared.summary import SummaryNode
 from agent.travel.adjustments import AdjustmentsNode
@@ -73,6 +76,7 @@ def _assemble_builder(provider: str = "google") -> StateGraph:
     travel_agent_node = TravelAgentNode(generation_model)
     summary_node = SummaryNode(extraction_model)
     formatter = FormatterNode()
+    travel_confirmation_node = TravelConfirmationNode()
     alternative_destination_node = AlternativeDestinationNode(extraction_model)
     formatter_alternative = FormatterAlternativeNode(extraction_model)
     router_node = RouterNode(extraction_model)
@@ -106,6 +110,7 @@ def _assemble_builder(provider: str = "google") -> StateGraph:
     builder.add_node("flight_search", flight_search_node)
     builder.add_node("travel_agent", travel_agent_node)
     builder.add_node("formatter", formatter)
+    builder.add_node("travel_confirmation", travel_confirmation_node)
     # save_plan_prompt HITL disabled for now (see edges below); node not registered.
     # builder.add_node("save_plan_prompt", save_plan_prompt_node)
     builder.add_node("alternative_destination", alternative_destination_node)
@@ -186,9 +191,25 @@ def _assemble_builder(provider: str = "google") -> StateGraph:
     )
     builder.add_edge("alternative_destination", "formatter_alternative")
     builder.add_edge("formatter_alternative", "summary")
-    # save_plan_prompt HITL disabled for now — formatter goes straight to summary.
-    # To re-enable, restore: formatter -> save_plan_prompt -> summary.
-    builder.add_edge("formatter", "summary")
+
+    # After the travel formatter renders flights + hotels, pause for user confirmation.
+    # Only interrupts when a full plan (hotels + flights) exists; falls back to summary.
+    builder.add_conditional_edges(
+        "formatter",
+        after_travel_formatter,
+        {
+            "travel_confirmation": "travel_confirmation",
+            "summary": "summary",
+        },
+    )
+    builder.add_conditional_edges(
+        "travel_confirmation",
+        after_travel_confirmation,
+        {
+            "plan_check": "plan_check",
+            "summary": "summary",
+        },
+    )
 
     # -----   -Itinerary (Plan & Execute + Replanner) -----
     builder.add_conditional_edges(
