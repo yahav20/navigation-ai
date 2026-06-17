@@ -1,4 +1,6 @@
 """Formatter node — turns raw tool data into a warm, conversational advisor response."""
+import datetime
+
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, RemoveMessage
 from pydantic import BaseModel, Field
@@ -74,16 +76,28 @@ TYPE C — CONCERTS & LIVE EVENTS (search_concerts):
   - End with an offer to search for flights or build a full itinerary around the event.
 
   STRICT DATA DISCIPLINE FOR CONCERTS — CRITICAL:
-  - ONLY present an event if the raw content EXPLICITLY names the searched artist AND states a
-    specific date or venue. Both must be present in the same snippet.
-  - Genre pages, "similar artists" pages, metro-area listings, and past-show references do NOT
-    count as confirmed upcoming events — discard them.
-  - If no snippet contains an explicit artist + date + venue match, respond honestly:
-    "I couldn't find confirmed [artist] dates for [month] in our concert sources. This may mean
+  The filtering rule depends on whether the user searched for a SPECIFIC ARTIST or not.
+
+  MODE A — SPECIFIC ARTIST SEARCH (user named an artist):
+  - ONLY present an event if the raw content EXPLICITLY names that artist AND states a specific
+    date or venue. Both must be present in the same snippet.
+  - Genre pages, "similar artists" pages, and general tour-date roundups do NOT count — discard.
+  - If no snippet contains an explicit artist + date/venue match, respond honestly:
+    "I couldn't find confirmed [artist] dates for [month/city] in our concert sources. This may mean
     no shows are announced yet, or they haven't been listed on Songkick/Bandsintown yet.
     I'd recommend checking [artist]'s official site or Bandsintown directly."
-  - NEVER infer, guess, or extrapolate dates from genre or location pages. If in doubt, say
-    you found no confirmed dates.
+
+  MODE B — CITY / MONTH SEARCH (user did NOT name a specific artist):
+  - Present any event where the snippet names a specific act/artist/band AND a date or venue.
+    You do NOT need to match a specific artist name — any confirmed act is valid.
+  - Metro-area browse pages with NO specific event dates or artists must be discarded.
+  - Past-show references (dates before TODAY'S DATE shown above) must be discarded.
+  - If snippets only contain generic listings with no specific artists or dates, respond honestly
+    that no confirmed events were found and suggest checking Songkick/Bandsintown directly.
+
+  BOTH MODES:
+  - NEVER infer, guess, or extrapolate dates from genre or location pages.
+  - Filter out any event whose date is before TODAY'S DATE shown at the top of this data block.
 
 SCOPE — CRITICAL:
 Answer ONLY the current user question (the last human message in the conversation).
@@ -221,6 +235,12 @@ class AdvisorFormatterNode:
         current_turn_messages = messages[last_human_idx:]
 
         data_block = state.get("advisor_data_collected") or build_data_collected([])
+
+        # Prepend today's date so the formatter can filter out past events (TYPE C)
+        # and reason correctly about time-sensitive information in general.
+        today_str = datetime.date.today().strftime("%B %d, %Y")
+        data_block = f"TODAY'S DATE: {today_str}\n\n{data_block}"
+
         response = self.model.invoke([
             {"role": "system", "content": _SYSTEM_PROMPT},
             *current_turn_messages,

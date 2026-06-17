@@ -1,6 +1,7 @@
 """Tavily-powered concert and live event search for the advisor agent."""
 from __future__ import annotations
 
+import datetime
 import os
 
 from langchain_core.tools import tool
@@ -38,26 +39,29 @@ def _get_tavily():
         )
 
     return TavilySearch(
-        max_results=8,
+        max_results=10,
         include_domains=_CONCERT_DOMAINS,
+        search_depth="advanced",
     )
 
 
 def _build_query(city: str | None, artist: str | None, month: str | None) -> str:
-    """Build a focused, minimal Tavily query from the available parameters."""
+    """Build a focused Tavily query targeting specific event listing pages."""
     parts: list[str] = []
     if artist:
         parts.append(artist)
+
     if city and artist:
+        # Artist in a specific city — target their tour page for that city
         parts.append(f"concert {city}")
     elif city:
-        parts.append(f"concerts {city}")
+        # All events in a city — "lineup schedule" pulls event listing pages
+        # rather than generic metro-area browse/category pages
+        parts.append(f"concerts {city} lineup schedule")
     else:
         parts.append("concert tour dates")
-    if month:
-        parts.append(month)
-    else:
-        parts.append("2026")
+
+    parts.append(month if month else str(datetime.date.today().year))
     return " ".join(parts)
 
 
@@ -86,10 +90,12 @@ def search_concerts(
         return [{"message": "Please provide at least one of: city, artist, or month."}]
 
     query = _build_query(city, artist, month)
+    today = datetime.date.today().isoformat()  # e.g. "2026-06-17"
     try:
         tavily = _get_tavily()
         # TavilySearch._run returns Dict{"query", "results": [...], "response_time"}
-        response = tavily.invoke({"query": query})
+        # start_date tells Tavily to only return pages updated/relevant from today onward
+        response = tavily.invoke({"query": query, "start_date": today})
     except (ImportError, ValueError) as exc:
         return [{"message": str(exc)}]
     except Exception as exc:  # noqa: BLE001
