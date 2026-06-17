@@ -1,32 +1,52 @@
 """Security gate to validate inputs before LLM invocation."""
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from langchain_core.messages import AIMessage, HumanMessage
+
 from agent.core.state import AgentState
-from security import coerce_to_text, validate_input
+from security import coerce_to_text, sanitize_message, validate_input
 
-def security_gate_node(state: AgentState) -> dict:
-    """Run regex and length security checks before hitting any LLM."""
-    messages = state.get("messages", [])
-    if not messages:
+if TYPE_CHECKING:
+    from agent.shared.injection_guard import InjectionGuard
+
+_BLOCKED_MSG = "I'm not able to process that request. Please ask me about travel planning!"
+
+
+def make_security_gate_node(guard: "InjectionGuard"):
+    """Return a security gate node that validates, sanitizes, and LLM-guards each user message."""
+
+    def security_gate_node(state: AgentState) -> dict:
+        messages = state.get("messages", [])
+        if not messages:
+            return {}
+
+        last_msg = messages[-1]
+
+        if getattr(last_msg, "type", "") != "human":
+            return {}
+
+        session_id = state.get("session_id", "unknown")
+
+        try:
+            text = validate_input(last_msg.content)
+        except ValueError as e:
+            return {"messages": [AIMessage(content=str(e), name="security_gate")]}
+
+        # Strip embedded injection clauses while keeping the travel question
+        sanitized = sanitize_message(text, session_id=session_id)
+
+        # LLM semantic guard — catches creative bypasses that regex misses
+        if guard.is_injection(sanitized, session_id=session_id):
+            return {"messages": [AIMessage(content=_BLOCKED_MSG, name="security_gate")]}
+
+        # Normalize content type AND replace with sanitized text if anything changed
+        if sanitized != text or not isinstance(last_msg.content, str):
+            msg_id = getattr(last_msg, "id", None)
+            if msg_id:
+                return {"messages": [HumanMessage(content=sanitized, id=msg_id)]}
+
         return {}
 
-    last_msg = messages[-1]
-
-    # Check only human messages
-    if getattr(last_msg, "type", "") != "human":
-        return {}
-
-    try:
-        validate_input(last_msg.content)
-    except ValueError as e:
-        return {
-            "messages": [AIMessage(content=str(e), name="security_gate")]
-        }
-
-    # Chat UIs (e.g. agent-chat-ui) send content as a list of content blocks,
-    # but downstream nodes assume a plain string (e.g. `router` calls
-    # `.content.lower()`). Normalize to text in-place — replacing the message by
-    # id — so the rest of the graph behaves exactly like the string-based CLI.
-    if not isinstance(last_msg.content, str) and getattr(last_msg, "id", None):
-        return {"messages": [HumanMessage(content=coerce_to_text(last_msg.content), id=last_msg.id)]}
-
-    return {}
+    return security_gate_node

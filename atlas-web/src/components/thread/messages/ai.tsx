@@ -17,6 +17,8 @@ import { useQueryState, parseAsBoolean } from "nuqs";
 import { GenericInterruptView } from "./generic-interrupt";
 import { getQuestionOptionsInterrupt } from "@/lib/question-options-interrupt";
 import { QuestionOptionsInterruptView } from "./question-options-interrupt";
+import { getTravelSelectionInterrupt } from "@/lib/travel-selection-interrupt";
+import { TravelSelectionInterruptView } from "./travel-selection-interrupt";
 import { useArtifact } from "../artifact";
 import { Fragment } from "react";
 
@@ -199,18 +201,25 @@ function Interrupt({
 
   const showInterrupt = isLastMessage || hasNoAIOrToolMessages;
   const isAgentInbox = isAgentInboxInterruptSchema(interrupt);
-  const questionOptions = isAgentInbox
+  const travelSelection = isAgentInbox
+    ? null
+    : getTravelSelectionInterrupt(interrupt);
+  const questionOptions = isAgentInbox || travelSelection
     ? null
     : getQuestionOptionsInterrupt(interrupt);
 
   return (
     <>
       {isAgentInbox && showInterrupt && <ThreadView interrupt={interrupt} />}
+      {travelSelection && showInterrupt && (
+        <TravelSelectionInterruptView interrupt={travelSelection} />
+      )}
       {questionOptions && showInterrupt && (
         <QuestionOptionsInterruptView interrupt={questionOptions} />
       )}
       {interrupt &&
       !isAgentInbox &&
+      !travelSelection &&
       !questionOptions &&
       showInterrupt ? (
         <GenericInterruptView interrupt={fallbackValue} />
