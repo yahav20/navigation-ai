@@ -130,6 +130,12 @@ Tone-matching instructions:
    Adapt the length to the complexity of the question.
 
 3. COMPLETENESS — If DATA COLLECTED lists multiple destinations, mention ALL of them.
+   MULTI-FILTER INTERSECTION EXCEPTION: If DATA COLLECTED contains an INTERSECTION line:
+   - If INTERSECTION lists specific cities: present ONLY those cities. These are destinations that
+     matched ALL of the user's filters simultaneously. Frame them as "cities that tick every box."
+   - If INTERSECTION says "No cities matched all selected filters": present the best partial matches
+     from each list and honestly explain the trade-off (e.g. "budget-friendly cities don't overlap
+     with family-focused ones in our data — here are the closest options for each").
 
 4. ACTIVITY RELEVANCE — Only include specific activities that fit the context of the user's current question.
 
