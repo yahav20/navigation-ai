@@ -114,6 +114,7 @@ ToolName = Literal[
     "get_packing_list",
     "get_local_customs",
     "get_wikipedia_summary",
+    "search_concerts",
 ]
 
 
@@ -179,6 +180,14 @@ class PlannedToolCall(BaseModel):
         "Topic name for get_wikipedia_summary — a city, attraction, landmark, or place. "
         "Use the most specific name (e.g. 'Colosseum', 'Eiffel Tower', 'Kyoto')."
     ))
+    artist: str | None = Field(default=None, description=(
+        "Artist or performer name — used by search_concerts. "
+        "E.g. 'John Legend', 'Hardwell', 'Coldplay'."
+    ))
+    month: str | None = Field(default=None, description=(
+        "Month and year for search_concerts — e.g. 'August 2026', 'September 2026'. "
+        "Omit if the user did not specify a time period."
+    ))
 
 
 class AdvisorPlan(BaseModel):
@@ -192,7 +201,7 @@ class AdvisorPlan(BaseModel):
 _ARG_FIELDS = (
     "city", "tag", "category", "origin", "total_budget", "trip_days",
     "max_flight_hours", "season", "passport_nationality", "from_currency",
-    "to_currency", "amount", "trip_type", "topic",
+    "to_currency", "amount", "trip_type", "topic", "artist", "month",
 )
 
 # These tools use 'destination' as their parameter name instead of 'city'
@@ -409,6 +418,22 @@ PRACTICAL TRAVEL TOOLS (informational — each needs exactly ONE call, no combin
     -> Trigger: etiquette, tipping norms, local customs, or useful phrases for a destination
     -> Examples: "what are the customs in Japan?", "should I tip in France?", "useful phrases for Italy"
 
+- search_concerts
+    Set: city = <city>, artist = <performer name>, month = <"Month YYYY">
+    -> For questions about live concerts, shows, gigs, or DJ sets
+    -> At least one parameter must be provided; combine all that are known
+    -> Trigger phrases: "concerts in X", "shows in X in [month]", "where is [artist] touring",
+                        "when is [artist] in [city]", "where can I see [artist]"
+    -> Searches exclusively: Songkick, Bandsintown, Ticketmaster, Live Nation, Resident Advisor
+    -> Returns live web results — the formatter will extract event names, dates, venues, and cities
+    -> ONE call only; never combine with destination discovery tools in the same plan
+
+    Query-mode examples:
+      "concerts in London in August 2026"           → city="London",       month="August 2026"
+      "where is John Legend touring September 2026" → artist="John Legend", month="September 2026"
+      "when is Hardwell in Amsterdam"               → artist="Hardwell",    city="Amsterdam"
+      "upcoming Coldplay shows"                     → artist="Coldplay"
+
 - get_wikipedia_summary
     Set: topic = <specific place, attraction, or landmark name>
     -> For questions about a SPECIFIC ATTRACTION, LANDMARK, or HISTORICAL SITE (NOT a city as a whole)
@@ -520,6 +545,7 @@ MULTI-FILTER RULE — User specifies TWO or more distinct destination preference
       "customs in X / tipping in X / etiquette / phrases"   → get_local_customs
       "tell me about [landmark] / what is [landmark]"       → get_wikipedia_summary
       (city-level: "tell me about Rome" → get_city_overview, NOT wikipedia)
+      "concerts / shows / gigs / events / touring / DJ set" → search_concerts
 
 COUNTRY -> CITY RESOLUTION:
 Apply this mapping to both KNOWN USER CONTEXT and the user's message:
