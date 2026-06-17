@@ -177,7 +177,11 @@ def _normalize_offer(offer: dict, origin_city: str, destination_city: str) -> di
         "availability": "available",
         "departure_time": offer.get("departure_at") or "",
         "arrival_time": "",  # not provided by this endpoint
-        "duration_minutes": offer.get("duration"),
+        # Searches are one-way (one_way=true), so `duration_to` is the outbound
+        # leg's travel time. `duration` can include round-trip/total figures that
+        # make a legitimate one-way offer look implausibly long and get filtered
+        # out by `_is_reasonable`. Prefer the leg duration, falling back to total.
+        "duration_minutes": offer.get("duration_to") or offer.get("duration"),
         "transfers": int(offer.get("transfers") or 0),
     }
 
