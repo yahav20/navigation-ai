@@ -37,13 +37,39 @@ class PlanCheckNode:
             and bool(state.get("return_flight_options"))
         )
 
+        dest_label = destination or "your destination"
+
         if has_hotels and has_flights:
-            resolved = self._resolve_travel_data(state, travel_plan, destination)
+            # ── Human-in-the-Loop: let user pick their preferred flight + hotel ─
+            user_choice: str = interrupt({
+                "type": "travel_selection",
+                "question": (
+                    f"Choose your preferred flight and hotel for the itinerary "
+                    f"to **{dest_label}**"
+                ),
+                "flight_pairings": travel_plan.get("flight_pairings", []),
+                "hotels": travel_plan.get("hotels", []),
+            })
+
+            pairings_list = travel_plan.get("flight_pairings", [])
+            hotels_list   = travel_plan.get("hotels", [])
+            if user_choice.strip() == "auto":
+                flight_idx = _cheapest_pairing_idx(pairings_list)
+                hotel_idx  = _cheapest_hotel_idx(hotels_list)
+            else:
+                flight_idx, hotel_idx = _parse_selection(
+                    user_choice.strip(),
+                    len(pairings_list),
+                    len(hotels_list),
+                )
+
+            resolved = self._resolve_travel_data(
+                state, travel_plan, destination, flight_idx, hotel_idx
+            )
             resolved["itinerary_mode"] = "with_travel_data"
             return resolved
 
         # ── Human-in-the-Loop: present a choice widget to the user ───────
-        dest_label = destination or "your destination"
         user_choice: str = interrupt({
             "question": (
                 f"I don't have a travel plan with flights and hotels for your trip to "
@@ -78,12 +104,15 @@ class PlanCheckNode:
         state: AgentState,
         travel_plan: dict,
         destination: str,
+        flight_idx: int = 0,
+        hotel_idx: int = 0,
     ) -> dict:
         result: dict = {}
 
         # ── Hotel ──────────────────────────────────────────────────────
         hotels_curated      = travel_plan.get("hotels", [])
-        selected_hotel_name = hotels_curated[0].get("name") if hotels_curated else None
+        hotel_idx           = min(hotel_idx, len(hotels_curated) - 1) if hotels_curated else 0
+        selected_hotel_name = hotels_curated[hotel_idx].get("name") if hotels_curated else None
         if selected_hotel_name and destination:
             try:
                 raw_hotels = [
@@ -105,7 +134,7 @@ class PlanCheckNode:
         # Fallback: build a minimal hotel dict from the curated plan so Executor
         # always has a non-empty itinerary_selected_hotel (avoids defaulting to Paris coords).
         if "itinerary_selected_hotel" not in result and hotels_curated:
-            result["itinerary_selected_hotel"] = hotels_curated[0]
+            result["itinerary_selected_hotel"] = hotels_curated[hotel_idx]
 
         # ── Outbound flight ────────────────────────────────────────────
         valid_outbound = [
@@ -116,7 +145,8 @@ class PlanCheckNode:
             pairings       = travel_plan.get("flight_pairings", [])
             outbound_label = ""
             if pairings:
-                ob             = pairings[0].get("outbound") or {}
+                pairing_idx    = min(flight_idx, len(pairings) - 1)
+                ob             = pairings[pairing_idx].get("outbound") or {}
                 outbound_label = ob.get("flight_number") or ob.get("label") or ""
 
             matched_ob = _match_flight(valid_outbound, outbound_label)
@@ -158,6 +188,44 @@ def _arrival_hour(flight: dict) -> int:
         return int(arr[:5].split(":")[0])
     except (ValueError, IndexError):
         return 23
+
+
+def _cheapest_pairing_idx(pairings: list[dict]) -> int:
+    if not pairings:
+        return 0
+    return min(range(len(pairings)), key=lambda i: float(pairings[i].get("total_price", 9999)))
+
+
+def _cheapest_hotel_idx(hotels: list[dict]) -> int:
+    if not hotels:
+        return 0
+    return min(range(len(hotels)), key=lambda i: float(hotels[i].get("price_per_night", 9999)))
+
+
+def _parse_selection(
+    value: str,
+    num_pairings: int,
+    num_hotels: int,
+) -> tuple[int, int]:
+    """Parse user resume value from the travel_selection interrupt.
+
+    Accepts:
+      "auto"          → cheapest of each (index 0 after caller sorts by price)
+      "flight:N,hotel:M" → explicit indices
+    Falls back to (0, 0) on any parse error.
+    """
+    if value == "auto" or not value:
+        return 0, 0
+    try:
+        parts = value.split(",")
+        flight_idx = int(parts[0].split(":")[1])
+        hotel_idx  = int(parts[1].split(":")[1])
+        # Clamp to valid range
+        flight_idx = max(0, min(flight_idx, num_pairings - 1)) if num_pairings else 0
+        hotel_idx  = max(0, min(hotel_idx,  num_hotels  - 1)) if num_hotels  else 0
+        return flight_idx, hotel_idx
+    except (IndexError, ValueError):
+        return 0, 0
 
 
 def _pick_best_outbound(flights: list[dict]) -> dict:
