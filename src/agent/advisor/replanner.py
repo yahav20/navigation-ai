@@ -194,7 +194,7 @@ class AdvisorReplannerNode:
         )
 
         prompt = (
-            f"Original question: {user_question}\n\n"
+            f"<user_question>{user_question}</user_question>\n\n"
             f"Steps already executed:\n{past_summary}\n\n"
             f"Remaining steps:\n{remaining_summary if remaining_summary else '(none)'}\n\n"
             "Return the remaining steps to execute (pruned of redundant ones), "

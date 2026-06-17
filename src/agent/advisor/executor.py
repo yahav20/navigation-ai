@@ -3,6 +3,7 @@ import json
 from typing import Any
 
 from agent.core.state import AgentState
+from security import scan_tool_output
 from tools.destinations import advisor_tools
 from ui import render_node, render_node_status
 
@@ -100,6 +101,7 @@ class AdvisorExecutorNode:
 
         render_node_status(f"[Executor] Executing: {tool_name}({args})")
         result = _run_step(tool_name, args)
+        result = scan_tool_output(result, source=tool_name, session_id=state.get("session_id", "unknown"))
 
         past_results.append({"tool_name": tool_name, "args": args, "result": result})
         return {"advisor_last_tool_results": past_results}

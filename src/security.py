@@ -67,13 +67,20 @@ _SANITIZE_PATTERNS = [
 ]
 _COMPILED_SANITIZE = [(re.compile(p, re.IGNORECASE), r) for p, r in _SANITIZE_PATTERNS]
 
-# ── API key pattern (for output scanning) ───────────────────────────────────
+# ── API key / system prompt leak patterns (for output scanning) ─────────────
 _SECRET_PATTERNS = [
     re.compile(r"AIza[0-9A-Za-z\-_]{35}"),           # Google API key
     re.compile(r"gsk_[0-9A-Za-z]{50}"),               # Groq API key
     re.compile(r"sk-[0-9A-Za-z]{48}"),                # OpenAI API key
     re.compile(r"(system\s+prompt\s+(is|says?|reads?)|my\s+instructions?\s+(are|say))",
                re.IGNORECASE),
+]
+
+# ── Manipulation signal patterns (detect if LLM output was hijacked) ─────────
+_MANIPULATION_SIGNALS = [
+    re.compile(r"\b(arr|ahoy|matey|shiver\s+me\s+timbers)\b", re.IGNORECASE),   # pirate roleplay
+    re.compile(r"as\s+an?\s+AI\s+(with\s+no\s+restrictions|without\s+(any\s+)?limits?)", re.IGNORECASE),
+    re.compile(r"\bDAN\b"),
 ]
 
 # ── Shared system prompt security block (injected into every node) ───────────
@@ -146,13 +153,50 @@ def sanitize_message(user_input: str, session_id: str = "unknown") -> str:
     return cleaned
 
 
+_SAFE_TRAVEL_RESPONSE = "I can only help with travel planning. How can I assist you with your trip?"
+
 def scan_output(text: str, session_id: str = "unknown") -> str:
-    """Scan LLM output for leaked secrets or system prompt content."""
+    """Scan LLM output for leaked secrets, system prompt content, or manipulation signals."""
     for pattern in _SECRET_PATTERNS:
         if pattern.search(text):
             audit_log.error("session=%s BLOCKED sensitive data in output", session_id)
-            return "I can only help with travel planning. How can I assist you with your trip?"
+            return _SAFE_TRAVEL_RESPONSE
+    for pattern in _MANIPULATION_SIGNALS:
+        if pattern.search(text):
+            audit_log.error("session=%s BLOCKED manipulated output detected", session_id)
+            return _SAFE_TRAVEL_RESPONSE
     return text
+
+
+# ── Tool output scanning (indirect injection defense) ────────────────────────
+_TOOL_FIELD_MAX_LEN = 1500
+
+
+def scan_tool_output(data: object, source: str = "tool", session_id: str = "unknown") -> object:
+    """Scan external tool/API results for injection payloads and enforce field length limits.
+
+    Works recursively on dicts, lists, and strings. Returns a sanitized copy.
+    """
+    if isinstance(data, str):
+        for pattern in _COMPILED_PATTERNS:
+            if pattern.search(data):
+                audit_log.warning(
+                    "session=%s BLOCKED injection payload in %s output: %r",
+                    session_id, source, data[:120],
+                )
+                return "[content removed — policy violation]"
+        if len(data) > _TOOL_FIELD_MAX_LEN:
+            audit_log.warning(
+                "session=%s TRUNCATED oversized field in %s output (%d chars)",
+                session_id, source, len(data),
+            )
+            return data[:_TOOL_FIELD_MAX_LEN] + "…"
+        return data
+    if isinstance(data, dict):
+        return {k: scan_tool_output(v, source, session_id) for k, v in data.items()}
+    if isinstance(data, list):
+        return [scan_tool_output(item, source, session_id) for item in data]
+    return data
 
 
 def log_turn(session_id: str, user_input: str, turn: int) -> None:
