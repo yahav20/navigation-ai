@@ -227,12 +227,18 @@ _DISCOVERY_TOOLS = frozenset({"find_destinations_by_tag", "find_destinations_by_
 def _sanitize_plan(steps: list[PlannedToolCall]) -> list[PlannedToolCall]:
     """Enforce hard architectural constraints the LLM occasionally ignores.
 
-    Rule: when a budget tool is present, discovery tools are redundant and misleading
+    Rule A: when a budget tool is present, discovery tools are redundant and misleading
     (they return cities without cost/reachability filtering). Remove them.
+
+    Rule B: when search_concerts is present, it must be the only tool.
+    Adding get_best_time_to_visit or any other tool causes the formatter to ignore
+    the concert results and answer with irrelevant general-travel data instead.
     """
     tool_names = {s.tool_name for s in steps}
     if tool_names & _BUDGET_TOOLS:
         steps = [s for s in steps if s.tool_name not in _DISCOVERY_TOOLS]
+    if "search_concerts" in tool_names:
+        steps = [s for s in steps if s.tool_name == "search_concerts"]
     return steps
 
 
@@ -426,7 +432,9 @@ PRACTICAL TRAVEL TOOLS (informational — each needs exactly ONE call, no combin
                         "when is [artist] in [city]", "where can I see [artist]"
     -> Searches exclusively: Songkick, Bandsintown, Ticketmaster, Live Nation, Resident Advisor
     -> Returns live web results — the formatter will extract event names, dates, venues, and cities
-    -> ONE call only; never combine with destination discovery tools in the same plan
+    -> ALWAYS ONE call only — NEVER combine with ANY other tool (not get_best_time_to_visit,
+       not get_city_overview, not fetch_activities, not any discovery tool).
+       Concert date data IS the answer; general travel timing is irrelevant here.
 
     Query-mode examples:
       "concerts in London in August 2026"           → city="London",       month="August 2026"
