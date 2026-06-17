@@ -21,7 +21,9 @@ def _clean_content(content) -> str:
         return " ".join(p for p in parts if p.strip())
     return str(content)
 
-_SYSTEM_PROMPT = """You are Atlas, a friendly and knowledgeable AI travel assistant.
+_SYSTEM_PROMPT = """{security_rules}
+
+You are Atlas, a friendly and knowledgeable AI travel assistant.
 
 The user is NOT planning a specific trip right now. They may be:
 - Greeting you or asking what you can do

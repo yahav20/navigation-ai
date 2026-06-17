@@ -1,7 +1,7 @@
 """Security gate to validate inputs before LLM invocation."""
 from langchain_core.messages import AIMessage, HumanMessage
 from agent.core.state import AgentState
-from security import coerce_to_text, validate_input
+from security import coerce_to_text, validate_input, sanitize_message
 
 def security_gate_node(state: AgentState) -> dict:
     """Run regex and length security checks before hitting any LLM."""
@@ -16,17 +16,19 @@ def security_gate_node(state: AgentState) -> dict:
         return {}
 
     try:
-        validate_input(last_msg.content)
+        text = validate_input(last_msg.content)
     except ValueError as e:
         return {
             "messages": [AIMessage(content=str(e), name="security_gate")]
         }
 
-    # Chat UIs (e.g. agent-chat-ui) send content as a list of content blocks,
-    # but downstream nodes assume a plain string (e.g. `router` calls
-    # `.content.lower()`). Normalize to text in-place — replacing the message by
-    # id — so the rest of the graph behaves exactly like the string-based CLI.
-    if not isinstance(last_msg.content, str) and getattr(last_msg, "id", None):
-        return {"messages": [HumanMessage(content=coerce_to_text(last_msg.content), id=last_msg.id)]}
+    # Strip any embedded injection clauses from the validated text
+    sanitized = sanitize_message(text)
+
+    # Normalize content type AND replace with sanitized text if anything changed
+    if sanitized != text or not isinstance(last_msg.content, str):
+        msg_id = getattr(last_msg, "id", None)
+        if msg_id:
+            return {"messages": [HumanMessage(content=sanitized, id=msg_id)]}
 
     return {}
