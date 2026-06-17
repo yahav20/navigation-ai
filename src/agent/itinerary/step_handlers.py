@@ -1043,6 +1043,9 @@ def _build_config_standalone(
 
 
 def _hotel_price(state: dict) -> float:
+    selected = state.get("itinerary_selected_hotel") or {}
+    if selected.get("price_per_night"):
+        return float(selected["price_per_night"])
     tp = state.get("travel_plan") or {}
     hotels = tp.get("hotels", [])
     return float(hotels[0].get("price_per_night", 0)) if hotels else 0.0

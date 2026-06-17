@@ -61,6 +61,11 @@ def after_router(state: AgentState) -> str:
     elif intent == "advisor":
         return "advisor_planner"
     elif intent == "build_itinerary":
+        # Skip metadata re-extraction when a travel plan already exists: MetadataNode
+        # reads flight dates from the rendered plan output and may call _invalidate_flights(),
+        # wiping travel_plan/flight_options before plan_check can use them.
+        if state.get("travel_plan"):
+            return "plan_check"
         return "extract_metadata"
     elif intent == "update_itinerary":
         return "itinerary_planner"

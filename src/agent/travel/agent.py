@@ -649,5 +649,4 @@ class TravelAgentNode:
             travelers_label=payload.get("travelers_label"),
         )
 
-        return {"travel_plan": plan.model_dump(),
-                "has_existing_trip_context": True}
+        return {"travel_plan": plan.model_dump()}

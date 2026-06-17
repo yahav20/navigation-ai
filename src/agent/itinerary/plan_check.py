@@ -97,8 +97,15 @@ class PlanCheckNode:
                 )
                 if matched:
                     result["itinerary_selected_hotel"] = matched
-            except Exception:
-                pass
+            except Exception as exc:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "Hotel resolution failed for %r in %r: %s", selected_hotel_name, destination, exc
+                )
+        # Fallback: build a minimal hotel dict from the curated plan so Executor
+        # always has a non-empty itinerary_selected_hotel (avoids defaulting to Paris coords).
+        if "itinerary_selected_hotel" not in result and hotels_curated:
+            result["itinerary_selected_hotel"] = hotels_curated[0]
 
         # ── Outbound flight ────────────────────────────────────────────
         valid_outbound = [

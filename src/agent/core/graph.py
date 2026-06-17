@@ -155,6 +155,7 @@ def _assemble_builder(provider: str = "google") -> StateGraph:
             "adjustments":       "adjustments",
             "advisor_planner":   "advisor_planner",
             "itinerary_planner": "itinerary_planner",
+            "plan_check":        "plan_check",
             "out_of_scope":      "out_of_scope",
             END: END,
         },
