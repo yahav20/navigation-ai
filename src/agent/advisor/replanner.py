@@ -1,4 +1,6 @@
 """Replanner node — reviews execution results and decides to continue or finish."""
+from typing import Any
+
 from langchain_core.language_models import BaseChatModel
 from pydantic import BaseModel, Field
 
@@ -11,6 +13,42 @@ from ui import render_node, render_node_status
 MAX_REPLAN_STEPS = 5
 
 _DISCOVERY_TOOLS = frozenset({"find_destinations_by_vibe", "find_destinations_by_tag"})
+
+# Only these two filter-discovery tools participate in intersection logic
+_FILTER_DISCOVERY_TOOLS = frozenset({"find_destinations_by_vibe", "find_destinations_by_tag"})
+
+
+def _extract_city_names(result: Any) -> set[str]:
+    """Extract city names from a discovery tool result list."""
+    if not isinstance(result, list):
+        return set()
+    return {item["city"] for item in result if isinstance(item, dict) and "city" in item}
+
+
+def _build_intersection_note(tool_results: list[dict]) -> str:
+    """When 2+ filter-discovery tools ran, return an INTERSECTION line for the data block.
+
+    Returns an empty string when no intersection is applicable (< 2 filter tools ran).
+    """
+    filter_results = [
+        r for r in tool_results
+        if r["tool_name"] in _FILTER_DISCOVERY_TOOLS and not _is_empty(r["result"])
+    ]
+    if len(filter_results) < 2:
+        return ""
+
+    city_sets = [_extract_city_names(r["result"]) for r in filter_results]
+    intersection = city_sets[0].intersection(*city_sets[1:])
+
+    if not intersection:
+        return (
+            "INTERSECTION: No cities matched all selected filters — "
+            "present the best partial matches from each list and note the trade-off to the user."
+        )
+    return (
+        f"INTERSECTION (cities matching ALL user filters — present ONLY these): "
+        f"{', '.join(sorted(intersection))}"
+    )
 
 
 class _RemainingPlan(BaseModel):
@@ -33,7 +71,13 @@ def build_data_collected(tool_results: list[dict]) -> str:
         format_tool_result(r["tool_name"], r.get("args", {}), r["result"])
         for r in usable
     ]
-    return "DATA COLLECTED:\n" + "\n\n".join(blocks) + "\nREADY FOR FORMATTING."
+    data_block = "DATA COLLECTED:\n" + "\n\n".join(blocks)
+
+    intersection_note = _build_intersection_note(usable)
+    if intersection_note:
+        data_block += f"\n\n{intersection_note}"
+
+    return data_block + "\nREADY FOR FORMATTING."
 
 
 _REPLANNER_PROMPT = """You are a travel advisor planning assistant reviewing execution progress.

@@ -1,4 +1,6 @@
 """Formatter node — turns raw tool data into a warm, conversational advisor response."""
+import datetime
+
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, RemoveMessage
 from pydantic import BaseModel, Field
@@ -39,6 +41,9 @@ Do NOT invent destinations or data.
 
 RESPONSE TYPE — DETECT BEFORE WRITING:
 Look at the tool name(s) in the DATA COLLECTED block to determine response type.
+PRIORITY ORDER: TYPE C overrides TYPE A and TYPE B. If search_concerts appears anywhere
+in the DATA COLLECTED block, treat the ENTIRE response as TYPE C — ignore any other
+tool results present (e.g. get_best_time_to_visit) and answer only the concert question.
 
 TYPE A — INFORMATIONAL (currency, visa, safety, packing, customs, wikipedia):
   Tools: get_currency_exchange, get_visa_requirements, get_travel_safety_info,
@@ -55,6 +60,44 @@ TYPE B — DESTINATION ADVISORY (city discovery, budget filtering, city overview
          find_destinations_within_budget*, get_city_overview, fetch_activities,
          get_best_time_to_visit, get_average_weather, get_trip_duration_advisor
   Apply ALL the destination-specific rules below.
+
+TYPE C — CONCERTS & LIVE EVENTS (search_concerts):
+  Tool: search_concerts
+  Format rules:
+  - The DATA COLLECTED block contains raw web snippets (title + content + url) from concert sites.
+  - Extract and present: artist/act name, date, venue, city, and ticket link (url) when available.
+  - Group results by city (if multiple cities appear) or by date (if a single city).
+  - If the user asked "WHERE should I travel" (artist + month, no city): list the cities and dates,
+    then offer to check flights from the user's origin to those cities.
+  - If the user asked "WHEN should I travel" (artist + city, no month): list the dates clearly,
+    then offer to check flights around those dates.
+  - If the user asked for all concerts in a city: present a clean event list with dates and venues.
+  - Do NOT apply destination-discovery rules (budget discipline, origin awareness, intersection).
+  - End with an offer to search for flights or build a full itinerary around the event.
+
+  STRICT DATA DISCIPLINE FOR CONCERTS — CRITICAL:
+  The filtering rule depends on whether the user searched for a SPECIFIC ARTIST or not.
+
+  MODE A — SPECIFIC ARTIST SEARCH (user named an artist):
+  - ONLY present an event if the raw content EXPLICITLY names that artist AND states a specific
+    date or venue. Both must be present in the same snippet.
+  - Genre pages, "similar artists" pages, and general tour-date roundups do NOT count — discard.
+  - If no snippet contains an explicit artist + date/venue match, respond honestly:
+    "I couldn't find confirmed [artist] dates for [month/city] in our concert sources. This may mean
+    no shows are announced yet, or they haven't been listed on Songkick/Bandsintown yet.
+    I'd recommend checking [artist]'s official site or Bandsintown directly."
+
+  MODE B — CITY / MONTH SEARCH (user did NOT name a specific artist):
+  - Present any event where the snippet names a specific act/artist/band AND a date or venue.
+    You do NOT need to match a specific artist name — any confirmed act is valid.
+  - Metro-area browse pages with NO specific event dates or artists must be discarded.
+  - Past-show references (dates before TODAY'S DATE shown above) must be discarded.
+  - If snippets only contain generic listings with no specific artists or dates, respond honestly
+    that no confirmed events were found and suggest checking Songkick/Bandsintown directly.
+
+  BOTH MODES:
+  - NEVER infer, guess, or extrapolate dates from genre or location pages.
+  - Filter out any event whose date is before TODAY'S DATE shown at the top of this data block.
 
 SCOPE — CRITICAL:
 Answer ONLY the current user question (the last human message in the conversation).
@@ -130,6 +173,12 @@ Tone-matching instructions:
    Adapt the length to the complexity of the question.
 
 3. COMPLETENESS — If DATA COLLECTED lists multiple destinations, mention ALL of them.
+   MULTI-FILTER INTERSECTION EXCEPTION: If DATA COLLECTED contains an INTERSECTION line:
+   - If INTERSECTION lists specific cities: present ONLY those cities. These are destinations that
+     matched ALL of the user's filters simultaneously. Frame them as "cities that tick every box."
+   - If INTERSECTION says "No cities matched all selected filters": present the best partial matches
+     from each list and honestly explain the trade-off (e.g. "budget-friendly cities don't overlap
+     with family-focused ones in our data — here are the closest options for each").
 
 4. ACTIVITY RELEVANCE — Only include specific activities that fit the context of the user's current question.
 
@@ -186,6 +235,12 @@ class AdvisorFormatterNode:
         current_turn_messages = messages[last_human_idx:]
 
         data_block = state.get("advisor_data_collected") or build_data_collected([])
+
+        # Prepend today's date so the formatter can filter out past events (TYPE C)
+        # and reason correctly about time-sensitive information in general.
+        today_str = datetime.date.today().strftime("%B %d, %Y")
+        data_block = f"TODAY'S DATE: {today_str}\n\n{data_block}"
+
         response = self.model.invoke([
             {"role": "system", "content": _SYSTEM_PROMPT},
             *current_turn_messages,

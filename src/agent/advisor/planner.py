@@ -114,6 +114,7 @@ ToolName = Literal[
     "get_packing_list",
     "get_local_customs",
     "get_wikipedia_summary",
+    "search_concerts",
 ]
 
 
@@ -179,6 +180,14 @@ class PlannedToolCall(BaseModel):
         "Topic name for get_wikipedia_summary — a city, attraction, landmark, or place. "
         "Use the most specific name (e.g. 'Colosseum', 'Eiffel Tower', 'Kyoto')."
     ))
+    artist: str | None = Field(default=None, description=(
+        "Artist or performer name — used by search_concerts. "
+        "E.g. 'John Legend', 'Hardwell', 'Coldplay'."
+    ))
+    month: str | None = Field(default=None, description=(
+        "Month and year for search_concerts — e.g. 'August 2026', 'September 2026'. "
+        "Omit if the user did not specify a time period."
+    ))
 
 
 class AdvisorPlan(BaseModel):
@@ -192,7 +201,7 @@ class AdvisorPlan(BaseModel):
 _ARG_FIELDS = (
     "city", "tag", "category", "origin", "total_budget", "trip_days",
     "max_flight_hours", "season", "passport_nationality", "from_currency",
-    "to_currency", "amount", "trip_type", "topic",
+    "to_currency", "amount", "trip_type", "topic", "artist", "month",
 )
 
 # These tools use 'destination' as their parameter name instead of 'city'
@@ -218,12 +227,18 @@ _DISCOVERY_TOOLS = frozenset({"find_destinations_by_tag", "find_destinations_by_
 def _sanitize_plan(steps: list[PlannedToolCall]) -> list[PlannedToolCall]:
     """Enforce hard architectural constraints the LLM occasionally ignores.
 
-    Rule: when a budget tool is present, discovery tools are redundant and misleading
+    Rule A: when a budget tool is present, discovery tools are redundant and misleading
     (they return cities without cost/reachability filtering). Remove them.
+
+    Rule B: when search_concerts is present, it must be the only tool.
+    Adding get_best_time_to_visit or any other tool causes the formatter to ignore
+    the concert results and answer with irrelevant general-travel data instead.
     """
     tool_names = {s.tool_name for s in steps}
     if tool_names & _BUDGET_TOOLS:
         steps = [s for s in steps if s.tool_name not in _DISCOVERY_TOOLS]
+    if "search_concerts" in tool_names:
+        steps = [s for s in steps if s.tool_name == "search_concerts"]
     return steps
 
 
@@ -334,12 +349,12 @@ DESTINATION DISCOVERY TOOLS:
 - find_destinations_by_vibe
     Set: category = one of the AVAILABLE ACTIVITY CATEGORIES
     -> For activity-type queries: Nature, Culture, History, Family, Nightlife, Sightseeing
-    -> Pick the single closest category
+    -> Pick the single closest category (or one call per filter for multi-filter queries — see MULTI-FILTER RULE)
 
 - find_destinations_by_tag
     Set: tag = one of the AVAILABLE CITY TAGS
     -> For atmosphere, lifestyle, or vibe queries: romantic, beach, foodie, budget-friendly, etc.
-    -> Pick the single closest tag
+    -> Pick the single closest tag (or one call per filter for multi-filter queries — see MULTI-FILTER RULE)
 
 - find_destinations_within_budget_auto
     Set: origin = <city>, total_budget = <number>
@@ -382,31 +397,60 @@ PRACTICAL TRAVEL TOOLS (informational — each needs exactly ONE call, no combin
 
 - get_currency_exchange
     Set: from_currency = <currency code or name>, to_currency = <currency code or name>, amount = <number or omit for rate only>
-    -> For exchange rate / currency conversion questions ("how much is $500 in euros?")
+    -> Trigger: any exchange rate or currency conversion question
+    -> Examples: "how much is $500 in euros?", "what's the euro to shekel rate?", "convert 100 USD to JPY"
     -> Always one tool call; never combine with other tools
 
 - get_visa_requirements
     Set: city = <destination country or city>, passport_nationality = <user's nationality>
-    -> For visa requirement questions ("do I need a visa for Japan?")
+    -> Trigger: visa / passport requirement questions for a specific destination
+    -> Examples: "do I need a visa for Japan?", "can I enter Thailand visa-free?", "visa for Schengen?"
     -> If passport nationality is unknown, use "Unknown"
 
 - get_travel_safety_info
     Set: city = <destination>
-    -> For safety / travel advisory questions ("is Bangkok safe?", "travel warnings for Mexico?")
+    -> Trigger: safety, risk level, or travel advisory for a destination
+    -> Examples: "is Bangkok safe?", "travel warnings for Mexico?", "how safe is Cairo?"
 
 - get_packing_list
     Set: city = <destination>, season = <Spring|Summer|Autumn|Winter>, trip_days = <int>, trip_type = <city|beach|nature|cultural|business>
-    -> For packing questions ("what should I pack for Tokyo in summer?")
+    -> Trigger: packing advice or what to bring for a trip
+    -> Examples: "what should I pack for Tokyo in summer?", "packing list for a beach trip to Bali"
     -> Infer trip_type from context; default to "city" if unclear
     -> If trip_days unknown, use 7 as a reasonable default
 
 - get_local_customs
     Set: city = <destination or country>
-    -> For etiquette, tipping, customs, or useful-phrases questions
+    -> Trigger: etiquette, tipping norms, local customs, or useful phrases for a destination
+    -> Examples: "what are the customs in Japan?", "should I tip in France?", "useful phrases for Italy"
+
+- search_concerts
+    Set: city = <city>, artist = <performer name>, month = <"Month YYYY">
+    -> For questions about live concerts, shows, gigs, or DJ sets
+    -> At least one parameter must be provided; combine all that are known
+    -> Trigger phrases: "concerts in X", "shows in X in [month]", "where is [artist] touring",
+                        "when is [artist] in [city]", "where can I see [artist]"
+    -> Searches exclusively: Songkick, Bandsintown, Ticketmaster, Live Nation, Resident Advisor
+    -> Returns live web results — the formatter will extract event names, dates, venues, and cities
+    -> ALWAYS ONE call only — NEVER combine with ANY other tool (not get_best_time_to_visit,
+       not get_city_overview, not fetch_activities, not any discovery tool).
+       Concert date data IS the answer; general travel timing is irrelevant here.
+
+    Query-mode examples:
+      "concerts in London in August 2026"           → city="London",       month="August 2026"
+      "where is John Legend touring September 2026" → artist="John Legend", month="September 2026"
+      "when is Hardwell in Amsterdam"               → artist="Hardwell",    city="Amsterdam"
+      "upcoming Coldplay shows"                     → artist="Coldplay"
 
 - get_wikipedia_summary
     Set: topic = <specific place, attraction, or landmark name>
-    -> For "tell me about X", "what is X?", "history of X" questions about a place or landmark
+    -> For questions about a SPECIFIC ATTRACTION, LANDMARK, or HISTORICAL SITE (NOT a city as a whole)
+    -> Trigger phrases: "tell me about X", "what is X?", "history of X", "what's the X?", "describe X"
+    -> Examples: "tell me about the Colosseum" → topic="Colosseum"
+                 "what is the Sagrada Familia?" → topic="Sagrada Familia"
+                 "history of the Acropolis" → topic="Acropolis"
+                 "tell me about the Great Wall" → topic="Great Wall of China"
+    -> Do NOT use for city-level questions ("tell me about Rome" → use get_city_overview instead)
     -> Use the most specific name (e.g. "Colosseum", not "that famous place in Rome")
     -> One call only
 
@@ -446,6 +490,33 @@ RULE 0 — BUDGET WITHOUT ORIGIN (check this FIRST before any other rule):
 6. User mentions vibe/tag only, NO origin, NO budget:
    -> Plan EXACTLY ONE tool: find_destinations_by_tag or find_destinations_by_vibe
    -> Do NOT plan get_reachable_destinations — you have no origin to use
+   -> Exception: if the user specifies MULTIPLE vibes/filters, see MULTI-FILTER RULE below
+
+MULTI-FILTER RULE — User specifies TWO or more distinct destination preferences:
+   When the user combines two or more distinct filters (e.g. "cheap AND family", "beach AND romantic",
+   "cultural AND nightlife"), plan ONE discovery tool per filter. Results will be automatically
+   intersected so that only destinations satisfying ALL filters are shown.
+
+   Examples:
+     "cheap family destination"      → find_destinations_by_tag(tag="budget-friendly")
+                                        + find_destinations_by_vibe(category="Family")
+     "romantic beach getaway"        → find_destinations_by_tag(tag="romantic")
+                                        + find_destinations_by_tag(tag="beach")
+     "cultural city with nightlife"  → find_destinations_by_vibe(category="Culture")
+                                        + find_destinations_by_tag(tag="nightlife")
+     "safe, family-friendly nature"  → find_destinations_by_tag(tag="safe")
+                                        + find_destinations_by_vibe(category="Family")
+                                        (2 tools already — do not add a third discovery tool)
+
+   With origin and NO budget:
+     "cheap family trip from Paris"  → get_reachable_destinations(origin="Paris")
+                                        + find_destinations_by_tag(tag="budget-friendly")
+                                        + find_destinations_by_vibe(category="Family")
+
+   IMPORTANT constraints:
+   - Maximum 2 filter-discovery tools even when 3+ vibes are mentioned (pick the 2 most important)
+   - Budget tools (RULES 1 & 2) ALWAYS override this rule: if user has origin + budget, use budget tool only
+   - If one filter maps to both a tag and a vibe (e.g. "nightlife"), count it as ONE filter tool
 
 7. General destination ideas with no vibe, no origin, no budget:
    -> Plan: find_destinations_by_tag (tag="city-break") OR find_destinations_by_vibe (category="Sightseeing")
@@ -473,6 +544,16 @@ RULE 0 — BUDGET WITHOUT ORIGIN (check this FIRST before any other rule):
     -> Plan EXACTLY ONE tool from the PRACTICAL TRAVEL TOOLS section above
     -> Never combine practical tools with destination discovery tools in the same plan
     -> Never combine two practical tools unless the user explicitly asked two separate questions
+
+    Quick trigger reference:
+      "how much is X in Y / convert X to Y / exchange rate"  → get_currency_exchange
+      "do I need a visa / visa requirements for X"           → get_visa_requirements
+      "is X safe / travel warning / safety in X"            → get_travel_safety_info
+      "what should I pack / packing list for X"             → get_packing_list
+      "customs in X / tipping in X / etiquette / phrases"   → get_local_customs
+      "tell me about [landmark] / what is [landmark]"       → get_wikipedia_summary
+      (city-level: "tell me about Rome" → get_city_overview, NOT wikipedia)
+      "concerts / shows / gigs / events / touring / DJ set" → search_concerts
 
 COUNTRY -> CITY RESOLUTION:
 Apply this mapping to both KNOWN USER CONTEXT and the user's message:

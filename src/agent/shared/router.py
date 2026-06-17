@@ -76,9 +76,14 @@ class RouterNode:
            visa requirements ("do I need a visa for Japan?"), travel safety ("is Rio safe?"),
            packing questions ("what should I pack for Tokyo?"), local customs and etiquette,
            greetings ("hello", "hi", "thanks"), and capability questions ("what can you do?").
+           ALWAYS 'advisor' for concert / live event queries — regardless of whether a city is named:
+             "concerts in London in August", "when is Hardwell in Amsterdam?",
+             "where is John Legend touring?", "I want to see [artist] in [city]",
+             "when should I travel to see [artist]?" — all of these are information requests, NOT trip commitments.
         2. 'new_travel_plan': User commits to a SPECIFIC destination and wants flights/hotels/costs.
            ("I want to fly to Rome — show me flights", "Let's book a trip to Madrid").
            ONLY use when the user is ready to START PLANNING a specific trip, not just exploring.
+           NEVER use for concert/event queries — those are always 'advisor'.
         3. 'build_itinerary': ONLY when user EXPLICITLY asks for a day-by-day schedule.
            ("Build a 3-day itinerary for Rome", "plan my days in Paris", "replan for $700").
            "How should I split my time?" or "how many days per city?" → 'advisor', NOT here.
@@ -163,6 +168,18 @@ class RouterNode:
         # Guardrail 5: out_of_scope cannot be overridden by trip context
         if final_intent == "out_of_scope":
             return {"intent": "out_of_scope"}
+
+        # Guardrail 5b: concert / live-event queries must always route to advisor.
+        # These are information requests ("when is X in Y?") — never trip commitments.
+        if final_intent != "advisor":
+            content_lower = last_msg.content.lower()
+            concert_keywords = [
+                "concert", "concerts", "gig", "gigs", "show", "festival",
+                "tour", "touring", "performing", "performance", "live music",
+                "dj set", "dj", "hardwell", "when should i travel to see",
+            ]
+            if any(kw in content_lower for kw in concert_keywords):
+                final_intent = "advisor"
 
         # Guardrail 6: update_itinerary requires a built itinerary; otherwise build a fresh one
         if final_intent == "update_itinerary":
