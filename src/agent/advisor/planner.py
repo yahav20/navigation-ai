@@ -59,6 +59,14 @@ class _TravelRelevance(BaseModel):
 _TRAVEL_RELEVANCE_PROMPT = """You are a classifier for a travel assistant.
 Determine whether the user's question is related to travel or this assistant's capabilities.
 
+CONVERSATION CONTEXT (summary of what was already discussed, if available):
+{summary}
+
+SHORT FOLLOW-UP RULE: If the CONVERSATION CONTEXT shows an ongoing travel topic (e.g. a
+concert search, destination research, or itinerary planning) AND the new question is a short
+refinement of that topic (e.g. "only rock", "just show me cheaper ones", "what about Paris
+instead?"), classify it as travel-related — the context makes the intent clear.
+
 Return is_travel_related=True for ANY of these:
 - Destinations, cities, countries, regions
 - Flights, hotels, accommodations, transport
@@ -72,7 +80,7 @@ Return is_travel_related=True for ANY of these:
 - Greetings to the assistant ("hello", "hi", "thanks")
 - Questions about what the assistant can do ("what can you help me with?")
 
-Return is_travel_related=False for ALL of the following — even when travel context was mentioned earlier:
+Return is_travel_related=False for ALL of the following — regardless of context:
 - Coding / programming questions
 - Math or science homework
 - Sports scores or results
@@ -89,15 +97,21 @@ but then asks for cooking/recipe/preparation instructions is NOT a travel questi
 The subject of the question determines the category, not its framing."""
 
 
-def _is_travel_related(extraction_model: BaseChatModel, question: str) -> bool:
-    """Return False only when the question is clearly unrelated to travel."""
-    # silent(): keep this classifier's structured-output tokens off the chat
-    # stream, otherwise `{"is_travel_related": ...}` flashes in the UI before the
-    # real answer (matches the other silenced calls in this file).
+def _is_travel_related(extraction_model: BaseChatModel, question: str, summary: str = "") -> bool:
+    """Return False only when the question is clearly unrelated to travel.
+
+    Accepts an optional conversation summary so short follow-up refinements
+    ("I want only rock concerts") can be judged in context rather than in isolation.
+    """
     result: _TravelRelevance = silent(
         extraction_model.with_structured_output(_TravelRelevance)
     ).invoke([
-        {"role": "system", "content": _TRAVEL_RELEVANCE_PROMPT},
+        {
+            "role": "system",
+            "content": _TRAVEL_RELEVANCE_PROMPT.format(
+                summary=summary if summary else "No previous conversation."
+            ),
+        },
         {"role": "user", "content": question},
     ])
     return result.is_travel_related
@@ -366,14 +380,31 @@ with response_mode="greeting". The formatter will generate a warm welcome respon
 Do NOT plan any tool calls.
 
 CONVERSATIONAL SYNTHESIS (response_mode="conversational", steps=[]):
-Return an EMPTY steps list with response_mode="conversational" when the user asks you
-to synthesize or summarize from the conversation history — no new tool data is needed:
+Return an EMPTY steps list with response_mode="conversational" ONLY when the user asks
+to recap or compare using data that has ALREADY been shown — no new fetch is needed:
 - "summarize my demands so far" / "recap what I told you"
-- "what have we discussed?" / "what did we talk about?"
+- "what have we discussed?" / "which of those was cheapest?"
 - "based on what I said, which destination fits better?"
 - "compare those two cities based on what you told me"
-- Any question that needs prior context to answer but requires no new tool lookup.
-Do NOT plan any tool calls for these.
+
+DO NOT use conversational mode when the user is refining a search to fetch NEW data:
+- Genre refinement: "I want only rock concerts" / "show me jazz only"
+  → This requires a REAL tool call, not synthesis. See REFINEMENT RULE below.
+- Location change: "what about Paris instead?" → new tool call for Paris
+- "Only show me X" where X requires fetching data the assistant does not already have
+
+REFINEMENT RULE FOR CONCERTS — ABSOLUTE, NO EXCEPTIONS:
+When the user adds a genre filter after a previous concert search, ALWAYS make a new
+tool call — never use conversational mode, regardless of how many results are in the summary.
+
+The exact previous search parameters are available in KNOWN USER CONTEXT as
+"Last concert search: city=..., month=...". Use them directly.
+
+Concrete example:
+  KNOWN USER CONTEXT shows: Last concert search: city='London', month='August 2026'
+  User says: "I want only rock concerts"
+  → ALWAYS: search_concerts(city="London", month="August 2026", genre="rock")
+  → NEVER: conversational mode — even if the summary lists some rock acts already
 
 KNOWN USER CONTEXT (treat as confirmed facts — use directly in tool fields):
 {state_context}
@@ -654,8 +685,10 @@ class AdvisorPlannerNode:
         if not last_human:
             return {"advisor_plan": []}
 
-        # Gate: reject non-travel questions before planning
-        if not _is_travel_related(self.extraction_model, last_human.content):
+        # Gate: reject non-travel questions before planning.
+        # Summary is passed so short follow-up refinements ("only rock", "cheaper ones")
+        # are judged in context rather than in isolation.
+        if not _is_travel_related(self.extraction_model, last_human.content, summary):
             render_node_status("[Planner] Non-travel question detected — flagging as out-of-scope.")
             return {
                 "advisor_plan": [],
@@ -676,6 +709,10 @@ class AdvisorPlannerNode:
             ctx_parts.append(f"Budget: ${state['total_budget']:.0f}")
         if state.get("trip_days") is not None:
             ctx_parts.append(f"Trip duration: {state['trip_days']} days")
+        last_concert = state.get("advisor_last_concert_search") or {}
+        if last_concert:
+            parts = [f"{k}={v!r}" for k, v in last_concert.items()]
+            ctx_parts.append(f"Last concert search: {', '.join(parts)}")
         state_context = ", ".join(ctx_parts) if ctx_parts else "None established yet."
 
         shown_cities = state.get("advisor_shown_cities") or []

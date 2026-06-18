@@ -67,3 +67,4 @@ class AgentState(TypedDict):
     advisor_out_of_scope: NotRequired[bool]   # True when planner detects a non-travel question
     advisor_response_mode: NotRequired[str]   # "tool_call" | "greeting" | "conversational"
     advisor_intent_summary: NotRequired[str]  # planner-generated one-sentence intent (safe: no user message, no tool names)
+    advisor_last_concert_search: NotRequired[dict]  # args of the last search_concerts call {city, month, genre}

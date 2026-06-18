@@ -104,4 +104,11 @@ class AdvisorExecutorNode:
         result = scan_tool_output(result, source=tool_name, session_id=state.get("session_id", "unknown"))
 
         past_results.append({"tool_name": tool_name, "args": args, "result": result})
-        return {"advisor_last_tool_results": past_results}
+
+        update: dict = {"advisor_last_tool_results": past_results}
+        # Persist concert search args so the planner can carry them forward on genre refinements
+        if tool_name == "search_concerts":
+            update["advisor_last_concert_search"] = {
+                k: args[k] for k in ("city", "month", "genre") if k in args
+            }
+        return update
