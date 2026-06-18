@@ -20,6 +20,7 @@ structured data is passed to the main LLM formatter — same security properties
 from __future__ import annotations
 
 import datetime
+import re
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, RemoveMessage
@@ -32,6 +33,74 @@ from agent.advisor.result_formatters import (
     closer_guidance_for,
 )
 from security import SECURITY_RULES
+
+# ---------------------------------------------------------------------------
+# Deterministic post-extraction date validator
+# ---------------------------------------------------------------------------
+
+# Month name → its 3-letter abbreviations and variants
+_MONTH_VARIANTS: dict[str, list[str]] = {
+    "january":   ["jan"],
+    "february":  ["feb"],
+    "march":     ["mar"],
+    "april":     ["apr"],
+    "may":       ["may"],
+    "june":      ["jun"],
+    "july":      ["jul"],
+    "august":    ["aug"],
+    "september": ["sep", "sept"],
+    "october":   ["oct"],
+    "november":  ["nov"],
+    "december":  ["dec"],
+}
+
+
+def _date_matches_month(date_str: str, requested_month: str) -> bool:
+    """Return True if date_str falls within the requested month.
+
+    requested_month format: "Month YYYY"  e.g. "September 2026"
+    date_str: free-form string as extracted by LLM e.g. "Sep 18, 2026"
+
+    This is a deterministic check applied AFTER LLM extraction to catch
+    cases where the LLM hallucinated a date to make an event "fit" the filter.
+    """
+    if not requested_month:
+        return True
+
+    parts      = requested_month.strip().split()
+    month_name = parts[0].lower()          # "september"
+    year       = parts[1] if len(parts) > 1 else ""
+
+    date_lower = date_str.lower()
+
+    # Build all recognisable forms of the month (full name + abbreviations)
+    variants = [month_name] + _MONTH_VARIANTS.get(month_name, [])
+    has_month = any(v in date_lower for v in variants)
+
+    # Accept if the month abbrev appears as a word boundary (e.g. "sep" in "sept" is fine,
+    # but "aug" must NOT match "august" when we requested September).
+    # The simple substring check above is sufficient because each abbreviation set is disjoint.
+
+    has_year = year in date_lower if year else True
+    return has_month and has_year
+
+
+def _is_specific_url(url: str | None) -> bool:
+    """Return False for bare homepage URLs that have no event/artist-specific path.
+
+    e.g. 'https://www.bandsintown.com' → False (homepage, useless)
+         'https://www.bandsintown.com/e/12345' → True (specific event)
+         'https://www.bandsintown.com/a/tyler-the-creator' → True (artist page)
+    """
+    if not url:
+        return False
+    try:
+        from urllib.parse import urlparse
+        path = urlparse(url).path.strip("/")
+        return bool(path)
+    except Exception:
+        return True  # keep on parse failure
+
 
 # ---------------------------------------------------------------------------
 # Greeting (no LLM needed)
@@ -55,18 +124,48 @@ _GREETING_RESPONSE = (
 # ---------------------------------------------------------------------------
 
 class _ConcertEvent(BaseModel):
-    artist: str = Field(description="Artist or performer name as stated in the snippet")
-    date: str   = Field(description="Concert date exactly as stated (e.g. 'August 15, 2026')")
+    artist: str = Field(
+        description=(
+            "For standalone concerts: the artist name. "
+            "For festivals: the headliner, or 'Various Artists' if no clear headliner."
+        )
+    )
+    event_name: str | None = Field(
+        default=None,
+        description=(
+            "Festival or multi-act event name — e.g. 'All Points East 2026', 'Glastonbury'. "
+            "Leave None for standalone single-artist concerts."
+        ),
+    )
+    artists: list[str] = Field(
+        default_factory=list,
+        description=(
+            "For festival/multi-act events ONLY: ALL confirmed performers as a list. "
+            "CRITICAL: when multiple snippets mention different artists at the SAME festival "
+            "on the SAME day, merge them into ONE event entry here — do NOT create separate "
+            "entries per artist. Leave empty for standalone concerts."
+        ),
+    )
+    date: str   = Field(description="Event date exactly as stated (e.g. 'August 15, 2026')")
     venue: str | None = Field(default=None, description="Venue name if explicitly stated")
     city:  str | None = Field(default=None, description="City of the event if explicitly stated")
     url:   str | None = Field(default=None, description="Ticket or event URL from the snippet")
+    genre: str | None = Field(
+        default=None,
+        description=(
+            "Music genre of this event if mentioned in the snippet "
+            "(e.g. 'rock', 'electronic', 'jazz', 'pop', 'classical'). "
+            "Leave None when genre is not stated."
+        ),
+    )
 
 
 class _ConcertResults(BaseModel):
     events: list[_ConcertEvent] = Field(
         description=(
             "Confirmed upcoming events. Only include an event if the snippet explicitly "
-            "names the artist AND a specific date. Both must be present."
+            "names the artist AND a specific date. Both must be present. "
+            "FESTIVAL RULE: multiple artists at the same festival on the same day = ONE entry."
         )
     )
     no_results_message: str | None = Field(
@@ -104,6 +203,16 @@ FORMAT RULES:
 - Multi-topic response: use **bold headers** per section (e.g. **When to Visit**, **What to Pack**).
 - Closer: {closer_guidance}
 - Use **bold** for key values, bullet lists for long lists.
+- Concert events: present ALL events in ONE unified list — do NOT split into "main"
+  and "also in city" or any other secondary section, regardless of data completeness.
+- When a DATA entry includes a `url:` field, render it as a clickable
+  markdown link at the end of the line: `[Tickets/Info](url_value)`.
+- Festival events: when a DATA entry includes a `festival:` and `performers:` field,
+  show it as ONE entry: "**Festival Name** — date at venue\nArtists: performer1, performer2, ..."
+  followed by [Tickets/Info](url). Never list the same festival multiple times.
+- Genre: when a DATA entry includes a `genre:` field AND the user did not filter by a
+  specific artist, show the genre after the artist name in parentheses, e.g.
+  "Luke Combs (country) — August 2, 2026 at Wembley Stadium".
 - Tone: warm, direct, first person — like chatting with a knowledgeable friend.
 """
 
@@ -278,13 +387,45 @@ class AdvisorFormatterNode:
                         f"Extract confirmed upcoming concerts from these snippets.\n"
                         f"{mode_note}{month_filter}\n"
                         "Discard events before today's date.\n"
-                        "Discard genre pages, 'similar artists' roundups, or snippets with no specific date."
+                        "Discard genre pages, 'similar artists' roundups, or snippets with no specific date.\n\n"
+                        "DATE REQUIREMENT (strict): Every extracted event MUST have a specific date "
+                        "(day + month + year). If the content is JSON and dates appear as '2026-08-22', "
+                        "convert to 'August 22, 2026'. "
+                        "Year-only or month-only is NOT a valid date — discard those events.\n\n"
+                        "FESTIVAL CONSOLIDATION (critical):\n"
+                        "When snippets mention multiple artists at the SAME festival on the SAME day:\n"
+                        "  → Create exactly ONE _ConcertEvent entry for the festival\n"
+                        "  → Set event_name to the festival name (e.g. 'All Points East 2026')\n"
+                        "  → Put ALL artists in the artists[] list\n"
+                        "  → Set date/venue/city/url from the festival listing\n"
+                        "  → Do NOT create one entry per artist\n"
+                        "For standalone single-artist concerts, leave event_name and artists empty."
                     ),
                 },
                 {"role": "user", "content": snippets_text},
             ])
         except Exception:
             extraction = _ConcertResults(events=[], no_results_message=None)
+
+        # Deterministic post-extraction filters (LLM cannot bypass these)
+        if extraction.events:
+            # 1. Date completeness — drop events without a specific day+month+year
+            _VAGUE_DATES = {"", "tbc", "unknown", "?", "various", "dates tbc"}
+            extraction.events = [
+                ev for ev in extraction.events
+                if ev.date and ev.date.strip().lower() not in _VAGUE_DATES
+                and any(ch.isdigit() for ch in ev.date)  # must contain at least one digit
+            ]
+            # 2. Month filter — discard events with hallucinated dates outside requested month
+            if requested_month:
+                extraction.events = [
+                    ev for ev in extraction.events
+                    if _date_matches_month(ev.date, requested_month)
+                ]
+            # 3. URL filter — strip bare homepage URLs (e.g. www.bandsintown.com with no path)
+            for ev in extraction.events:
+                if not _is_specific_url(ev.url):
+                    ev.url = None
 
         if extraction.no_results_message and not extraction.events:
             return f"[{label}]\nstatus: {extraction.no_results_message}"
@@ -294,10 +435,23 @@ class AdvisorFormatterNode:
 
         lines = []
         for ev in extraction.events:
-            parts = [f"artist: {ev.artist}", f"date: {ev.date}"]
-            if ev.venue: parts.append(f"venue: {ev.venue}")
-            if ev.city:  parts.append(f"city: {ev.city}")
-            if ev.url:   parts.append(f"url: {ev.url}")
+            if ev.event_name and ev.artists:
+                # Festival with consolidated performer list
+                parts = [
+                    f"festival: {ev.event_name}",
+                    f"performers: {', '.join(ev.artists)}",
+                    f"date: {ev.date}",
+                ]
+            elif ev.event_name:
+                # Festival but only one artist extracted
+                parts = [f"festival: {ev.event_name}", f"performer: {ev.artist}", f"date: {ev.date}"]
+            else:
+                # Standalone concert
+                parts = [f"artist: {ev.artist}", f"date: {ev.date}"]
+            if ev.venue:  parts.append(f"venue: {ev.venue}")
+            if ev.city:   parts.append(f"city: {ev.city}")
+            if ev.genre:  parts.append(f"genre: {ev.genre}")
+            if ev.url:    parts.append(f"url: {ev.url}")
             lines.append("- " + " | ".join(parts))
 
         return f"[{label}]\n" + "\n".join(lines)

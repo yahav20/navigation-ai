@@ -198,6 +198,11 @@ class PlannedToolCall(BaseModel):
         "Month and year for search_concerts — e.g. 'August 2026', 'September 2026'. "
         "Omit if the user did not specify a time period."
     ))
+    genre: str | None = Field(default=None, description=(
+        "Music genre filter for search_concerts — e.g. 'rock', 'jazz', 'electronic', 'pop', 'classical'. "
+        "Set when the user specifies a genre (e.g. 'rock concerts in London'). "
+        "Omit when no genre is mentioned."
+    ))
 
 
 class AdvisorPlan(BaseModel):
@@ -237,7 +242,7 @@ class AdvisorPlan(BaseModel):
 _ARG_FIELDS = (
     "city", "tag", "category", "origin", "total_budget", "trip_days",
     "max_flight_hours", "season", "passport_nationality", "from_currency",
-    "to_currency", "amount", "trip_type", "topic", "artist", "month",
+    "to_currency", "amount", "trip_type", "topic", "artist", "month", "genre",
 )
 
 # These tools use 'destination' as their parameter name instead of 'city'
@@ -472,9 +477,11 @@ PRACTICAL TRAVEL TOOLS (informational — each needs exactly ONE call, no combin
     -> Examples: "what are the customs in Japan?", "should I tip in France?", "useful phrases for Italy"
 
 - search_concerts
-    Set: city = <city>, artist = <performer name>, month = <"Month YYYY">
+    Set: city = <city>, artist = <performer name>, month = <"Month YYYY">, genre = <music genre>
     -> For questions about live concerts, shows, gigs, or DJ sets
     -> At least one parameter must be provided; combine all that are known
+    -> Set genre when the user specifies a music style: "rock concerts", "jazz shows", "electronic",
+       "classical", "pop", "hip-hop", "metal", "R&B", etc.
     -> Trigger phrases: "concerts in X", "shows in X in [month]", "where is [artist] touring",
                         "when is [artist] in [city]", "where can I see [artist]"
     -> Searches exclusively: Songkick, Bandsintown, Ticketmaster, Live Nation, Resident Advisor

@@ -12,17 +12,21 @@ from langchain_core.tools import tool
 # consistent, structured event data.
 # ---------------------------------------------------------------------------
 
-_CONCERT_DOMAINS = [
-    "songkick.com",      # city/date listings, best for "concerts in X in August"
-    "bandsintown.com",   # artist tour pages, best for "where is [artist] in [month]"
-    "ticketmaster.com",  # official tickets, global venue coverage
-    "livenation.com",    # major promoter, strong European coverage
-    "ra.co",             # Resident Advisor — essential for electronic/DJ acts
+_ALL_CONCERT_DOMAINS = [
+    "songkick.com",
+    "ticketmaster.com",
+    "livenation.com",
+    "ra.co",
 ]
 
+# Artist queries → artist tour/event pages are most useful
+_ARTIST_DOMAINS = ["songkick.com", "ticketmaster.com", "livenation.com"]
+# City/month queries → event listing and festival pages are most useful
+_CITY_DOMAINS   = ["songkick.com", "ticketmaster.com", "livenation.com"]
 
-def _get_tavily():
-    """Lazily import and instantiate TavilySearch so missing API keys fail at call time."""
+
+def _get_tavily(domains: list[str], max_results: int = 20):
+    """Lazily import and instantiate TavilySearch restricted to the given domains."""
     try:
         from langchain_tavily import TavilySearch  # noqa: PLC0415
     except ImportError as exc:
@@ -39,25 +43,59 @@ def _get_tavily():
         )
 
     return TavilySearch(
-        max_results=10,
-        include_domains=_CONCERT_DOMAINS,
+        max_results=max_results,
+        include_domains=domains,
         search_depth="advanced",
     )
 
 
-def _build_query(city: str | None, artist: str | None, month: str | None) -> str:
-    """Build a focused Tavily query targeting specific event listing pages."""
+# ---------------------------------------------------------------------------
+# City disambiguation — prevents e.g. "London" matching London, Ontario
+# ---------------------------------------------------------------------------
+
+_DISAMBIGUATE: dict[str, str] = {
+    "london":     "London UK",
+    "paris":      "Paris France",
+    "rome":       "Rome Italy",
+    "florence":   "Florence Italy",
+    "cambridge":  "Cambridge UK",
+    "oxford":     "Oxford UK",
+    "manchester": "Manchester UK",
+    "birmingham": "Birmingham UK",
+}
+
+
+def _build_query(
+    city: str | None,
+    artist: str | None,
+    month: str | None,
+    genre: str | None = None,
+) -> str:
+    """Build a Tavily query that surfaces comprehensive event listing pages.
+
+    Design goals:
+    - City+month: target broad listing pages (Songkick metro-area, Ticketmaster
+      city search) that contain many events, not individual event pages.
+    - Artist: target the artist's own tour/event page.
+    - Genre: prepend the genre so search results are filtered to that style.
+    """
     parts: list[str] = []
+
+    if genre:
+        parts.append(genre)
+
     if artist:
         parts.append(artist)
 
-    if city and artist:
-        # Artist in a specific city — target their tour page for that city
-        parts.append(f"concert {city}")
-    elif city:
-        # All events in a city — "lineup schedule" pulls event listing pages
-        # rather than generic metro-area browse/category pages
-        parts.append(f"concerts {city} lineup schedule")
+    if city:
+        city_str = _DISAMBIGUATE.get(city.lower().strip(), city)
+        if artist:
+            # Artist + city: find that artist's event page for the city
+            parts.append(f"concert {city_str}")
+        else:
+            # City only: "concerts in X" matches Songkick metro-area page titles
+            # "festivals" ensures /festivals/ pages surface alongside /concerts/ pages
+            parts.append(f"concerts in {city_str} festivals")
     else:
         parts.append("concert tour dates")
 
@@ -65,43 +103,51 @@ def _build_query(city: str | None, artist: str | None, month: str | None) -> str
     return " ".join(parts)
 
 
+# ---------------------------------------------------------------------------
+# Main tool
+# ---------------------------------------------------------------------------
+
 @tool
 def search_concerts(
     city: str | None = None,
     artist: str | None = None,
     month: str | None = None,
+    genre: str | None = None,
 ) -> list[dict]:
     """Search for upcoming concerts and live shows using real-time web data.
 
     At least one of city, artist, or month must be provided. Combine parameters
     to narrow the search:
 
-    - city + month       → all concerts/shows in that city during that period
-    - artist + month     → cities where the artist performs that month (find where to travel)
-    - artist + city      → dates when the artist performs in that city (find when to travel)
-    - artist alone       → all upcoming tour dates for the artist
+    - city + month         → all concerts/shows in that city during that period
+    - artist + month       → cities where the artist performs that month
+    - artist + city        → dates when the artist performs in that city
+    - genre + city + month → genre-filtered concerts (e.g. rock concerts in London)
+    - artist alone         → all upcoming tour dates for the artist
 
-    Data is sourced exclusively from: Songkick, Bandsintown, Ticketmaster,
-    Live Nation, and Resident Advisor (RA).
+    Data is sourced from: Songkick, Ticketmaster, Live Nation, Resident Advisor.
 
     Returns a list of results, each with a title, content snippet, and source URL.
     """
-    if not any([city, artist, month]):
-        return [{"message": "Please provide at least one of: city, artist, or month."}]
+    if not any([city, artist, month, genre]):
+        return [{"message": "Please provide at least one of: city, artist, month, or genre."}]
 
-    query = _build_query(city, artist, month)
-    today = datetime.date.today().isoformat()  # e.g. "2026-06-17"
+    domains    = _ARTIST_DOMAINS if artist else _CITY_DOMAINS
+    query      = _build_query(city, artist, month, genre)
+    today      = datetime.date.today().isoformat()
+
+    # City+month listings benefit from more results since each page typically
+    # covers only 1-3 events; artist searches need fewer pages.
+    max_results = 20 if (city and month and not artist) else 15
+
     try:
-        tavily = _get_tavily()
-        # TavilySearch._run returns Dict{"query", "results": [...], "response_time"}
-        # start_date tells Tavily to only return pages updated/relevant from today onward
+        tavily   = _get_tavily(domains, max_results)
         response = tavily.invoke({"query": query, "start_date": today})
     except (ImportError, ValueError) as exc:
         return [{"message": str(exc)}]
     except Exception as exc:  # noqa: BLE001
         return [{"message": f"Concert search failed: {exc}"}]
 
-    # Extract the nested results list from the response dict
     if isinstance(response, dict):
         raw = response.get("results", [])
     elif isinstance(response, list):
@@ -113,11 +159,7 @@ def search_concerts(
         return [{"message": "No concert results found for this search."}]
 
     return [
-        {
-            "title": r.get("title", ""),
-            "content": r.get("content", ""),
-            "url": r.get("url", ""),
-        }
+        {"title": r.get("title", ""), "content": r.get("content", ""), "url": r.get("url", "")}
         for r in raw
         if isinstance(r, dict)
     ]
