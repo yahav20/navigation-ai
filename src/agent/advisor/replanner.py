@@ -10,7 +10,11 @@ from agent.advisor.planner import AdvisorPlan, PlannedToolCall, _step_to_args
 from agent.advisor.executor import _is_empty, format_tool_result
 from ui import render_node, render_node_status
 
-MAX_REPLAN_STEPS = 5
+# Maximum total tool executions allowed in one advisor turn.
+# Counts actual tool results, not replanner calls, so a legitimately large
+# plan (e.g. 6 tools from the planner) is never cut short. The cap only
+# fires when runaway replanning keeps adding new steps beyond what was planned.
+MAX_TOOL_EXECUTIONS = 12
 
 _DISCOVERY_TOOLS = frozenset({"find_destinations_by_vibe", "find_destinations_by_tag"})
 
@@ -160,11 +164,16 @@ class AdvisorReplannerNode:
                 render_node_status(f"[Replanner] '{last_executed_name}' returned empty — "
                                    f"checking whether to substitute sibling tool.")
 
-        if (not remaining_plan and not needs_substitution_check) or replan_count >= MAX_REPLAN_STEPS:
-            if replan_count >= MAX_REPLAN_STEPS:
-                render_node_status(f"[Replanner] Step limit reached ({MAX_REPLAN_STEPS}). Forcing finish.")
+        tool_count = len(past_results)
+        hit_cap    = tool_count >= MAX_TOOL_EXECUTIONS
+
+        if (not remaining_plan and not needs_substitution_check) or hit_cap:
+            if hit_cap:
+                render_node_status(
+                    f"[Replanner] Safety cap reached ({tool_count}/{MAX_TOOL_EXECUTIONS} tools). Forcing finish."
+                )
             else:
-                render_node_status(f"[Replanner] Plan complete. Proceeding to formatter.")
+                render_node_status("[Replanner] Plan complete. Proceeding to formatter.")
             return {
                 "advisor_plan": [],
                 "advisor_data_collected": build_data_collected(past_results),

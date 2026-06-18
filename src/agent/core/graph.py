@@ -23,7 +23,8 @@ from agent.shared.metadata import MetadataNode
 from agent.shared.router import RouterNode
 from agent.shared.save_plan import SavePlanPromptNode
 from agent.travel.confirmation import TravelConfirmationNode
-from agent.shared.security_gate import security_gate_node
+from agent.shared.security_gate import make_security_gate_node
+from agent.shared.injection_guard import InjectionGuard
 from agent.shared.summary import SummaryNode
 from agent.travel.adjustments import AdjustmentsNode
 from agent.travel.agent import TravelAgentNode
@@ -102,7 +103,8 @@ def _assemble_builder(provider: str = "google") -> StateGraph:
     builder = StateGraph(AgentState)
 
     # Travel planning nodes
-    builder.add_node("security_gate", security_gate_node)
+    injection_guard = InjectionGuard(extraction_model)
+    builder.add_node("security_gate", make_security_gate_node(injection_guard))
     builder.add_node("router", router_node)
     builder.add_node("extract_metadata", extract_metadata_node)
     builder.add_node("adjustments", adjustments_node)

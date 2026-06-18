@@ -63,5 +63,6 @@ class AgentState(TypedDict):
     advisor_last_tool_results: list    # [{tool_name, args, result}] accumulated within the current turn
     advisor_shown_cities: list         # accumulates every city name presented to the user across advisor turns
     advisor_replan_count: int          # number of replan cycles completed in the current turn
-    advisor_data_collected: NotRequired[str]  # DATA COLLECTED block passed to the advisor formatter (kept out of `messages`)
-    advisor_out_of_scope: NotRequired[bool]  # True when planner detects a non-travel question
+    advisor_data_collected: NotRequired[str]  # DATA COLLECTED block (kept for debug/traces only — not passed to the formatter LLM)
+    advisor_out_of_scope: NotRequired[bool]   # True when planner detects a non-travel question
+    advisor_response_mode: NotRequired[str]   # "tool_call" | "greeting" | "conversational"

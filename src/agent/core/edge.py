@@ -98,7 +98,15 @@ def after_travel_confirmation(state: AgentState) -> str:
 
 
 def after_advisor_planner(state: AgentState) -> str:
-    """Route to out_of_scope when planner detected a non-travel question, else to executor."""
+    """Route advisor planner output.
+
+    - Non-travel questions            → out_of_scope
+    - Greeting or conversational mode → advisor_formatter (skip executor/replanner loop)
+    - Tool calls planned              → advisor_executor
+    """
     if state.get("advisor_out_of_scope"):
         return "out_of_scope"
+    if not state.get("advisor_plan"):
+        # Empty plan = greeting or conversational synthesis; bypass the tool-execution loop
+        return "advisor_formatter"
     return "advisor_executor"

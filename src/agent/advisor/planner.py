@@ -4,6 +4,8 @@ from typing import Literal
 from langchain_core.language_models import BaseChatModel
 from pydantic import BaseModel, Field
 
+ResponseMode = Literal["tool_call", "greeting", "conversational"]
+
 from agent.core.llm import silent
 from agent.core.state import AgentState
 from ui import render_node, render_node_status
@@ -70,13 +72,21 @@ Return is_travel_related=True for ANY of these:
 - Greetings to the assistant ("hello", "hi", "thanks")
 - Questions about what the assistant can do ("what can you help me with?")
 
-Return is_travel_related=False ONLY when the question has zero travel connection:
+Return is_travel_related=False for ALL of the following — even when travel context was mentioned earlier:
 - Coding / programming questions
 - Math or science homework
-- Food recipes unrelated to travel
 - Sports scores or results
 - Medical / legal advice
-- Other topics a travel assistant should not touch"""
+- Cooking instructions, recipes, or how-to preparation steps for food
+  (e.g. "how do I make pizza?", "what are the steps to prepare pasta?",
+  "what ingredients go into X?", "how do I cook Y?" — these are cooking questions,
+  NOT travel questions, regardless of whether a food tour or local cuisine was mentioned)
+- Any request asking HOW TO DO or MAKE something that is not travel planning
+- Other topics a travel assistant should not touch
+
+CRITICAL: A question that starts with travel framing ("on my food tour", "in Naples")
+but then asks for cooking/recipe/preparation instructions is NOT a travel question.
+The subject of the question determines the category, not its framing."""
 
 
 def _is_travel_related(extraction_model: BaseChatModel, question: str) -> bool:
@@ -192,6 +202,18 @@ class PlannedToolCall(BaseModel):
 
 class AdvisorPlan(BaseModel):
     steps: list[PlannedToolCall] = Field(description="Ordered list of tool calls to execute, maximum 3")
+    response_mode: ResponseMode = Field(
+        default="tool_call",
+        description=(
+            "How the formatter should respond after planning:\n"
+            "- 'tool_call'     : steps will be executed (use whenever steps is non-empty)\n"
+            "- 'greeting'      : user sent a greeting or meta-question ('hi', 'thanks', "
+            "'what can you do?') — steps must be empty\n"
+            "- 'conversational': user asked a follow-up that needs conversation context but "
+            "no tools ('summarize my demands', 'what have we discussed?', 'compare those cities "
+            "based on what you told me') — steps must be empty"
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -318,10 +340,21 @@ You do NOT answer the question yourself. An executor will run the tools and a fo
 
 SPECIAL CASES — handle BEFORE planning any tools:
 
-GREETINGS & META QUESTIONS:
+GREETINGS & META QUESTIONS (response_mode="greeting", steps=[]):
 If the user is greeting you ("hello", "hi", "hey", "thanks") or asking what you can do
-("what can you do?", "how do you work?", "what are you?"): return an EMPTY steps list.
-The formatter will generate a warm welcome response. Do NOT plan any tool calls.
+("what can you do?", "how do you work?", "what are you?"): return an EMPTY steps list
+with response_mode="greeting". The formatter will generate a warm welcome response.
+Do NOT plan any tool calls.
+
+CONVERSATIONAL SYNTHESIS (response_mode="conversational", steps=[]):
+Return an EMPTY steps list with response_mode="conversational" when the user asks you
+to synthesize or summarize from the conversation history — no new tool data is needed:
+- "summarize my demands so far" / "recap what I told you"
+- "what have we discussed?" / "what did we talk about?"
+- "based on what I said, which destination fits better?"
+- "compare those two cities based on what you told me"
+- Any question that needs prior context to answer but requires no new tool lookup.
+Do NOT plan any tool calls for these.
 
 KNOWN USER CONTEXT (treat as confirmed facts — use directly in tool fields):
 {state_context}
@@ -451,6 +484,9 @@ PRACTICAL TRAVEL TOOLS (informational — each needs exactly ONE call, no combin
                  "history of the Acropolis" → topic="Acropolis"
                  "tell me about the Great Wall" → topic="Great Wall of China"
     -> Do NOT use for city-level questions ("tell me about Rome" → use get_city_overview instead)
+    -> Do NOT use for food items, dishes, recipes, or cooking topics — even if travel-framed
+       ("tell me about pizza margherita", "what is carbonara?" → these are food/cooking topics,
+       NOT travel topics; the travel relevance gate will reject them before planning reaches this tool)
     -> Use the most specific name (e.g. "Colosseum", not "that famous place in Rome")
     -> One call only
 
@@ -647,10 +683,13 @@ class AdvisorPlannerNode:
             {"tool_name": step.tool_name, "args": _step_to_args(step)}
             for step in sanitized
         ]
-        render_node_status(f"[Planner] Created plan: {[s['tool_name'] for s in plan_steps]}")
+        render_node_status(
+            f"[Planner] mode={plan.response_mode} plan={[s['tool_name'] for s in plan_steps]}"
+        )
         return {
             "advisor_plan": plan_steps,
             "advisor_last_tool_results": [],   # reset accumulated results for new turn
             "advisor_replan_count": 0,          # reset replan counter for new turn
             "advisor_out_of_scope": False,
+            "advisor_response_mode": plan.response_mode,
         }
