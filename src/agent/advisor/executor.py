@@ -5,9 +5,10 @@ from typing import Any
 from agent.core.state import AgentState
 from security import scan_tool_output
 from tools.destinations import advisor_tools
+from tools.flights import fetch_flights
 from ui import render_node, render_node_status
 
-_tool_map = {t.name: t for t in advisor_tools}
+_tool_map = {t.name: t for t in advisor_tools} | {"fetch_flights": fetch_flights}
 
 
 def _is_empty(result: Any) -> bool:
