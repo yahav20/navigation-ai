@@ -4,6 +4,8 @@ from typing import Literal
 from langchain_core.language_models import BaseChatModel
 from pydantic import BaseModel, Field
 
+ResponseMode = Literal["tool_call", "greeting", "conversational"]
+
 from agent.core.llm import silent
 from agent.core.state import AgentState
 from ui import render_node, render_node_status
@@ -57,6 +59,14 @@ class _TravelRelevance(BaseModel):
 _TRAVEL_RELEVANCE_PROMPT = """You are a classifier for a travel assistant.
 Determine whether the user's question is related to travel or this assistant's capabilities.
 
+CONVERSATION CONTEXT (summary of what was already discussed, if available):
+{summary}
+
+SHORT FOLLOW-UP RULE: If the CONVERSATION CONTEXT shows an ongoing travel topic (e.g. a
+concert search, destination research, or itinerary planning) AND the new question is a short
+refinement of that topic (e.g. "only rock", "just show me cheaper ones", "what about Paris
+instead?"), classify it as travel-related — the context makes the intent clear.
+
 Return is_travel_related=True for ANY of these:
 - Destinations, cities, countries, regions
 - Flights, hotels, accommodations, transport
@@ -70,24 +80,38 @@ Return is_travel_related=True for ANY of these:
 - Greetings to the assistant ("hello", "hi", "thanks")
 - Questions about what the assistant can do ("what can you help me with?")
 
-Return is_travel_related=False ONLY when the question has zero travel connection:
+Return is_travel_related=False for ALL of the following — regardless of context:
 - Coding / programming questions
 - Math or science homework
-- Food recipes unrelated to travel
 - Sports scores or results
 - Medical / legal advice
-- Other topics a travel assistant should not touch"""
+- Cooking instructions, recipes, or how-to preparation steps for food
+  (e.g. "how do I make pizza?", "what are the steps to prepare pasta?",
+  "what ingredients go into X?", "how do I cook Y?" — these are cooking questions,
+  NOT travel questions, regardless of whether a food tour or local cuisine was mentioned)
+- Any request asking HOW TO DO or MAKE something that is not travel planning
+- Other topics a travel assistant should not touch
+
+CRITICAL: A question that starts with travel framing ("on my food tour", "in Naples")
+but then asks for cooking/recipe/preparation instructions is NOT a travel question.
+The subject of the question determines the category, not its framing."""
 
 
-def _is_travel_related(extraction_model: BaseChatModel, question: str) -> bool:
-    """Return False only when the question is clearly unrelated to travel."""
-    # silent(): keep this classifier's structured-output tokens off the chat
-    # stream, otherwise `{"is_travel_related": ...}` flashes in the UI before the
-    # real answer (matches the other silenced calls in this file).
+def _is_travel_related(extraction_model: BaseChatModel, question: str, summary: str = "") -> bool:
+    """Return False only when the question is clearly unrelated to travel.
+
+    Accepts an optional conversation summary so short follow-up refinements
+    ("I want only rock concerts") can be judged in context rather than in isolation.
+    """
     result: _TravelRelevance = silent(
         extraction_model.with_structured_output(_TravelRelevance)
     ).invoke([
-        {"role": "system", "content": _TRAVEL_RELEVANCE_PROMPT},
+        {
+            "role": "system",
+            "content": _TRAVEL_RELEVANCE_PROMPT.format(
+                summary=summary if summary else "No previous conversation."
+            ),
+        },
         {"role": "user", "content": question},
     ])
     return result.is_travel_related
@@ -188,10 +212,41 @@ class PlannedToolCall(BaseModel):
         "Month and year for search_concerts — e.g. 'August 2026', 'September 2026'. "
         "Omit if the user did not specify a time period."
     ))
+    genre: str | None = Field(default=None, description=(
+        "Music genre filter for search_concerts — e.g. 'rock', 'jazz', 'electronic', 'pop', 'classical'. "
+        "Set when the user specifies a genre (e.g. 'rock concerts in London'). "
+        "Omit when no genre is mentioned."
+    ))
 
 
 class AdvisorPlan(BaseModel):
     steps: list[PlannedToolCall] = Field(description="Ordered list of tool calls to execute, maximum 3")
+    user_intent_summary: str = Field(
+        default="",
+        description=(
+            "One concise sentence (max 20 words) describing what the user is asking for — "
+            "factual, no style instructions, no tool names. Used by the formatter to write "
+            "a context-aware response.\n"
+            "Examples:\n"
+            "  'User wants visa and packing info for Paris, Israeli passport, 5-day summer trip.'\n"
+            "  'User is looking for romantic beach destinations within $1500 from Tel Aviv.'\n"
+            "  'User wants to find John Legend concerts in September 2026.'\n"
+            "  'User asked about best time to visit Tokyo and typical autumn weather.'\n"
+            "Leave empty for greetings and conversational synthesis."
+        ),
+    )
+    response_mode: ResponseMode = Field(
+        default="tool_call",
+        description=(
+            "How the formatter should respond after planning:\n"
+            "- 'tool_call'     : steps will be executed (use whenever steps is non-empty)\n"
+            "- 'greeting'      : user sent a greeting or meta-question ('hi', 'thanks', "
+            "'what can you do?') — steps must be empty\n"
+            "- 'conversational': user asked a follow-up that needs conversation context but "
+            "no tools ('summarize my demands', 'what have we discussed?', 'compare those cities "
+            "based on what you told me') — steps must be empty"
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -201,7 +256,7 @@ class AdvisorPlan(BaseModel):
 _ARG_FIELDS = (
     "city", "tag", "category", "origin", "total_budget", "trip_days",
     "max_flight_hours", "season", "passport_nationality", "from_currency",
-    "to_currency", "amount", "trip_type", "topic", "artist", "month",
+    "to_currency", "amount", "trip_type", "topic", "artist", "month", "genre",
 )
 
 # These tools use 'destination' as their parameter name instead of 'city'
@@ -318,10 +373,38 @@ You do NOT answer the question yourself. An executor will run the tools and a fo
 
 SPECIAL CASES — handle BEFORE planning any tools:
 
-GREETINGS & META QUESTIONS:
+GREETINGS & META QUESTIONS (response_mode="greeting", steps=[]):
 If the user is greeting you ("hello", "hi", "hey", "thanks") or asking what you can do
-("what can you do?", "how do you work?", "what are you?"): return an EMPTY steps list.
-The formatter will generate a warm welcome response. Do NOT plan any tool calls.
+("what can you do?", "how do you work?", "what are you?"): return an EMPTY steps list
+with response_mode="greeting". The formatter will generate a warm welcome response.
+Do NOT plan any tool calls.
+
+CONVERSATIONAL SYNTHESIS (response_mode="conversational", steps=[]):
+Return an EMPTY steps list with response_mode="conversational" ONLY when the user asks
+to recap or compare using data that has ALREADY been shown — no new fetch is needed:
+- "summarize my demands so far" / "recap what I told you"
+- "what have we discussed?" / "which of those was cheapest?"
+- "based on what I said, which destination fits better?"
+- "compare those two cities based on what you told me"
+
+DO NOT use conversational mode when the user is refining a search to fetch NEW data:
+- Genre refinement: "I want only rock concerts" / "show me jazz only"
+  → This requires a REAL tool call, not synthesis. See REFINEMENT RULE below.
+- Location change: "what about Paris instead?" → new tool call for Paris
+- "Only show me X" where X requires fetching data the assistant does not already have
+
+REFINEMENT RULE FOR CONCERTS — ABSOLUTE, NO EXCEPTIONS:
+When the user adds a genre filter after a previous concert search, ALWAYS make a new
+tool call — never use conversational mode, regardless of how many results are in the summary.
+
+The exact previous search parameters are available in KNOWN USER CONTEXT as
+"Last concert search: city=..., month=...". Use them directly.
+
+Concrete example:
+  KNOWN USER CONTEXT shows: Last concert search: city='London', month='August 2026'
+  User says: "I want only rock concerts"
+  → ALWAYS: search_concerts(city="London", month="August 2026", genre="rock")
+  → NEVER: conversational mode — even if the summary lists some rock acts already
 
 KNOWN USER CONTEXT (treat as confirmed facts — use directly in tool fields):
 {state_context}
@@ -425,9 +508,11 @@ PRACTICAL TRAVEL TOOLS (informational — each needs exactly ONE call, no combin
     -> Examples: "what are the customs in Japan?", "should I tip in France?", "useful phrases for Italy"
 
 - search_concerts
-    Set: city = <city>, artist = <performer name>, month = <"Month YYYY">
+    Set: city = <city>, artist = <performer name>, month = <"Month YYYY">, genre = <music genre>
     -> For questions about live concerts, shows, gigs, or DJ sets
     -> At least one parameter must be provided; combine all that are known
+    -> Set genre when the user specifies a music style: "rock concerts", "jazz shows", "electronic",
+       "classical", "pop", "hip-hop", "metal", "R&B", etc.
     -> Trigger phrases: "concerts in X", "shows in X in [month]", "where is [artist] touring",
                         "when is [artist] in [city]", "where can I see [artist]"
     -> Searches exclusively: Songkick, Bandsintown, Ticketmaster, Live Nation, Resident Advisor
@@ -451,6 +536,9 @@ PRACTICAL TRAVEL TOOLS (informational — each needs exactly ONE call, no combin
                  "history of the Acropolis" → topic="Acropolis"
                  "tell me about the Great Wall" → topic="Great Wall of China"
     -> Do NOT use for city-level questions ("tell me about Rome" → use get_city_overview instead)
+    -> Do NOT use for food items, dishes, recipes, or cooking topics — even if travel-framed
+       ("tell me about pizza margherita", "what is carbonara?" → these are food/cooking topics,
+       NOT travel topics; the travel relevance gate will reject them before planning reaches this tool)
     -> Use the most specific name (e.g. "Colosseum", not "that famous place in Rome")
     -> One call only
 
@@ -597,8 +685,10 @@ class AdvisorPlannerNode:
         if not last_human:
             return {"advisor_plan": []}
 
-        # Gate: reject non-travel questions before planning
-        if not _is_travel_related(self.extraction_model, last_human.content):
+        # Gate: reject non-travel questions before planning.
+        # Summary is passed so short follow-up refinements ("only rock", "cheaper ones")
+        # are judged in context rather than in isolation.
+        if not _is_travel_related(self.extraction_model, last_human.content, summary):
             render_node_status("[Planner] Non-travel question detected — flagging as out-of-scope.")
             return {
                 "advisor_plan": [],
@@ -619,6 +709,10 @@ class AdvisorPlannerNode:
             ctx_parts.append(f"Budget: ${state['total_budget']:.0f}")
         if state.get("trip_days") is not None:
             ctx_parts.append(f"Trip duration: {state['trip_days']} days")
+        last_concert = state.get("advisor_last_concert_search") or {}
+        if last_concert:
+            parts = [f"{k}={v!r}" for k, v in last_concert.items()]
+            ctx_parts.append(f"Last concert search: {', '.join(parts)}")
         state_context = ", ".join(ctx_parts) if ctx_parts else "None established yet."
 
         shown_cities = state.get("advisor_shown_cities") or []
@@ -647,10 +741,14 @@ class AdvisorPlannerNode:
             {"tool_name": step.tool_name, "args": _step_to_args(step)}
             for step in sanitized
         ]
-        render_node_status(f"[Planner] Created plan: {[s['tool_name'] for s in plan_steps]}")
+        render_node_status(
+            f"[Planner] mode={plan.response_mode} plan={[s['tool_name'] for s in plan_steps]}"
+        )
         return {
             "advisor_plan": plan_steps,
-            "advisor_last_tool_results": [],   # reset accumulated results for new turn
-            "advisor_replan_count": 0,          # reset replan counter for new turn
+            "advisor_last_tool_results": [],
+            "advisor_replan_count": 0,
             "advisor_out_of_scope": False,
+            "advisor_response_mode": plan.response_mode,
+            "advisor_intent_summary": plan.user_intent_summary,
         }
