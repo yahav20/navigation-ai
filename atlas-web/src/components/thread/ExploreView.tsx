@@ -73,7 +73,7 @@ function CardImage({
       }}
     >
       <img
-        src={`/images/explore/${country.toLowerCase()}.jpg`}
+        src={`/images/explore/${country.toLowerCase()}.png`}
         alt={`${city}, ${country}`}
         className="w-full h-full object-cover"
         onError={() => setError(true)}
