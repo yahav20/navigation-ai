@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 import {
   MapPin,
   Plane,
-  MessageCircle,
+  Ticket,
   Star,
   Calendar,
   DollarSign,
@@ -15,6 +15,8 @@ import {
   BedDouble,
   Baby,
   ChevronRight,
+  ChevronDown,
+  Check,
   X,
 } from "lucide-react";
 
@@ -24,7 +26,7 @@ import {
 export type AgentType =
   | "trip_planner"
   | "flight_finder"
-  | "general"
+  | "events"
   | "recommendations"
   | null;
 
@@ -63,12 +65,12 @@ const AGENTS: AgentCard[] = [
     hasForm: true,
   },
   {
-    id: "general",
-    label: "General Questions",
-    description: "Any question you have about travel and tourism",
-    icon: <MessageCircle className="size-5" />,
-    color: "oklch(0.5 0.15 260)",
-    hasForm: false,
+    id: "events",
+    label: "Shows & Events",
+    description: "Find concerts, shows and events worldwide",
+    icon: <Ticket className="size-5" />,
+    color: "oklch(0.58 0.22 320)",
+    hasForm: true,
   },
 ];
 
@@ -112,6 +114,7 @@ function TravelersRow({
           placeholder="2"
           value={adults}
           onChange={(e) => setAdults(e.target.value)}
+          onWheel={(e) => e.currentTarget.blur()}
           dir="ltr"
         />
       </div>
@@ -127,6 +130,7 @@ function TravelersRow({
           placeholder="0"
           value={children}
           onChange={(e) => setChildren(e.target.value)}
+          onWheel={(e) => e.currentTarget.blur()}
           dir="ltr"
         />
       </div>
@@ -143,6 +147,7 @@ function TravelersRow({
             placeholder="1"
             value={rooms}
             onChange={(e) => setRooms(e.target.value)}
+            onWheel={(e) => e.currentTarget.blur()}
             dir="ltr"
           />
         </div>
@@ -160,12 +165,41 @@ function TripPlannerForm({ onSubmit }: { onSubmit: (text: string) => void }) {
   const [days, setDays] = useState("");
   const [budget, setBudget] = useState("");
   const [month, setMonth] = useState("");
-  const [adults, setAdults] = useState("");
-  const [children, setChildren] = useState("");
-  const [rooms, setRooms] = useState("");
+  const [year, setYear] = useState("");
+  const [adults, setAdults] = useState("1");
+  const [children, setChildren] = useState("0");
+  const [rooms, setRooms] = useState("1");
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  const clearError = (key: string) =>
+    setErrors((p) => { const n = { ...p }; delete n[key]; return n; });
+
+  const locationRe = /^[a-zA-ZÀ-ɏ\s-]+$/;
 
   const handleSubmit = () => {
-    if (!origin || !destination || !days) return;
+    const errs: Record<string, string> = {};
+    if (!origin.trim()) {
+      errs.origin = "Required";
+    } else if (!locationRe.test(origin.trim())) {
+      errs.origin = "Please enter a valid location (letters only)";
+    }
+    if (!destination.trim()) {
+      errs.destination = "Required";
+    } else if (!locationRe.test(destination.trim())) {
+      errs.destination = "Please enter a valid location (letters only)";
+    }
+    const numDays = parseInt(days);
+    if (!days || isNaN(numDays) || numDays < 1) errs.days = "Must be at least 1";
+    if (budget.trim()) {
+      const numBudget = parseFloat(budget.replace(/[^0-9.]/g, ""));
+      if (isNaN(numBudget) || numBudget <= 0) errs.budget = "Must be a positive number";
+    }
+    if (year.trim()) {
+      const numYear = parseInt(year);
+      if (isNaN(numYear) || numYear < 2025 || numYear > 2030) errs.year = "Please enter a valid year (2025–2030)";
+    }
+    if (Object.keys(errs).length > 0) { setErrors(errs); return; }
+    setErrors({});
     const numAdults   = parseInt(adults)   || 1;
     const numChildren = parseInt(children) || 0;
     const numRooms    = parseInt(rooms)    || 1;
@@ -174,14 +208,17 @@ function TripPlannerForm({ onSubmit }: { onSubmit: (text: string) => void }) {
         ? "1 adult"
         : `${numAdults} adult${numAdults > 1 ? "s" : ""}` +
           (numChildren > 0 ? ` and ${numChildren} child${numChildren > 1 ? "ren" : ""}` : "");
+    const effectiveBudget = budget.trim() || "$5,000";
+    const effectiveMonth  = month || new Date().toLocaleString("en", { month: "long" });
+    const effectiveYear   = year.trim() ? parseInt(year) : new Date().getFullYear();
 
     const parts = [
       `Build a 3-day itinerary from ${origin} to ${destination}`,
       `for ${days} days`,
       `for ${travelers}`,
       numRooms > 1 ? `in ${numRooms} rooms` : "",
-      budget && `with a budget of ${budget}`,
-      month && `in ${month}`,
+      `with a budget of ${effectiveBudget}`,
+      `in ${effectiveMonth} ${effectiveYear}`,
     ].filter(Boolean);
     onSubmit(parts.join(", ") + ".");
   };
@@ -192,47 +229,67 @@ function TripPlannerForm({ onSubmit }: { onSubmit: (text: string) => void }) {
         <div>
           <label className={labelCls}>
             <Globe className="mb-0.5 mr-1 inline size-3" />
-            Origin country
+            Origin country<span className="text-[--ring] ml-0.5">*</span>
           </label>
-          <input className={inputCls} placeholder="Israel" value={origin}
-            onChange={(e) => setOrigin(e.target.value)} dir="ltr" />
+          <input className={cn(inputCls, errors.origin && "border-red-500")} placeholder="Israel" value={origin}
+            onChange={(e) => { setOrigin(e.target.value); if (e.target.value.trim() && locationRe.test(e.target.value.trim())) clearError("origin"); }} dir="ltr" />
+          {errors.origin && <p className="mt-1 text-xs text-red-500">{errors.origin}</p>}
         </div>
         <div>
           <label className={labelCls}>
             <MapPin className="mb-0.5 mr-1 inline size-3" />
-            Destination country
+            Destination country<span className="text-[--ring] ml-0.5">*</span>
           </label>
-          <input className={inputCls} placeholder="Italy" value={destination}
-            onChange={(e) => setDestination(e.target.value)} dir="ltr" />
+          <input className={cn(inputCls, errors.destination && "border-red-500")} placeholder="Italy" value={destination}
+            onChange={(e) => { setDestination(e.target.value); if (e.target.value.trim() && locationRe.test(e.target.value.trim())) clearError("destination"); }} dir="ltr" />
+          {errors.destination && <p className="mt-1 text-xs text-red-500">{errors.destination}</p>}
         </div>
         <div>
           <label className={labelCls}>
             <Calendar className="mb-0.5 mr-1 inline size-3" />
-            Number of days
+            Number of days<span className="text-[--ring] ml-0.5">*</span>
           </label>
-          <input className={inputCls} type="number" placeholder="7" min={1}
-            value={days} onChange={(e) => setDays(e.target.value)} dir="ltr" />
+          <input className={cn(inputCls, errors.days && "border-red-500")} type="number" placeholder="7" min={1}
+            value={days} onChange={(e) => { setDays(e.target.value); if (parseInt(e.target.value) >= 1) clearError("days"); }}
+            onWheel={(e) => e.currentTarget.blur()} dir="ltr" />
+          {errors.days && <p className="mt-1 text-xs text-red-500">{errors.days}</p>}
         </div>
-        <div>
-          <label className={labelCls}>
-            <Calendar className="mb-0.5 mr-1 inline size-3" />
-            Estimated month
-          </label>
-          <select className={inputCls} value={month} onChange={(e) => setMonth(e.target.value)} dir="ltr">
-            <option value="">Select month...</option>
-            {["January","February","March","April","May","June",
-              "July","August","September","October","November","December"].map((m) => (
-              <option key={m} value={m}>{m}</option>
-            ))}
-          </select>
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <label className={labelCls}>
+              <Calendar className="mb-0.5 mr-1 inline size-3" />
+              Month
+            </label>
+            <div className="relative">
+              <select className={cn(inputCls, "appearance-none pr-8")} value={month} onChange={(e) => setMonth(e.target.value)} dir="ltr">
+                <option value="">Select month...</option>
+                {["January","February","March","April","May","June",
+                  "July","August","September","October","November","December"].map((m) => (
+                  <option key={m} value={m}>{m}</option>
+                ))}
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 size-3.5 -translate-y-1/2 text-[--muted-foreground]" />
+            </div>
+          </div>
+          <div>
+            <label className={labelCls}>
+              <Calendar className="mb-0.5 mr-1 inline size-3" />
+              Year
+            </label>
+            <input className={cn(inputCls, errors.year && "border-red-500")} type="number" placeholder="2026" min={2025} max={2030}
+              value={year} onChange={(e) => { setYear(e.target.value); const y = parseInt(e.target.value); if (y >= 2025 && y <= 2030) clearError("year"); }}
+              onWheel={(e) => e.currentTarget.blur()} dir="ltr" />
+            {errors.year && <p className="mt-1 text-xs text-red-500">{errors.year}</p>}
+          </div>
         </div>
         <div className="col-span-2">
           <label className={labelCls}>
             <DollarSign className="mb-0.5 mr-1 inline size-3" />
             Estimated budget (optional)
           </label>
-          <input className={inputCls} placeholder="$5,000 per person" value={budget}
-            onChange={(e) => setBudget(e.target.value)} dir="ltr" />
+          <input className={cn(inputCls, errors.budget && "border-red-500")} placeholder="$5,000" value={budget}
+            onChange={(e) => { setBudget(e.target.value); if (errors.budget) clearError("budget"); }} dir="ltr" />
+          {errors.budget && <p className="mt-1 text-xs text-red-500">{errors.budget}</p>}
         </div>
       </div>
 
@@ -247,7 +304,7 @@ function TripPlannerForm({ onSubmit }: { onSubmit: (text: string) => void }) {
       </div>
 
       <div className="flex justify-end pt-1">
-        <FormSubmitButton onClick={handleSubmit} disabled={!origin || !destination || !days}
+        <FormSubmitButton onClick={handleSubmit} disabled={false}
           label="Plan my trip" icon={<MapPin className="size-4" />} />
       </div>
     </div>
@@ -261,13 +318,40 @@ function FlightFinderForm({ onSubmit }: { onSubmit: (text: string) => void }) {
   const [origin, setOrigin] = useState("");
   const [destination, setDestination] = useState("");
   const [month, setMonth] = useState("");
+  const [year, setYear] = useState("");
   const [budget, setBudget] = useState("");
   const [days, setDays] = useState("");
-  const [adults, setAdults] = useState("");
-  const [children, setChildren] = useState("");
+  const [adults, setAdults] = useState("1");
+  const [children, setChildren] = useState("0");
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  const clearError = (key: string) =>
+    setErrors((p) => { const n = { ...p }; delete n[key]; return n; });
+
+  const locationRe = /^[a-zA-ZÀ-ɏ\s-]+$/;
 
   const handleSubmit = () => {
-    if (!origin || !destination) return;
+    const errs: Record<string, string> = {};
+    if (!origin.trim()) {
+      errs.origin = "Required";
+    } else if (!locationRe.test(origin.trim())) {
+      errs.origin = "Please enter a valid location (letters only)";
+    }
+    if (!destination.trim()) {
+      errs.destination = "Required";
+    } else if (!locationRe.test(destination.trim())) {
+      errs.destination = "Please enter a valid location (letters only)";
+    }
+    if (days.trim()) {
+      const numDays = parseInt(days);
+      if (isNaN(numDays) || numDays < 1) errs.days = "Must be at least 1";
+    }
+    if (year.trim()) {
+      const numYear = parseInt(year);
+      if (isNaN(numYear) || numYear < 2025 || numYear > 2030) errs.year = "Please enter a valid year (2025–2030)";
+    }
+    if (Object.keys(errs).length > 0) { setErrors(errs); return; }
+    setErrors({});
     const numAdults   = parseInt(adults)   || 1;
     const numChildren = parseInt(children) || 0;
     const travelers =
@@ -275,13 +359,16 @@ function FlightFinderForm({ onSubmit }: { onSubmit: (text: string) => void }) {
         ? "1 adult"
         : `${numAdults} adult${numAdults > 1 ? "s" : ""}` +
           (numChildren > 0 ? ` and ${numChildren} child${numChildren > 1 ? "ren" : ""}` : "");
+    const effectiveBudget = budget.trim() || "$5,000";
+    const effectiveMonth  = month || new Date().toLocaleString("en", { month: "long" });
+    const effectiveYear   = year.trim() ? parseInt(year) : new Date().getFullYear();
 
     const parts = [
       `I'm looking for flights from ${origin} to ${destination}`,
-      month && `in ${month}`,
+      `in ${effectiveMonth} ${effectiveYear}`,
       days && `for a ${days}-day trip`,
       `for ${travelers}`,
-      budget && `with a budget of ${budget}`,
+      `with a budget of ${effectiveBudget}`,
     ].filter(Boolean);
     onSubmit(parts.join(", ") + ".");
   };
@@ -292,39 +379,58 @@ function FlightFinderForm({ onSubmit }: { onSubmit: (text: string) => void }) {
         <div>
           <label className={labelCls}>
             <Globe className="mb-0.5 mr-1 inline size-3" />
-            Origin city / airport
+            Origin city / airport<span className="text-[--ring] ml-0.5">*</span>
           </label>
-          <input className={inputCls} placeholder="Tel Aviv (TLV)" value={origin}
-            onChange={(e) => setOrigin(e.target.value)} dir="ltr" />
+          <input className={cn(inputCls, errors.origin && "border-red-500")} placeholder="Tel Aviv (TLV)" value={origin}
+            onChange={(e) => { setOrigin(e.target.value); if (e.target.value.trim() && locationRe.test(e.target.value.trim())) clearError("origin"); }} dir="ltr" />
+          {errors.origin && <p className="mt-1 text-xs text-red-500">{errors.origin}</p>}
         </div>
         <div>
           <label className={labelCls}>
             <Plane className="mb-0.5 mr-1 inline size-3" />
-            Destination
+            Destination<span className="text-[--ring] ml-0.5">*</span>
           </label>
-          <input className={inputCls} placeholder="Rome (FCO)" value={destination}
-            onChange={(e) => setDestination(e.target.value)} dir="ltr" />
+          <input className={cn(inputCls, errors.destination && "border-red-500")} placeholder="Rome (FCO)" value={destination}
+            onChange={(e) => { setDestination(e.target.value); if (e.target.value.trim() && locationRe.test(e.target.value.trim())) clearError("destination"); }} dir="ltr" />
+          {errors.destination && <p className="mt-1 text-xs text-red-500">{errors.destination}</p>}
         </div>
-        <div>
-          <label className={labelCls}>
-            <Calendar className="mb-0.5 mr-1 inline size-3" />
-            Estimated month
-          </label>
-          <select className={inputCls} value={month} onChange={(e) => setMonth(e.target.value)} dir="ltr">
-            <option value="">Select month...</option>
-            {["January","February","March","April","May","June",
-              "July","August","September","October","November","December"].map((m) => (
-              <option key={m} value={m}>{m}</option>
-            ))}
-          </select>
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <label className={labelCls}>
+              <Calendar className="mb-0.5 mr-1 inline size-3" />
+              Month
+            </label>
+            <div className="relative">
+              <select className={cn(inputCls, "appearance-none pr-8")} value={month} onChange={(e) => setMonth(e.target.value)} dir="ltr">
+                <option value="">Select month...</option>
+                {["January","February","March","April","May","June",
+                  "July","August","September","October","November","December"].map((m) => (
+                  <option key={m} value={m}>{m}</option>
+                ))}
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 size-3.5 -translate-y-1/2 text-[--muted-foreground]" />
+            </div>
+          </div>
+          <div>
+            <label className={labelCls}>
+              <Calendar className="mb-0.5 mr-1 inline size-3" />
+              Year
+            </label>
+            <input className={cn(inputCls, errors.year && "border-red-500")} type="number" placeholder="2026" min={2025} max={2030}
+              value={year} onChange={(e) => { setYear(e.target.value); const y = parseInt(e.target.value); if (y >= 2025 && y <= 2030) clearError("year"); }}
+              onWheel={(e) => e.currentTarget.blur()} dir="ltr" />
+            {errors.year && <p className="mt-1 text-xs text-red-500">{errors.year}</p>}
+          </div>
         </div>
         <div>
           <label className={labelCls}>
             <Calendar className="mb-0.5 mr-1 inline size-3" />
             Trip duration (days)
           </label>
-          <input className={inputCls} type="number" min={1} placeholder="7" value={days}
-            onChange={(e) => setDays(e.target.value)} dir="ltr" />
+          <input className={cn(inputCls, errors.days && "border-red-500")} type="number" min={1} placeholder="7" value={days}
+            onChange={(e) => { setDays(e.target.value); if (parseInt(e.target.value) >= 1) clearError("days"); }}
+            onWheel={(e) => e.currentTarget.blur()} dir="ltr" />
+          {errors.days && <p className="mt-1 text-xs text-red-500">{errors.days}</p>}
         </div>
         <div className="col-span-2">
           <label className={labelCls}>
@@ -348,7 +454,7 @@ function FlightFinderForm({ onSubmit }: { onSubmit: (text: string) => void }) {
       </div>
 
       <div className="flex justify-end pt-1">
-        <FormSubmitButton onClick={handleSubmit} disabled={!origin || !destination}
+        <FormSubmitButton onClick={handleSubmit} disabled={false}
           label="Search flights" icon={<Plane className="size-4" />} />
       </div>
     </div>
@@ -362,13 +468,19 @@ function RecommendationsForm({ onSubmit }: { onSubmit: (text: string) => void })
   const [origin, setOrigin] = useState("");
   const [month, setMonth] = useState("");
   const [topic, setTopic] = useState("");
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  const locationRe = /^[a-zA-ZÀ-ɏ\s-]+$/;
 
   const handleSubmit = () => {
-    if (!origin) return;
+    if (!origin.trim()) { setErrors({ origin: "Required" }); return; }
+    if (!locationRe.test(origin.trim())) { setErrors({ origin: "Please enter a valid location (letters only)" }); return; }
+    setErrors({});
+    const effectiveMonth = month || new Date().toLocaleString("en", { month: "long" });
     const parts = [
       "I'm looking for travel recommendations",
-      origin && `from ${origin}`,
-      month && `in ${month}`,
+      `from ${origin}`,
+      `in ${effectiveMonth}`,
       topic && `about ${topic}`,
     ].filter(Boolean);
     onSubmit(parts.join(" ") + ".");
@@ -379,23 +491,27 @@ function RecommendationsForm({ onSubmit }: { onSubmit: (text: string) => void })
       <div>
         <label className={labelCls}>
           <Globe className="mb-0.5 mr-1 inline size-3" />
-          Origin country
+          Origin country<span className="text-[--ring] ml-0.5">*</span>
         </label>
-        <input className={inputCls} placeholder="Israel" value={origin}
-          onChange={(e) => setOrigin(e.target.value)} dir="ltr" />
+        <input className={cn(inputCls, errors.origin && "border-red-500")} placeholder="Israel" value={origin}
+          onChange={(e) => { setOrigin(e.target.value); if (e.target.value.trim() && locationRe.test(e.target.value.trim())) setErrors({}); }} dir="ltr" />
+        {errors.origin && <p className="mt-1 text-xs text-red-500">{errors.origin}</p>}
       </div>
       <div>
         <label className={labelCls}>
           <Calendar className="mb-0.5 mr-1 inline size-3" />
           Estimated date
         </label>
-        <select className={inputCls} value={month} onChange={(e) => setMonth(e.target.value)} dir="ltr">
-          <option value="">Select month...</option>
-          {["January","February","March","April","May","June",
-            "July","August","September","October","November","December"].map((m) => (
-            <option key={m} value={m}>{m}</option>
-          ))}
-        </select>
+        <div className="relative">
+          <select className={cn(inputCls, "appearance-none pr-8")} value={month} onChange={(e) => setMonth(e.target.value)} dir="ltr">
+            <option value="">Select month...</option>
+            {["January","February","March","April","May","June",
+              "July","August","September","October","November","December"].map((m) => (
+              <option key={m} value={m}>{m}</option>
+            ))}
+          </select>
+          <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 size-3.5 -translate-y-1/2 text-[--muted-foreground]" />
+        </div>
       </div>
       <div className="col-span-2">
         <label className={labelCls}>
@@ -406,7 +522,7 @@ function RecommendationsForm({ onSubmit }: { onSubmit: (text: string) => void })
           value={topic} onChange={(e) => setTopic(e.target.value)} dir="ltr" />
       </div>
       <div className="col-span-2 flex justify-end pt-1">
-        <FormSubmitButton onClick={handleSubmit} disabled={!origin}
+        <FormSubmitButton onClick={handleSubmit} disabled={false}
           label="Get Recommendations" icon={<Star className="size-4" />} />
       </div>
     </div>
@@ -424,12 +540,24 @@ function FormSubmitButton({
   label: string;
   icon: React.ReactNode;
 }) {
+  const [phase, setPhase] = useState<"idle" | "loading" | "done">("idle");
+
+  const handleClick = () => {
+    if (phase !== "idle") return;
+    onClick();
+    setPhase("loading");
+    setTimeout(() => {
+      setPhase("done");
+      setTimeout(() => setPhase("idle"), 600);
+    }, 1500);
+  };
+
   return (
     <motion.button
-      onClick={onClick}
+      onClick={handleClick}
       disabled={disabled}
       className={cn(
-        "flex items-center gap-2 rounded-xl px-5 py-2.5",
+        "flex min-w-[9rem] items-center justify-center gap-2 rounded-xl px-5 py-2.5",
         "bg-[--primary] text-[--primary-foreground] text-sm font-medium",
         "shadow-[0_0_16px_var(--glow-primary)]",
         "hover:shadow-[0_0_28px_var(--glow-accent)]",
@@ -439,10 +567,131 @@ function FormSubmitButton({
       whileHover={disabled ? {} : { scale: 1.03 }}
       whileTap={disabled ? {} : { scale: 0.97 }}
     >
-      {icon}
-      {label}
-      <ChevronRight className="size-4" />
+      <AnimatePresence mode="wait" initial={false}>
+        {phase === "idle" && (
+          <motion.span key="idle" className="flex items-center gap-2"
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            transition={{ duration: 0.15 }}>
+            {icon}{label}<ChevronRight className="size-4" />
+          </motion.span>
+        )}
+        {phase === "loading" && (
+          <motion.span key="loading" className="flex items-center gap-2"
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            transition={{ duration: 0.15 }}>
+            <motion.span
+              className="block size-4 rounded-full border-2 border-[--primary-foreground]/30 border-t-[--primary-foreground]"
+              animate={{ rotate: 360 }}
+              transition={{ duration: 0.8, repeat: Infinity, ease: "linear" }}
+            />
+            Processing...
+          </motion.span>
+        )}
+        {phase === "done" && (
+          <motion.span key="done" className="flex items-center gap-2"
+            initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}>
+            <Check className="size-4" />
+            Done!
+          </motion.span>
+        )}
+      </AnimatePresence>
     </motion.button>
+  );
+}
+
+/* ─────────────────────────────────────────
+   Events Form
+───────────────────────────────────────── */
+function EventsForm({ onSubmit }: { onSubmit: (text: string) => void }) {
+  const [artist, setArtist] = useState("");
+  const [city, setCity] = useState("");
+  const [month, setMonth] = useState("");
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  const locationRe = /^[a-zA-ZÀ-ɏ\s-]+$/;
+  const canSubmit = !!(artist.trim() || city.trim() || month);
+
+  const handleSubmit = () => {
+    if (!canSubmit) return;
+    const errs: Record<string, string> = {};
+    if (city.trim() && !locationRe.test(city.trim())) {
+      errs.city = "Please enter a valid location (letters only)";
+    }
+    if (Object.keys(errs).length > 0) { setErrors(errs); return; }
+    setErrors({});
+    const base = artist.trim() ? `Find me shows of ${artist.trim()}` : "Find me shows";
+    const parts = [
+      base,
+      city.trim() && `in ${city.trim()}`,
+      month && `in ${month}`,
+    ].filter(Boolean);
+    onSubmit(parts.join(" ") + ".");
+  };
+
+  const currentMonth = new Date().toLocaleString("en-US", { month: "long" });
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className={labelCls}>
+            <Ticket className="mb-0.5 mr-1 inline size-3" />
+            Artist / Show
+          </label>
+          <input className={inputCls} placeholder="Lady Gaga, Taylor Swift..." value={artist}
+            onChange={(e) => setArtist(e.target.value)} dir="ltr" />
+        </div>
+        <div>
+          <label className={labelCls}>
+            <MapPin className="mb-0.5 mr-1 inline size-3" />
+            City
+          </label>
+          <input className={cn(inputCls, errors.city && "border-red-500")} placeholder="London, New York..." value={city}
+            onChange={(e) => { setCity(e.target.value); if (e.target.value.trim() && locationRe.test(e.target.value.trim())) setErrors({}); }} dir="ltr" />
+          {errors.city && <p className="mt-1 text-xs text-red-500">{errors.city}</p>}
+        </div>
+        <div className="col-span-2">
+          <label className={labelCls}>
+            <Calendar className="mb-0.5 mr-1 inline size-3" />
+            Month
+          </label>
+          <div className="relative">
+            <select className={cn(inputCls, "appearance-none pr-8")} value={month} onChange={(e) => setMonth(e.target.value)} dir="ltr">
+              <option value="">Select month...</option>
+              {["January","February","March","April","May","June",
+                "July","August","September","October","November","December"].map((m) => (
+                <option key={m} value={m}>{m}</option>
+              ))}
+            </select>
+            <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 size-3.5 -translate-y-1/2 text-[--muted-foreground]" />
+          </div>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        <button type="button"
+          onClick={() => { setArtist("Lady Gaga"); setCity("London"); setErrors({}); }}
+          className="rounded-lg bg-[--accent] px-2.5 py-1 text-xs font-medium text-[--foreground] transition-colors duration-150 hover:bg-[--accent]/80">
+          🎤 Artist in city
+        </button>
+        <button type="button"
+          onClick={() => setMonth(currentMonth)}
+          className="rounded-lg bg-[--accent] px-2.5 py-1 text-xs font-medium text-[--foreground] transition-colors duration-150 hover:bg-[--accent]/80">
+          📅 Events this month
+        </button>
+        <button type="button"
+          onClick={() => { setCity("near me"); setErrors({}); }}
+          className="rounded-lg bg-[--accent] px-2.5 py-1 text-xs font-medium text-[--foreground] transition-colors duration-150 hover:bg-[--accent]/80">
+          🌍 Any shows near me
+        </button>
+      </div>
+
+      <div className="flex justify-end pt-1">
+        <FormSubmitButton onClick={handleSubmit} disabled={!canSubmit}
+          label="Find Events" icon={<Ticket className="size-4" />} />
+      </div>
+    </div>
   );
 }
 
@@ -546,6 +795,9 @@ export function AgentSelector({ onSubmit }: { onSubmit: (text: string) => void }
               )}
               {selected === "recommendations" && (
                 <RecommendationsForm onSubmit={(t) => { onSubmit(t); setSelected(null); }} />
+              )}
+              {selected === "events" && (
+                <EventsForm onSubmit={(t) => { onSubmit(t); setSelected(null); }} />
               )}
             </div>
           </motion.div>
