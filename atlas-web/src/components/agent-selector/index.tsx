@@ -8,14 +8,12 @@ import {
   Plane,
   Ticket,
   Star,
-  Compass,
   X,
 } from "lucide-react";
 import { TripPlannerForm } from "./forms/TripPlannerForm";
 import { FlightFinderForm } from "./forms/FlightFinderForm";
 import { RecommendationsForm } from "./forms/RecommendationsForm";
 import { EventsForm } from "./forms/EventsForm";
-import { ExploreForm } from "./forms/ExploreForm";
 
 /* ─────────────────────────────────────────
    Types
@@ -25,7 +23,6 @@ export type AgentType =
   | "flight_finder"
   | "events"
   | "recommendations"
-  | "explore"
   | null;
 
 interface AgentCard {
@@ -68,14 +65,6 @@ const AGENTS: AgentCard[] = [
     description: "Find concerts, shows and events worldwide",
     icon: <Ticket className="size-5" />,
     color: "oklch(0.58 0.22 320)",
-    hasForm: true,
-  },
-  {
-    id: "explore",
-    label: "Explore",
-    description: "Instant highlights for 5 top European destinations",
-    icon: <Compass className="size-5" />,
-    color: "oklch(0.6 0.2 150)",
     hasForm: true,
   },
 ];
@@ -184,7 +173,6 @@ export function AgentSelector({ onSubmit }: { onSubmit: (text: string) => void }
               {selected === "events" && (
                 <EventsForm onSubmit={(t) => { onSubmit(t); setSelected(null); }} />
               )}
-              {selected === "explore" && <ExploreForm />}
             </div>
           </motion.div>
         )}

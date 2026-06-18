@@ -9,7 +9,7 @@ import { Checkpoint, Message } from "@langchain/langgraph-sdk";
 import { AssistantMessage, AssistantMessageLoading } from "./messages/ai";
 import { HumanMessage } from "./messages/human";
 import { useTheme } from "next-themes";
-import { Moon, Sun } from "lucide-react";
+import { Moon, Sun, Compass } from "lucide-react";
 import {
   DO_NOT_RENDER_ID_PREFIX,
   ensureToolCallsHaveResponses,
@@ -53,6 +53,9 @@ import {
   useArtifactContext,
 } from "./artifact";
 import { AgentSelector } from "./agent-selector";
+import { createClient } from "@/providers/client";
+import { getApiKey } from "@/lib/api-key";
+import ExploreView, { type ExploreCard } from "./ExploreView";
 
 /* ─────────────────────────────────────────
    Ambient background: animated ocean orbs
@@ -238,6 +241,36 @@ function PanelToggleButton({ isOpen, onToggle }: { isOpen: boolean; onToggle: ()
   );
 }
 
+function ExploreButton({ onClick, active }: { onClick: () => void; active: boolean }) {
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <motion.button
+            onClick={onClick}
+            className={cn(
+              "relative flex h-9 w-9 items-center justify-center rounded-full",
+              "border bg-[--card]/60 backdrop-blur-sm",
+              "transition-all duration-300",
+              active
+                ? "border-[--ring] text-[--ring] shadow-[0_0_14px_var(--glow-accent)]"
+                : "border-[--border] text-[--muted-foreground] hover:border-[--ring] hover:text-[--foreground] hover:shadow-[0_0_12px_var(--glow-accent)]",
+            )}
+            whileHover={{ scale: 1.1 }}
+            whileTap={{ scale: 0.92 }}
+            aria-label="Explore destinations"
+          >
+            <Compass className="size-[1.1rem]" />
+          </motion.button>
+        </TooltipTrigger>
+        <TooltipContent side="left">
+          <p>Explore destinations</p>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
 /* ─────────────────────────────────────────
    Main Thread component
 ───────────────────────────────────────── */
@@ -269,6 +302,12 @@ export function Thread() {
   const [inputFocused, setInputFocused] = useState(false);
   const isLargeScreen = useMediaQuery("(min-width: 1024px)");
 
+  const [exploreOpen, setExploreOpen] = useState(false);
+  const [cards, setCards] = useState<ExploreCard[]>([]);
+  const [fetchStatus, setFetchStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
+  const [apiUrl] = useQueryState("apiUrl", { defaultValue: process.env.NEXT_PUBLIC_API_URL ?? "" });
+  const [authScheme] = useQueryState("authScheme", { defaultValue: process.env.NEXT_PUBLIC_AUTH_SCHEME ?? "" });
+
   const stream = useStreamContext();
   const messages = stream.messages;
   const isLoading = stream.isLoading;
@@ -283,6 +322,30 @@ export function Thread() {
     _setThreadId(id);
     closeArtifact();
     setArtifactContext({});
+  };
+
+  const fetchExplore = async () => {
+    setFetchStatus("loading");
+    try {
+      const client = createClient(
+        apiUrl || "http://localhost:2024",
+        getApiKey() ?? undefined,
+        authScheme || undefined,
+      );
+      const result = await client.runs.wait(null, "explore", { input: {} }) as { cards?: ExploreCard[] };
+      setCards(result.cards ?? []);
+      setFetchStatus("done");
+    } catch {
+      setFetchStatus("error");
+    }
+  };
+
+  const handleExploreToggle = () => {
+    const next = !exploreOpen;
+    setExploreOpen(next);
+    if (next && fetchStatus === "idle") {
+      void fetchExplore();
+    }
   };
 
   useEffect(() => {
@@ -469,7 +532,8 @@ export function Thread() {
                   />
                 )}
               </div>
-              <div className="absolute top-3 right-4 flex items-center">
+              <div className="absolute top-3 right-4 flex items-center gap-1">
+                <ExploreButton onClick={handleExploreToggle} active={exploreOpen} />
                 <OpenGitHubRepo />
               </div>
             </motion.div>
@@ -501,6 +565,7 @@ export function Thread() {
               </div>
 
               <div className="flex items-center gap-2">
+                <ExploreButton onClick={handleExploreToggle} active={exploreOpen} />
                 <OpenGitHubRepo />
                 <TooltipIconButton
                   size="lg"
@@ -801,6 +866,79 @@ export function Thread() {
           </div>
         </div>
       </div>
+
+      {/* ── Explore overlay ── */}
+      <AnimatePresence>
+        {exploreOpen && (
+          <motion.div
+            className="fixed inset-0 z-50 overflow-auto bg-[--background]/95 backdrop-blur-md"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.25 }}
+          >
+            <div className="min-h-full p-6">
+              {/* Header */}
+              <div className="mb-6 flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <Compass className="size-5 text-[--ring]" />
+                  <h2 className="text-lg font-semibold text-[--foreground]">Explore Destinations</h2>
+                </div>
+                <motion.button
+                  onClick={() => setExploreOpen(false)}
+                  className={cn(
+                    "flex h-9 w-9 items-center justify-center rounded-full",
+                    "border border-[--border] bg-[--card]/60 backdrop-blur-sm",
+                    "text-[--muted-foreground] transition-all duration-200",
+                    "hover:border-[--ring] hover:text-[--foreground]",
+                    "hover:shadow-[0_0_12px_var(--glow-accent)]",
+                  )}
+                  whileHover={{ scale: 1.1 }}
+                  whileTap={{ scale: 0.92 }}
+                >
+                  <XIcon className="size-4" />
+                </motion.button>
+              </div>
+
+              {/* Loading */}
+              {fetchStatus === "loading" && (
+                <div className="flex flex-col items-center gap-3 py-24">
+                  <motion.div
+                    className="size-10 rounded-full border-2 border-[--primary]/30 border-t-[--primary]"
+                    animate={{ rotate: 360 }}
+                    transition={{ duration: 0.9, repeat: Infinity, ease: "linear" }}
+                  />
+                  <p className="text-sm text-[--muted-foreground]">Fetching 5 destinations in parallel…</p>
+                </div>
+              )}
+
+              {/* Error */}
+              {fetchStatus === "error" && (
+                <div className="flex flex-col items-center gap-4 py-24">
+                  <p className="text-sm text-red-500">Could not load explore data.</p>
+                  <motion.button
+                    onClick={fetchExplore}
+                    className={cn(
+                      "rounded-xl border border-[--border] bg-[--card]/70 px-5 py-2.5",
+                      "text-sm text-[--foreground] transition-all duration-200",
+                      "hover:border-[--ring] hover:shadow-[0_0_12px_var(--glow-accent)]",
+                    )}
+                    whileHover={{ scale: 1.03 }}
+                    whileTap={{ scale: 0.97 }}
+                  >
+                    Retry
+                  </motion.button>
+                </div>
+              )}
+
+              {/* Cards */}
+              {fetchStatus === "done" && cards.length > 0 && (
+                <ExploreView cards={cards} />
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
