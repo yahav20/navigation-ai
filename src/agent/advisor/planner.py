@@ -202,6 +202,20 @@ class PlannedToolCall(BaseModel):
 
 class AdvisorPlan(BaseModel):
     steps: list[PlannedToolCall] = Field(description="Ordered list of tool calls to execute, maximum 3")
+    user_intent_summary: str = Field(
+        default="",
+        description=(
+            "One concise sentence (max 20 words) describing what the user is asking for — "
+            "factual, no style instructions, no tool names. Used by the formatter to write "
+            "a context-aware response.\n"
+            "Examples:\n"
+            "  'User wants visa and packing info for Paris, Israeli passport, 5-day summer trip.'\n"
+            "  'User is looking for romantic beach destinations within $1500 from Tel Aviv.'\n"
+            "  'User wants to find John Legend concerts in September 2026.'\n"
+            "  'User asked about best time to visit Tokyo and typical autumn weather.'\n"
+            "Leave empty for greetings and conversational synthesis."
+        ),
+    )
     response_mode: ResponseMode = Field(
         default="tool_call",
         description=(
@@ -688,8 +702,9 @@ class AdvisorPlannerNode:
         )
         return {
             "advisor_plan": plan_steps,
-            "advisor_last_tool_results": [],   # reset accumulated results for new turn
-            "advisor_replan_count": 0,          # reset replan counter for new turn
+            "advisor_last_tool_results": [],
+            "advisor_replan_count": 0,
             "advisor_out_of_scope": False,
             "advisor_response_mode": plan.response_mode,
+            "advisor_intent_summary": plan.user_intent_summary,
         }
