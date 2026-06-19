@@ -127,7 +127,7 @@ _GREETING_RESPONSE = (
     "- **Budget planning** — see which destinations fit your budget from your city\n"
     "- **Practical info** — visa requirements, travel safety, currency exchange, "
     "packing lists, and local customs\n"
-    "- **Live events** — upcoming concerts and shows at your destination\n"
+    "- **Live events** — upcoming concerts, shows, and seasonal events at your destination\n"
     "- **Day-by-day itineraries** — once you've picked a destination\n\n"
     "Where are you thinking of going?"
 )
@@ -188,6 +188,74 @@ class _ConcertResults(BaseModel):
             "(e.g. 'No confirmed dates found yet — check Bandsintown directly')."
         ),
     )
+
+# ---------------------------------------------------------------------------
+# Special Events Pydantic extraction models (raw snippets → structured events)
+# ---------------------------------------------------------------------------
+
+class _SpecialEventAdvisor(BaseModel):
+    name: str = Field(description="Name of the event or festival")
+    description: str = Field(description="Brief description of what the event is")
+    dates_display: str = Field(
+        description=(
+            "Human-readable date range for display, e.g. 'December 1–31, 2026' or "
+            "'December 24, 2026'. Project annual events to the travel year."
+        )
+    )
+    hours_display: str = Field(
+        default="",
+        description="Opening hours for display, e.g. '11:00–21:00 daily' or 'varies'. Empty if unknown.",
+    )
+    location: str = Field(
+        default="",
+        description="Venue or area name for display, e.g. 'Gendarmenmarkt' or 'Old Town Square'.",
+    )
+    # Fields for itinerary pipeline reuse:
+    applicable_dates: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Each date the event runs in YYYY-MM-DD format. "
+            "If it runs all month, list every day. Must be within the travel window."
+        ),
+    )
+    time_start: str = Field(default="", description="Start time HH:MM or empty if unknown")
+    time_end: str   = Field(default="", description="End time HH:MM or empty if unknown")
+    cost_usd: float = Field(
+        default=0.0,
+        description=(
+            "Per-person USD cost estimate. 0.0 for free entry. "
+            "For free events (markets, street festivals), estimate realistic food/browsing spend."
+        ),
+    )
+    suggested_visit_hours: float = Field(
+        default=2.0,
+        description="Realistic visit duration in hours (not total event length).",
+    )
+    is_evening_only: bool = Field(
+        default=False,
+        description="True when event only makes sense after 18:00 (night markets, fireworks, etc.)",
+    )
+    location_hint: str = Field(
+        default="",
+        description=(
+            "Most specific venue/area name for geocoding — e.g. 'Marienplatz', 'Old Town Square'. "
+            "Always fill this from the article."
+        ),
+    )
+
+
+class _SpecialEventsResults(BaseModel):
+    events: list[_SpecialEventAdvisor] = Field(
+        description=(
+            "Confirmed special events. Include only events that are date-specific "
+            "and physically held in the destination city."
+        )
+    )
+    no_results_message: str | None = Field(
+        default=None,
+        description="If no events found, a brief honest message.",
+    )
+
 
 # ---------------------------------------------------------------------------
 # Main LLM formatter system prompt
@@ -268,6 +336,14 @@ def _build_concert_closer(concert_args: dict, browse_url: str | None = None) -> 
     return ", ".join(parts) + "."
 
 
+def _build_events_closer(city: str | None, month: str | None) -> str:
+    """Deterministic closer for special-events responses."""
+    return (
+        "I can search for flights to fit these dates, "
+        "or build a full day-by-day itinerary that weaves these events into your trip."
+    )
+
+
 # ---------------------------------------------------------------------------
 # Conversational synthesis prompt (summary only, no tool names or user message)
 # ---------------------------------------------------------------------------
@@ -315,6 +391,9 @@ class AdvisorFormatterNode:
         self._concert_extractor = silent(
             model.with_structured_output(_ConcertResults, method="function_calling")
         )
+        self._events_extractor = silent(
+            model.with_structured_output(_SpecialEventsResults, method="function_calling")
+        )
 
     def __call__(self, state: AgentState) -> dict:
         # Clean up any orphaned tool-call message left in history
@@ -326,8 +405,9 @@ class AdvisorFormatterNode:
             if orphan.id is not None:
                 remove_ops.append(RemoveMessage(id=orphan.id))
 
-        tool_results  = list(state.get("advisor_last_tool_results") or [])
-        response_mode = state.get("advisor_response_mode") or "tool_call"
+        tool_results     = list(state.get("advisor_last_tool_results") or [])
+        response_mode    = state.get("advisor_response_mode") or "tool_call"
+        extracted_events = None  # set by special-events path; written to state if non-empty
 
         # --- Routing ---
         if response_mode == "greeting" or (not tool_results and response_mode != "conversational"):
@@ -350,22 +430,41 @@ class AdvisorFormatterNode:
                     (s["_browse_url"] for s in snippets if isinstance(s, dict) and "_browse_url" in s),
                     None,
                 )
-            else:
-                data_block   = format_results_for_llm(tool_results)
+                extracted_events = None
+
+            elif "search_special_events" in tool_names:
+                extracted_events, data_block = self._extract_special_events_data(tool_results, state)
+                events_tr    = next(tr for tr in tool_results if tr["tool_name"] == "search_special_events")
+                events_args  = events_tr.get("args", {})
                 concert_args = {}
                 browse_url   = None
+
+            else:
+                data_block       = format_results_for_llm(tool_results)
+                concert_args     = {}
+                browse_url       = None
+                extracted_events = None
 
             full_response = self._call_formatter_llm(
                 intent, data_block, tool_names, state, concert_args, browse_url
             )
 
+            if "search_special_events" in tool_names:
+                events_closer = _build_events_closer(
+                    events_args.get("city"), events_args.get("month")
+                )
+                full_response = full_response.rstrip() + "\n\n" + events_closer
+
         response     = AIMessage(content=full_response)
         shown_cities = self._extract_cities(full_response, state)
 
-        return {
+        result: dict = {
             "messages": remove_ops + [response],
             "advisor_shown_cities": shown_cities,
         }
+        if extracted_events:
+            result["special_events_data"] = extracted_events
+        return result
 
     # ------------------------------------------------------------------
     # Main LLM formatter call
@@ -383,11 +482,13 @@ class AdvisorFormatterNode:
         has_origin = bool(state.get("current_city"))
         closer     = closer_guidance_for(tool_names, has_origin)
 
-        # For concert searches the closer is built deterministically so the smart
-        # suggestions and Songkick link are always precise. Tell the LLM to omit
-        # the closer — we append it ourselves after the LLM call.
+        # For concert and special-events searches the closer is built deterministically
+        # so suggestions are always precise. Tell the LLM to omit it — we append ourselves.
         if concert_args:
             concert_closer = _build_concert_closer(concert_args, browse_url)
+            closer = "Do NOT add a closing sentence — one will be appended automatically."
+        elif "search_special_events" in tool_names:
+            concert_closer = None
             closer = "Do NOT add a closing sentence — one will be appended automatically."
         else:
             concert_closer = None
@@ -546,6 +647,121 @@ class AdvisorFormatterNode:
             lines.append("- " + " | ".join(parts))
 
         return f"[{label}]\n" + "\n".join(lines)
+
+    # ------------------------------------------------------------------
+    # Special Events path: raw snippets → structured extraction → data block
+    # ------------------------------------------------------------------
+
+    def _extract_special_events_data(
+        self, tool_results: list[dict], state: AgentState
+    ) -> tuple[list[dict], str]:
+        """Extract structured special events from Tavily snippets.
+
+        Returns (events_for_state, data_block_for_llm).
+        - events_for_state: list of SpecialEvent-compatible dicts (written to state["special_events_data"])
+        - data_block_for_llm: clean text block WITHOUT price (passed to formatter LLM)
+        """
+        events_tr = next(tr for tr in tool_results if tr["tool_name"] == "search_special_events")
+        snippets  = events_tr.get("result") or []
+        args      = events_tr.get("args", {})
+
+        city  = args.get("city", "")
+        month = args.get("month", "")
+
+        # Derive travel year from month arg or trip_start state
+        year = month.split()[-1] if month and month.split()[-1].isdigit() else ""
+        if not year:
+            trip_start = state.get("trip_start", "")
+            year = trip_start[:4] if trip_start else str(datetime.date.today().year)
+
+        label = "Special Events" + (
+            " — " + ", ".join(filter(None, [city, month])) if any([city, month]) else ""
+        )
+
+        snippets_text = "\n\n".join(
+            f"[Snippet {i+1}]\nTitle: {s.get('title','')}\n"
+            f"Content: {s.get('content','')}\nURL: {s.get('url','')}"
+            for i, s in enumerate(snippets)
+            if isinstance(s, dict) and "content" in s
+        )
+
+        if not snippets_text:
+            return [], f"[{label}]\nstatus: No event data returned for this search."
+
+        today_str = datetime.date.today().strftime("%B %d, %Y")
+
+        try:
+            extraction: _SpecialEventsResults = self._events_extractor.invoke([
+                {
+                    "role": "system",
+                    "content": (
+                        f"TODAY'S DATE: {today_str}\n"
+                        f"TRAVEL YEAR: {year}\n"
+                        f"DESTINATION CITY: {city}\n\n"
+                        "Extract date-specific special events, festivals, and seasonal happenings "
+                        "from these travel article snippets.\n\n"
+                        "CITY RULE: Include ONLY events physically held IN the destination city itself. "
+                        "Discard events in nearby towns, other islands, or regions requiring separate travel.\n\n"
+                        "ANNUAL / RECURRING EVENTS:\n"
+                        f"If a snippet describes an event from a previous year (e.g., 'Christmas Market 2024') "
+                        f"AND the event is clearly annual or seasonal (markets, festivals, national holidays, "
+                        f"seasonal celebrations), project it to {year} and include it. "
+                        "Examples of annual events: Christmas markets, Oktoberfest, New Year's fireworks, "
+                        "carnival, pride events, harvest festivals, national holiday celebrations.\n"
+                        f"DISCARD one-time events that ran only in a specific past year and are unlikely to recur.\n\n"
+                        "DATES: In applicable_dates, list each date the event runs in YYYY-MM-DD format, "
+                        f"projected to {year}. If it runs all month, list every day of the month. "
+                        "Only include dates within the travel window (the month from the search).\n\n"
+                        "COST: Extract cost_usd (0.0 = free entry). For free events (markets, street "
+                        "festivals), estimate a realistic food/browsing spend ($10–$30 typical).\n\n"
+                        "LOCATION: Always fill location_hint with the most specific venue or area name "
+                        "mentioned in the article (e.g., 'Gendarmenmarkt', 'Old Town Square').\n\n"
+                        "Do NOT include permanent tourist attractions or regular museum opening hours — "
+                        "only time-limited, seasonal, or date-specific events."
+                    ),
+                },
+                {"role": "user", "content": snippets_text},
+            ])
+        except Exception:
+            extraction = _SpecialEventsResults(events=[], no_results_message=None)
+
+        if extraction.no_results_message and not extraction.events:
+            return [], f"[{label}]\nstatus: {extraction.no_results_message}"
+
+        if not extraction.events:
+            return [], f"[{label}]\nstatus: No special events found for this search."
+
+        # Build data block for formatter LLM (NO price — advisor shows what to do, not cost)
+        lines = []
+        for ev in extraction.events:
+            parts = [f"name: {ev.name}"]
+            if ev.dates_display:  parts.append(f"dates: {ev.dates_display}")
+            if ev.hours_display:  parts.append(f"hours: {ev.hours_display}")
+            if ev.location:       parts.append(f"location: {ev.location}")
+            parts.append(f"description: {ev.description}")
+            lines.append("- " + " | ".join(parts))
+
+        data_block = f"[{label}]\n" + "\n".join(lines)
+
+        # Build state-compatible dicts for itinerary pipeline reuse
+        events_for_state = [
+            {
+                "name":                 ev.name,
+                "description":          ev.description,
+                "applicable_dates":     ev.applicable_dates,
+                "time_start":           ev.time_start,
+                "time_end":             ev.time_end,
+                "cost_usd":             ev.cost_usd,
+                "suggested_visit_hours": ev.suggested_visit_hours,
+                "is_evening_only":      ev.is_evening_only,
+                "location_hint":        ev.location_hint or ev.location,
+                "lat":                  None,
+                "lng":                  None,
+            }
+            for ev in extraction.events
+        ]
+
+        return events_for_state, data_block
 
     # ------------------------------------------------------------------
     # Conversational synthesis (summary only, no tool names or user message)
