@@ -61,6 +61,55 @@ def _default_trip_start() -> str:
     return (date.today() + timedelta(days=30)).strftime("%Y-%m-%d")
 
 
+def _is_trip_start_in_past(trip_start: str) -> bool:
+    """Return True when trip_start is strictly before the current month (or date).
+
+    YYYY-MM: month-level comparison; the current month is NOT past.
+    YYYY-MM-DD: day-level comparison; today itself is valid.
+    Returns False on any parse error (fail-open).
+    """
+    today = date.today()
+    try:
+        if len(trip_start) == 7:
+            year, month = int(trip_start[:4]), int(trip_start[5:7])
+            return (year, month) < (today.year, today.month)
+        if len(trip_start) == 10:
+            return date.fromisoformat(trip_start) < today
+    except (ValueError, IndexError):
+        pass
+    return False
+
+
+def _build_past_date_message(
+    extraction_model: BaseChatModel,
+    trip_start: str,
+    asked: set,
+) -> dict:
+    msg = extraction_model.invoke([
+        {
+            "role": "system",
+            "content": (
+                "You are a friendly travel assistant. "
+                "The user mentioned a trip date that has already passed. "
+                "Let them know warmly and ask for a future month or date. "
+                "Keep it to 1-2 sentences."
+            ),
+        },
+        {
+            "role": "user",
+            "content": f"The user gave a trip start of '{trip_start}', which is in the past.",
+        },
+    ])
+    # Remove trip_start from asked so _classify_optional_fields won't auto-default
+    # it on the very next turn — we need the user to supply a new date explicitly.
+    return {
+        "trip_start": None,
+        "messages": [msg],
+        "enrichment_complete": False,
+        "enrichment_asked_fields": list(asked - {"trip_start"}),
+    }
+
+
 def _count_travel_options(origin: str, destination: str) -> tuple[list, list]:
     flights = [f for f in data_provider.fetch_flights(origin, destination) if "message" not in f]
     hotels  = [h for h in data_provider.fetch_hotels(destination)           if "message" not in h]
@@ -480,6 +529,10 @@ class EnrichmentNode:
         terminal, extra = _phase1_required_fields(state, self.extraction_model, asked)
         if terminal is not None:
             return terminal
+
+        current_trip_start = state.get("trip_start")
+        if current_trip_start and _is_trip_start_in_past(current_trip_start):
+            return _build_past_date_message(self.extraction_model, current_trip_start, asked)
 
         origin = state.get("current_city")
         destination = state.get("destination_city")

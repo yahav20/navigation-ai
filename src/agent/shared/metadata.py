@@ -93,6 +93,12 @@ class MetadataNode:
                 - Specific day ("June 10", "leaving August 3rd", "on 2026-07-15") -> YYYY-MM-DD.
                 - Month or season only ("in June", "next month", "around August", "late autumn")
                   -> YYYY-MM. Resolve relative phrases against today's date above.
+                - FUTURE-MONTH RULE: if the user says a bare month name with no year and that
+                  month is already in the past for the current year, resolve it to NEXT year.
+                  Example: today is 2026-06, user says "April" -> "2027-04" (not "2026-04").
+                  Example: today is 2026-06, user says "August" -> "2026-08" (still future).
+                - EXPLICIT YEAR: if the user includes an explicit year ("April 2028",
+                  "April in two years"), use that year exactly as stated. Do NOT shift it.
                 - If the user says nothing about timing, return null.
                 Never invent a date when none was implied.
 
