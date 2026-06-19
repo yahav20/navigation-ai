@@ -1525,7 +1525,11 @@ def _get_day_events(state: dict, day_num: int) -> list[dict]:
     if not events or not trip_start:
         return []
     try:
-        base      = datetime.date.fromisoformat(trip_start[:10])
+        s = trip_start.strip()
+        # "YYYY-MM" (month-only) → assume the 1st; keeps generic itineraries working
+        if len(s) == 7 and s[4] == "-":
+            s = s + "-01"
+        base      = datetime.date.fromisoformat(s[:10])
         trip_date = (base + datetime.timedelta(days=day_num - 1)).isoformat()
     except (ValueError, TypeError):
         return []

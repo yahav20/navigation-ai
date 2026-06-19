@@ -1,4 +1,6 @@
 """Extract travel metadata from the conversation history."""
+import copy
+import re
 from datetime import date
 
 from langchain_core.language_models import BaseChatModel
@@ -7,6 +9,59 @@ from agent.core.llm import silent
 from agent.core.models import TravelMetadata
 from agent.core.state import AgentState
 from agent.shared.travelers import apply_traveler_updates
+
+# ---------------------------------------------------------------------------
+# Common month-name typo normalization — runs before the LLM call so a single
+# OCR / autocorrect error ("decmber", "janaury") doesn't silently drop trip_start.
+# ---------------------------------------------------------------------------
+
+_MONTH_TYPOS: list[tuple[str, str]] = [
+    # January
+    (r"\bjanu[ae]ry\b",   "january"), (r"\bjanur[iy]\b",   "january"),
+    (r"\bjanaury\b",      "january"),
+    # February
+    (r"\bfebu[ar]{0,2}ry\b", "february"), (r"\bfebr?ua?ry\b", "february"),
+    (r"\bfebury\b",       "february"), (r"\bfebruary\b",    "february"),
+    # March — short, rarely typo'd
+    (r"\bmacrh\b",        "march"),
+    # April
+    (r"\barp?il\b",       "april"),   (r"\bapirl\b",        "april"),
+    # June
+    (r"\bjune?\b",        "june"),
+    # July
+    (r"\bjul[yi]\b",      "july"),
+    # August
+    (r"\bagu?gu?st\b",    "august"),  (r"\baug?u?st\b",     "august"),
+    (r"\bauguest\b",      "august"),
+    # September
+    (r"\bsep[te]{0,2}m?be?r\b", "september"),
+    # October
+    (r"\boct[ao]?be?r\b", "october"), (r"\botco?be?r\b",    "october"),
+    # November
+    (r"\bnov[em]{0,2}be?r\b", "november"),
+    # December — the most commonly typo'd
+    (r"\bdec[em]{0,2}be?r\b", "december"), (r"\bdeecember\b",  "december"),
+    (r"\bdeember\b",      "december"),
+]
+
+# Additional common travel-message typos (cities, phrases)
+_TRAVEL_TYPOS: list[tuple[str, str]] = [
+    (r"\bisreal\b",  "israel"),
+    (r"\bisrael\b",  "israel"),
+    (r"\bberlan\b",  "berlin"),
+    (r"\bpargue\b",  "prague"),
+    (r"\bprauge\b",  "prague"),
+    (r"\bpargue\b",  "prague"),
+    (r"\blonond\b",  "london"),
+    (r"\bbarceloan\b", "barcelona"),
+]
+
+
+def _normalise_text(text: str) -> str:
+    """Fix common typos in month names and city names before LLM extraction."""
+    for pattern, replacement in _MONTH_TYPOS + _TRAVEL_TYPOS:
+        text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+    return text
 
 
 def _same_month_refinement(old: str | None, new: str) -> bool:
@@ -38,11 +93,20 @@ class MetadataNode:
             return updates
 
         messages = state.get("messages", [])
-        recent_messages = [
+        raw_recent = [
             msg for msg in messages[-10:]
             if getattr(msg, "type", "") in ("human", "ai")
             and not getattr(msg, "tool_calls", None)
         ][-6:]
+
+        # Normalise typos in human messages so the LLM doesn't miss month names
+        # like "decmber" or city names like "isreal".
+        recent_messages = []
+        for msg in raw_recent:
+            if getattr(msg, "type", "") == "human" and isinstance(msg.content, str):
+                msg = copy.copy(msg)
+                msg.content = _normalise_text(msg.content)
+            recent_messages.append(msg)
 
         extractor = silent(self.extraction_model.with_structured_output(TravelMetadata))
 
