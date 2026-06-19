@@ -125,6 +125,26 @@ class DaySlot(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Special event — date-specific events found via timeout.com (Tavily)
+# ---------------------------------------------------------------------------
+
+class SpecialEvent(BaseModel):
+    """A date-specific event extracted from timeout.com and scheduled into itinerary days."""
+
+    name: str
+    description: str
+    applicable_dates: List[str]       # ["YYYY-MM-DD", ...] dates when event runs
+    time_start: str                   # "HH:MM" or "" (unknown/flexible)
+    time_end: str                     # "HH:MM" or ""
+    cost_usd: float                   # per-person USD estimate (includes snacks for free events)
+    suggested_visit_hours: float      # realistic visit duration, not full event length
+    is_evening_only: bool             # True when event only makes sense after 18:00
+    location_hint: str                # venue/area name for geocoding fallback
+    lat: Optional[float] = None       # populated by geocoding after extraction
+    lng: Optional[float] = None
+
+
+# ---------------------------------------------------------------------------
 # Itinerary update instruction — extracted from user modification requests
 # ---------------------------------------------------------------------------
 
