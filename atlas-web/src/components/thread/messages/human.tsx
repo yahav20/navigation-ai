@@ -57,6 +57,7 @@ export function HumanMessage({
       { messages: [newMessage] },
       {
         checkpoint: parentCheckpoint,
+        config: { recursion_limit: 100 },
         streamMode: ["values"],
         streamSubgraphs: true,
         streamResumable: true,
