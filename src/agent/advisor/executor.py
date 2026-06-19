@@ -23,6 +23,12 @@ def _run_step(tool_name: str, args: dict) -> Any:
     """Invoke a single tool, returning the result or an error dict."""
     tool = _tool_map.get(tool_name)
     if tool is None:
+        # Lazy rebuild in case the server imported this module before a new tool was added
+        from tools.destinations import advisor_tools as _latest  # noqa: PLC0415
+        refreshed = {t.name: t for t in _latest}
+        _tool_map.update(refreshed)
+        tool = _tool_map.get(tool_name)
+    if tool is None:
         return {"message": f"Unknown tool '{tool_name}', skipped."}
     try:
         return tool.invoke(args)
