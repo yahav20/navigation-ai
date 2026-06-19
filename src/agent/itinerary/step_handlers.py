@@ -15,6 +15,7 @@ Utility functions used by all handlers live at the bottom of this file.
 """
 from __future__ import annotations
 
+import datetime
 import json
 from typing import Optional
 
@@ -475,8 +476,15 @@ def handle_build_day(
                                       weather_cond, day_blocked, rest_blocks)
     )
 
+    # Retrieve and geocode special events for this calendar day
+    day_events = _enrich_event_coords(_get_day_events(state, day_num), destination)
+
     try:
-        slots = DayScheduleBuilder(cfg).build(candidates, day_plan=day_plan_filtered)
+        slots = DayScheduleBuilder(cfg).build(
+            candidates,
+            day_plan=day_plan_filtered,
+            special_events=day_events or None,
+        )
     except Exception as exc:
         return _wrap_result(
             status="failed",
@@ -524,7 +532,8 @@ def handle_build_day(
         error=None,
         replan_hint="",
         trace=_minimal_trace(action, {"day": day_num, "candidates": len(candidates)},
-                             f"Built {len(slots)} slots. Day cost: ${day_cost}.",
+                             f"Built {len(slots)} slots. Day cost: ${day_cost}."
+                             + (f" {len(day_events)} special event(s) injected." if day_events else ""),
                              f"Day {day_num} complete."),
     )
 
@@ -1499,3 +1508,51 @@ def _drop_stale_budget(results: dict) -> dict:
 def _wrap_result(status, data, error, replan_hint, trace) -> dict:
     return {"status": status, "data": data, "error": error,
             "replan_hint": replan_hint, "trace": trace}
+
+
+# ---------------------------------------------------------------------------
+# Special-events helpers
+# ---------------------------------------------------------------------------
+
+def _get_day_events(state: dict, day_num: int) -> list[dict]:
+    """Return special events that fall on the calendar date for *day_num*.
+
+    Uses state["trip_start"] (local destination date) to compute which calendar
+    date corresponds to this day number, then filters from special_events_data.
+    """
+    events     = (state or {}).get("special_events_data") or []
+    trip_start = (state or {}).get("trip_start", "")
+    if not events or not trip_start:
+        return []
+    try:
+        base      = datetime.date.fromisoformat(trip_start[:10])
+        trip_date = (base + datetime.timedelta(days=day_num - 1)).isoformat()
+    except (ValueError, TypeError):
+        return []
+    return [e for e in events if trip_date in (e.get("applicable_dates") or [])]
+
+
+def _enrich_event_coords(events: list[dict], destination: str) -> list[dict]:
+    """Attempt to geocode events that have a location_hint but no lat/lng.
+
+    Uses the existing _search_activity helper (Google Maps) so the schedule engine
+    can compute realistic transit times. Mutates each event dict in-place and
+    returns the list unchanged (for chaining).
+    """
+    for ev in events:
+        if ev.get("lat") and ev.get("lng"):
+            continue
+        hint = str(ev.get("location_hint") or "").strip()
+        if not hint:
+            continue
+        try:
+            query  = f"{hint} {destination}" if destination.lower() not in hint.lower() else hint
+            result = _search_activity(hint, destination)
+            lat = float(result.get("lat") or result.get("latitude") or 0)
+            lng = float(result.get("lng") or result.get("longitude") or 0)
+            if lat or lng:
+                ev["lat"] = lat
+                ev["lng"] = lng
+        except Exception:  # noqa: BLE001
+            pass
+    return events

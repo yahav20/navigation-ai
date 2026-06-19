@@ -307,8 +307,9 @@ class DayScheduleBuilder:
 
     def build(
         self,
-        candidates: list[ActivityCandidate],
-        day_plan:   dict | None = None,
+        candidates:     list[ActivityCandidate],
+        day_plan:       dict | None  = None,
+        special_events: list[dict] | None = None,
     ) -> list[dict]:
         cfg      = self.cfg
         day_plan = day_plan or {}
@@ -369,6 +370,35 @@ class DayScheduleBuilder:
                 pending_rests.append((hs, he, "Afternoon rest — extreme heat"))
                 blocked.append((hs, he))
 
+        # ── Special events ───────────────────────────────────────────────────
+        # Events are pre-geocoded by step_handlers._enrich_event_coords before
+        # reaching here, so lat/lng are available when known.
+        pending_day_events:  list[tuple[datetime, datetime, dict]] = []
+        pending_eve_events:  list[dict]                            = []
+
+        for ev in (special_events or []):
+            try:
+                t_s = _pt(self._date, ev["time_start"]) if ev.get("time_start") else None
+                t_e = _pt(self._date, ev["time_end"])   if ev.get("time_end")   else None
+            except (ValueError, KeyError):
+                t_s = t_e = None
+
+            dur = timedelta(hours=max(0.5, float(ev.get("suggested_visit_hours") or 2)))
+            if t_s is None:
+                t_s = _pt(self._date, "19:00") if ev.get("is_evening_only") else _pt(self._date, "10:00")
+            if t_e is None:
+                t_e = t_s + dur
+
+            # Block this window so regular activities don't overlap with the event
+            blocked.append((t_s, t_e))
+
+            if ev.get("is_evening_only") or t_s.hour >= 18:
+                pending_eve_events.append(ev)
+            else:
+                pending_day_events.append((t_s, t_e, ev))
+
+        pending_day_events.sort(key=lambda x: x[0])
+
         # ── Cursor & location init ───────────────────────────────────────────
         cursor   = _pt(self._date, cfg.day_start_time)
         location = GeoPoint(cfg.hotel_lat, cfg.hotel_lng, "Hotel")
@@ -404,6 +434,11 @@ class DayScheduleBuilder:
 
             # — Flush rest blocks that are now due —
             cursor = self._flush_rests(cursor, pending_rests, departure_anchor)
+
+            # — Flush daytime special events whose window has been reached —
+            cursor, location = self._flush_day_events(
+                cursor, pending_day_events, departure_anchor, location
+            )
 
             # — Pinned coffee (10:00–11:00 window) —
             if not self._had_coffee and pinned_coffee and 10 <= cursor.hour < 11:
@@ -563,6 +598,11 @@ class DayScheduleBuilder:
             if cursor < departure_anchor and cursor.hour >= 17:
                 cursor, location = self._inject_dinner(
                     cursor, departure_anchor, location, cfg, meal_cands)
+
+        # ── Evening special events ───────────────────────────────────────────
+        for ev in pending_eve_events:
+            if cursor < departure_anchor:
+                cursor, location = self._insert_special_event(ev, cursor, departure_anchor, location)
 
         # Departure taxi (last day) — skip for overnight/early-morning flights;
         # those depart after the schedule window and the user arranges them separately.
@@ -843,6 +883,72 @@ class DayScheduleBuilder:
         self._had_dinner     = True
         self._last_food_time = de
         return de, hpt
+
+    # ── Special event helpers ────────────────────────────────────────────────
+
+    def _flush_day_events(
+        self,
+        cursor:  datetime,
+        pending: list[tuple[datetime, datetime, dict]],
+        limit:   datetime,
+        location: GeoPoint,
+    ) -> tuple[datetime, GeoPoint]:
+        """Insert daytime special events whose window start is ≤ cursor + 15 min."""
+        to_remove: list[int] = []
+        for i, (t_start, _t_end, ev) in enumerate(pending):
+            if cursor >= t_start - timedelta(minutes=15):
+                actual_s = max(cursor, t_start)
+                if actual_s < limit:
+                    cursor, location = self._insert_special_event(ev, actual_s, limit, location)
+                to_remove.append(i)
+        for i in reversed(to_remove):
+            pending.pop(i)
+        return cursor, location
+
+    def _insert_special_event(
+        self,
+        ev:       dict,
+        cursor:   datetime,
+        limit:    datetime,
+        location: GeoPoint,
+    ) -> tuple[datetime, GeoPoint]:
+        """Insert a special event slot (+ optional transit) and return updated cursor+location."""
+        ev_lat = float(ev.get("lat") or 0)
+        ev_lng = float(ev.get("lng") or 0)
+        ev_pt  = GeoPoint(ev_lat, ev_lng, ev.get("name", "")) if (ev_lat or ev_lng) else None
+
+        # Transit to venue (only when coordinates are available)
+        if ev_pt:
+            mode, t_min, t_cost = transit_plan(location, ev_pt)
+            if t_min > 0:
+                transit_end = cursor + timedelta(minutes=t_min)
+                if transit_end < limit:
+                    self._push(TimeSlot(
+                        start=cursor, end=transit_end,
+                        slot_type="transport",
+                        name=f"Transit to {ev.get('name', 'event')}",
+                        description=f"{mode} · {haversine_km(location, ev_pt):.1f} km",
+                        estimated_cost=t_cost,
+                        transport_mode=mode,
+                        distance_km=haversine_km(location, ev_pt),
+                    ))
+                    cursor = transit_end
+
+        dur_min = int(max(30, float(ev.get("suggested_visit_hours") or 2) * 60))
+        ev_end  = min(cursor + timedelta(minutes=dur_min), limit)
+
+        if ev_end > cursor:
+            self._push(TimeSlot(
+                start=cursor, end=ev_end,
+                slot_type="activity",
+                name=ev.get("name", "Special Event"),
+                description=ev.get("description", "Special event"),
+                estimated_cost=float(ev.get("cost_usd") or 0),
+            ))
+            cursor = ev_end
+
+        new_location = ev_pt if ev_pt else location
+        return cursor, new_location
 
     # ── Rest helpers ─────────────────────────────────────────────────────────
 
