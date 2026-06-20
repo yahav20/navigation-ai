@@ -48,10 +48,12 @@ from agent.itinerary.itinerary_edges import (
 )
 from agent.itinerary.multi_dest import (
     SegmentPlannerNode,
+    RouteSelectNode,
     LegDispatchNode,
     LegCollectNode,
     TripFormatterNode,
     after_segment_planner,
+    after_route_select,
     after_leg_collect,
 )
 from tools import general_chat_tools
@@ -94,6 +96,7 @@ def _assemble_builder(provider: str = "google") -> StateGraph:
     #   -Itinerary
     plan_check_node           = PlanCheckNode()
     segment_planner_node      = SegmentPlannerNode(extraction_model)
+    route_select_node         = RouteSelectNode()
     multi_flight_node         = FlightSearchNode()
     leg_dispatch_node         = LegDispatchNode()
     itinerary_planner_node    = ItineraryPlannerNode(response_model)
@@ -133,6 +136,7 @@ def _assemble_builder(provider: str = "google") -> StateGraph:
     # Itinerary nodes
     builder.add_node("plan_check",          plan_check_node)
     builder.add_node("segment_planner",     segment_planner_node)
+    builder.add_node("route_select",        route_select_node)
     builder.add_node("multi_flight",        multi_flight_node)
     builder.add_node("leg_dispatch",        leg_dispatch_node)
     builder.add_node("itinerary_planner",   itinerary_planner_node)
@@ -243,10 +247,21 @@ def _assemble_builder(provider: str = "google") -> StateGraph:
         }
     )
 
-    # segment_planner → search the entry-city flight once (multi only) → leg loop
+    # segment_planner → (multi) pause for the user to pick a route → search the
+    # entry-city flight once → leg loop.  Single trips skip straight to the loop.
     builder.add_conditional_edges(
         "segment_planner",
         after_segment_planner,
+        {
+            "route_select": "route_select",
+            "leg_dispatch": "leg_dispatch",
+        }
+    )
+    # Booked trips keep their flights and skip the re-search; standalone multi
+    # trips search the entry-city flight once before the leg loop.
+    builder.add_conditional_edges(
+        "route_select",
+        after_route_select,
         {
             "multi_flight": "multi_flight",
             "leg_dispatch": "leg_dispatch",

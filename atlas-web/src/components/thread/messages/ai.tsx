@@ -19,6 +19,8 @@ import { getQuestionOptionsInterrupt } from "@/lib/question-options-interrupt";
 import { QuestionOptionsInterruptView } from "./question-options-interrupt";
 import { getTravelSelectionInterrupt } from "@/lib/travel-selection-interrupt";
 import { TravelSelectionInterruptView } from "./travel-selection-interrupt";
+import { getRouteSelectionInterrupt } from "@/lib/route-selection-interrupt";
+import { RouteSelectionInterruptView } from "./route-selection-interrupt";
 import { useArtifact } from "../artifact";
 import { Fragment } from "react";
 
@@ -204,7 +206,10 @@ function Interrupt({
   const travelSelection = isAgentInbox
     ? null
     : getTravelSelectionInterrupt(interrupt);
-  const questionOptions = isAgentInbox || travelSelection
+  const routeSelection = isAgentInbox || travelSelection
+    ? null
+    : getRouteSelectionInterrupt(interrupt);
+  const questionOptions = isAgentInbox || travelSelection || routeSelection
     ? null
     : getQuestionOptionsInterrupt(interrupt);
 
@@ -214,12 +219,16 @@ function Interrupt({
       {travelSelection && showInterrupt && (
         <TravelSelectionInterruptView interrupt={travelSelection} />
       )}
+      {routeSelection && showInterrupt && (
+        <RouteSelectionInterruptView interrupt={routeSelection} />
+      )}
       {questionOptions && showInterrupt && (
         <QuestionOptionsInterruptView interrupt={questionOptions} />
       )}
       {interrupt &&
       !isAgentInbox &&
       !travelSelection &&
+      !routeSelection &&
       !questionOptions &&
       showInterrupt ? (
         <GenericInterruptView interrupt={fallbackValue} />

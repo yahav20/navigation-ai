@@ -7,9 +7,28 @@ import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from agent.itinerary.multi_dest import (
-    SegmentPlannerNode, LegDispatchNode, LegCollectNode, TripFormatterNode,
-    after_segment_planner, after_leg_collect, _normalize_days, _cheapest, _demote_heading,
+    SegmentPlannerNode, RouteSelectNode, LegDispatchNode, LegCollectNode, TripFormatterNode,
+    after_segment_planner, after_route_select, after_leg_collect,
+    _normalize_days, _cheapest, _demote_heading, _parse_route_selection,
+    _MultiCityRoutes, _RouteOption, _CitySegment,
 )
+
+
+class _FakeRoutesLLM:
+    """Stand-in for the structured-output LLM used by SegmentPlannerNode."""
+
+    def __init__(self, routes):
+        # routes: list of [(city, days), ...]
+        self._routes = routes
+
+    def with_structured_output(self, schema, method=None):
+        return self
+
+    def invoke(self, _messages):
+        return _MultiCityRoutes(routes=[
+            _RouteOption(segments=[_CitySegment(city=c, days=d) for c, d in route])
+            for route in self._routes
+        ])
 
 
 # ── _normalize_days ──────────────────────────────────────────────────────────
@@ -45,12 +64,124 @@ def test_segment_planner_no_llm_stays_single():
     assert len(out["trip_segments"]) == 1
 
 
+def test_segment_planner_redirect_mode_stays_single():
+    # redirect_to_travel must never trigger a multi-destination split.
+    fake = _FakeRoutesLLM([[("Tokyo", 7), ("Kyoto", 7), ("Osaka", 6)]])
+    node = SegmentPlannerNode(llm=fake)
+    out = node({"destination_city": "Tokyo", "trip_days": 20,
+                "itinerary_mode": "redirect_to_travel", "total_budget": 10000})
+    assert out["is_multi_destination"] is False
+    assert len(out["trip_segments"]) == 1
+
+
+def test_segment_planner_with_travel_data_goes_multi(monkeypatch):
+    # Booked (with_travel_data) trips that far exceed the anchor's max now split.
+    import agent.itinerary.multi_dest as md
+    monkeypatch.setattr(SegmentPlannerNode, "_recommended_max", lambda self, city: 10)
+    monkeypatch.setattr(md.data_provider, "get_city_country", lambda city: "Japan")
+
+    fake = _FakeRoutesLLM([
+        [("Tokyo", 6), ("Kyoto", 7), ("Osaka", 7)],
+        [("Tokyo", 10), ("Kyoto", 10)],
+    ])
+    node = SegmentPlannerNode(llm=fake)
+    out = node({"destination_city": "Tokyo", "trip_days": 20,
+                "itinerary_mode": "with_travel_data", "total_budget": 10000})
+    assert out["is_multi_destination"] is True
+    assert len(out["proposed_routes"]) == 2
+    # every proposed route is anchored at Tokyo and sums to 20 days
+    for route in out["proposed_routes"]:
+        assert route[0]["destination"] == "Tokyo"
+        assert sum(s["days"] for s in route) == 20
+    assert out["trip_total_budget"] == 10000
+
+
+def test_segment_planner_with_travel_data_short_trip_stays_single(monkeypatch):
+    # A booked trip within the anchor's recommended stay should NOT split.
+    monkeypatch.setattr(SegmentPlannerNode, "_recommended_max", lambda self, city: 10)
+    fake = _FakeRoutesLLM([[("Tokyo", 4), ("Kyoto", 3)]])
+    node = SegmentPlannerNode(llm=fake)
+    out = node({"destination_city": "Tokyo", "trip_days": 7,
+                "itinerary_mode": "with_travel_data", "total_budget": 10000})
+    assert out["is_multi_destination"] is False
+    assert len(out["trip_segments"]) == 1
+
+
 # ── after_segment_planner routing ─────────────────────────────────────────────
 
 def test_after_segment_planner_routes_by_multi_flag():
-    assert after_segment_planner({"is_multi_destination": True}) == "multi_flight"
+    # Multi trips now pause for the user to pick a route before searching flights.
+    assert after_segment_planner({"is_multi_destination": True}) == "route_select"
     assert after_segment_planner({"is_multi_destination": False}) == "leg_dispatch"
     assert after_segment_planner({}) == "leg_dispatch"
+
+
+def test_after_route_select_keeps_booked_flights():
+    # Booked trip (has_flights) → keep flights, skip the re-search.
+    assert after_route_select({"has_flights": True}) == "leg_dispatch"
+    # Standalone multi (no flights yet) → search the entry-city flight.
+    assert after_route_select({"has_flights": False}) == "multi_flight"
+    assert after_route_select({}) == "multi_flight"
+
+
+# ── _parse_route_selection ────────────────────────────────────────────────────
+
+def test_parse_route_selection():
+    assert _parse_route_selection("auto", 3) == 0
+    assert _parse_route_selection("", 3) == 0
+    assert _parse_route_selection("route:1", 3) == 1
+    assert _parse_route_selection("2", 3) == 2
+    assert _parse_route_selection("route:9", 3) == 2      # clamped to last
+    assert _parse_route_selection("route:-1", 3) == 0     # clamped to first
+    assert _parse_route_selection("garbage", 3) == 0      # parse error → first
+
+
+# ── RouteSelectNode HITL ──────────────────────────────────────────────────────
+
+def _two_routes():
+    return [
+        [{"destination": "Rome", "days": 4, "order": 0, "drive_from_prev": None},
+         {"destination": "Florence", "days": 3, "order": 1, "drive_from_prev": "Rome"}],
+        [{"destination": "Rome", "days": 5, "order": 0, "drive_from_prev": None},
+         {"destination": "Venice", "days": 2, "order": 1, "drive_from_prev": "Rome"}],
+    ]
+
+
+def test_route_select_interrupts_with_route_payload(monkeypatch):
+    # Capture the interrupt payload via a spy (interrupt() needs a graph context).
+    import agent.itinerary.multi_dest as md
+    captured = {}
+
+    def _spy(payload):
+        captured["payload"] = payload
+        return "auto"
+
+    monkeypatch.setattr(md, "interrupt", _spy)
+    RouteSelectNode()({"proposed_routes": _two_routes(), "total_trip_days": 7})
+    payload = captured["payload"]
+    assert payload["type"] == "route_selection"
+    assert payload["anchor"] == "Rome"
+    assert payload["total_days"] == 7
+    assert len(payload["routes"]) == 2
+    assert payload["routes"][0]["segments"][0]["destination"] == "Rome"
+    # only UI-relevant keys are exposed (no internal "order")
+    assert set(payload["routes"][0]["segments"][0]) == {"destination", "days", "drive_from_prev"}
+
+
+def test_route_select_applies_choice_on_resume(monkeypatch):
+    # Simulate the resume value by patching interrupt() to return the user's pick.
+    import agent.itinerary.multi_dest as md
+    monkeypatch.setattr(md, "interrupt", lambda payload: "route:1")
+    out = RouteSelectNode()({"proposed_routes": _two_routes(), "total_trip_days": 7})
+    assert [s["destination"] for s in out["trip_segments"]] == ["Rome", "Venice"]
+    assert out["total_trip_days"] == 7
+    assert out["seg_index"] == 0
+    assert out["is_multi_destination"] is True
+    assert out["itineraries"] == []
+
+
+def test_route_select_no_routes_is_noop():
+    assert RouteSelectNode()({"proposed_routes": []}) == {}
 
 
 # ── LegDispatchNode ───────────────────────────────────────────────────────────
@@ -162,6 +293,33 @@ def test_trip_formatter_multi_stitches():
     # one map widget per city, all sharing the plans message id
     assert len(out["ui"]) == 2
     assert {u["metadata"]["message_id"] for u in out["ui"]} == {plans.id}
+
+
+def test_trip_formatter_multi_prefers_booked_flights():
+    # with_travel_data multi: overview must reflect the user's booked flights,
+    # not the cheapest searched option.
+    node = TripFormatterNode(llm=None)
+    legs = [
+        {"order": 0, "destination": "Tokyo", "days": 10, "drive_from_prev": None,
+         "itinerary_plan": {"step_results": {"verify_budget_0": {"data": {"grand_total": 1000}}}}},
+        {"order": 1, "destination": "Kyoto", "days": 10, "drive_from_prev": "Tokyo",
+         "itinerary_plan": {"step_results": {"verify_budget_0": {"data": {"grand_total": 1000}}}}},
+    ]
+    out = node({
+        "itineraries": legs, "current_city": "Tel Aviv", "total_trip_days": 20,
+        "trip_total_budget": 10000,
+        # cheapest-in-list is 100, but the user booked the 582 flight
+        "flight_options": [{"price": 100, "flight_number": "CHEAP"},
+                           {"price": 582, "flight_number": "4312"}],
+        "return_flight_options": [{"price": 200, "flight_number": "CHEAP2"},
+                                  {"price": 854, "flight_number": "357"}],
+        "itinerary_selected_outbound_flight": {"price": 582, "flight_number": "4312", "airline": "Red Wings"},
+        "itinerary_selected_return_flight":   {"price": 854, "flight_number": "357",  "airline": "Air India"},
+    })
+    content = out["messages"][0].content
+    # booked round-trip 582 + 854 = 1436 (not the cheapest 100 + 200 = 300)
+    assert "~$1436" in content
+    assert "4312" in content and "357" in content
 
 
 # ── pure helpers ──────────────────────────────────────────────────────────────

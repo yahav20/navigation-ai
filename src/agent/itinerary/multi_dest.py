@@ -37,6 +37,7 @@ from typing import List, Optional
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langgraph.types import interrupt
 from pydantic import BaseModel, ConfigDict, Field
 
 from agent.core.state import AgentState
@@ -52,6 +53,8 @@ from tools.dependencies import data_provider
 # Hard ceiling on cities in a multi-destination route — keeps the sequential
 # leg loop well within the graph recursion limit and the output readable.
 MAX_SEGMENTS = 4
+# How many alternative routes to propose to the user for selection.
+MAX_ROUTE_OPTIONS = 3
 # Default recommended max stay when a city has no duration data in the DB.
 _DEFAULT_MAX_DAYS = 5
 
@@ -66,7 +69,7 @@ class _CitySegment(BaseModel):
     days: int = Field(description="Whole days to spend in this city (>= 1).")
 
 
-class _MultiCityRoute(BaseModel):
+class _RouteOption(BaseModel):
     model_config = ConfigDict(extra="forbid")
     segments: List[_CitySegment] = Field(
         description=(
@@ -77,22 +80,37 @@ class _MultiCityRoute(BaseModel):
     )
 
 
+class _MultiCityRoutes(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    routes: List[_RouteOption] = Field(
+        description=(
+            "Two or three DISTINCT alternative round routes for the same trip. "
+            "Each route is a full plan on its own; they should differ from one "
+            "another (different city mix and/or day split), not be minor variations."
+        )
+    )
+
+
 _SPLIT_SYSTEM = """You are a trip routing planner.
 
 The traveller wants a {total} day trip but {anchor} is best enjoyed in about
-{max_days} days. Instead of over-staying one city, design a ROAD TRIP {region}:
+{max_days} days. Instead of over-staying one city, design ROAD TRIPS {region}:
 fly into {anchor}, drive between nearby cities, and fly home from {anchor}.
 
-Rules:
+Propose {n_routes} DISTINCT alternative routes so the traveller can choose.
+
+Rules for EVERY route:
 - The FIRST segment MUST be {anchor} (it is the entry and exit airport).
 - Pick well-known, real tourist cities {region} that travellers actually visit,
   within reasonable driving distance of each other (e.g. for Italy: Rome,
   Florence, Venice, Naples, Milan, Bologna).
 - Use between 2 and {max_segments} cities total (including {anchor}).
 - Give each city a sensible number of days for its size; the days across ALL
-  cities MUST sum to exactly {total}.
+  cities in that route MUST sum to exactly {total}.
 - Order the cities as an efficient driving loop that starts and ends at {anchor}.
-Return the structured route only."""
+
+Make the routes genuinely different from each other (vary the city mix and the
+day allocation). Return the structured routes only."""
 
 
 # ---------------------------------------------------------------------------
@@ -104,7 +122,7 @@ class SegmentPlannerNode:
 
     def __init__(self, llm: Optional[BaseChatModel] = None) -> None:
         self._llm = (
-            llm.with_structured_output(_MultiCityRoute, method="function_calling")
+            llm.with_structured_output(_MultiCityRoutes, method="function_calling")
             if llm else None
         )
 
@@ -125,21 +143,29 @@ class SegmentPlannerNode:
             "trip_total_budget":    float(state.get("total_budget") or 0),
         }
 
-        # Multi-destination only applies to standalone itineraries. A
-        # with_travel_data trip already has a specific booked single city.
-        if state.get("itinerary_mode") != "standalone" or not anchor or not self._llm:
+        # Multi-destination applies to standalone itineraries AND to booked
+        # (with_travel_data) trips that far exceed the anchor's recommended stay.
+        # For a booked trip we keep the round-trip flights into the anchor and
+        # re-plan a hotel per city (the single booked hotel only ever covered the
+        # one city, so it can't carry a multi-city route).
+        if state.get("itinerary_mode") not in ("standalone", "with_travel_data") \
+                or not anchor or not self._llm:
             return base
 
         max_days = self._recommended_max(anchor)
         if total <= max_days:
             return base  # trip fits the anchor — stay single
 
-        segments = self._split(anchor, total, max_days)
-        if len(segments) < 2:
-            return base  # couldn't build a real route — fall back to single
+        routes = self._split(anchor, total, max_days)
+        if not routes:
+            return base  # couldn't build any real route — fall back to single
 
+        # Propose the candidate routes to the user; route_select pauses for their
+        # pick. trip_segments is seeded with the first route so state stays valid
+        # if selection is somehow skipped, but the real choice is made downstream.
         return {
-            "trip_segments":        segments,
+            "proposed_routes":      routes,
+            "trip_segments":        routes[0],
             "seg_index":            0,
             "total_trip_days":      total,
             "is_multi_destination": True,
@@ -147,8 +173,8 @@ class SegmentPlannerNode:
             "trip_total_budget":    float(state.get("total_budget") or 0),
             "progress_log": [
                 "🗺️ **MULTI-DESTINATION:** "
-                f"{total} days exceeds {anchor}'s recommended {max_days} — routing "
-                + " → ".join(f"{s['destination']} ({s['days']}d)" for s in segments)
+                f"{total} days exceeds {anchor}'s recommended {max_days} — "
+                f"proposing {len(routes)} route option(s) for the user to choose"
             ],
         }
 
@@ -163,12 +189,14 @@ class SegmentPlannerNode:
             return int(rec["max_days"])
         return _DEFAULT_MAX_DAYS
 
-    def _split(self, anchor: str, total: int, max_days: int) -> list[dict]:
-        """Ask the LLM for a round route of real cities, validated by name format.
+    def _split(self, anchor: str, total: int, max_days: int) -> list[list[dict]]:
+        """Ask the LLM for several distinct round routes of real cities.
 
-        Activities, flights and hotels are all sourced from live APIs at runtime
-        (the DB city/flight tables are sparse), so candidate cities are NOT
-        constrained to a DB list — any real, well-known city in the country works.
+        Returns a list of routes (each a list of segment dicts), cleaned and
+        de-duplicated. Activities, flights and hotels are all sourced from live
+        APIs at runtime (the DB city/flight tables are sparse), so candidate
+        cities are NOT constrained to a DB list — any real, well-known city in
+        the country works.
         """
         try:
             country = data_provider.get_city_country(anchor)
@@ -177,21 +205,46 @@ class SegmentPlannerNode:
         region = f"in {country}" if country else "near it"
 
         try:
-            route = self._llm.invoke([
+            result = self._llm.invoke([
                 SystemMessage(content=_SPLIT_SYSTEM.format(
                     total=total, anchor=anchor, max_days=max_days,
                     max_segments=MAX_SEGMENTS, region=region,
+                    n_routes=MAX_ROUTE_OPTIONS,
                 )),
                 HumanMessage(content=f"Plan the {total}-day round trip from {anchor}."),
             ])
         except Exception:
             return []
 
+        routes: list[list[dict]] = []
+        seen_routes: set[tuple] = set()
+        for option in result.routes:
+            segments = self._clean_route(option.segments, anchor, total, max_days)
+            if not segments:
+                continue
+            # De-dup identical routes (same ordered cities + day split).
+            sig = tuple((s["destination"].lower(), s["days"]) for s in segments)
+            if sig in seen_routes:
+                continue
+            seen_routes.add(sig)
+            routes.append(segments)
+            if len(routes) >= MAX_ROUTE_OPTIONS:
+                break
+        return routes
+
+    def _clean_route(
+        self,
+        raw_segments: list,
+        anchor: str,
+        total: int,
+        max_days: int,
+    ) -> list[dict]:
+        """Validate/normalize one LLM route into segment dicts, or [] if invalid."""
         # Validate city-name FORMAT only (defends against prompt-injection / junk),
         # force the anchor first, de-dupe, and cap the count.
         cleaned: list[tuple[str, int]] = []
         seen: set[str] = set()
-        for seg in route.segments:
+        for seg in raw_segments:
             try:
                 city = validate_city((seg.city or "").strip())
             except Exception:
@@ -210,7 +263,7 @@ class SegmentPlannerNode:
 
         days = _normalize_days([d for _, d in cleaned], total)
         prev = None
-        segments = []
+        segments: list[dict] = []
         for order, ((city, _), d) in enumerate(zip(cleaned, days)):
             segments.append({
                 "destination": city, "days": d, "order": order,
@@ -243,6 +296,91 @@ def _normalize_days(days: list[int], total: int) -> list[int]:
                 break
         i += 1
     return days
+
+
+# ---------------------------------------------------------------------------
+# RouteSelectNode — HITL: let the user pick one of the proposed routes
+# ---------------------------------------------------------------------------
+
+def _parse_route_selection(value: str, num_routes: int) -> int:
+    """Parse the resume value from the route_selection interrupt.
+
+    Accepts:
+      "auto" / ""   → first (recommended) route
+      "route:N"     → explicit route index
+    Clamps to a valid index; falls back to 0 on any parse error.
+    """
+    if not value or value == "auto":
+        return 0
+    try:
+        idx = int(value.split(":")[1]) if ":" in value else int(value)
+    except (IndexError, ValueError):
+        return 0
+    if num_routes <= 0:
+        return 0
+    return max(0, min(idx, num_routes - 1))
+
+
+class RouteSelectNode:
+    """Pause and ask the user which of the proposed round routes to build.
+
+    Emits a ``{type: "route_selection", routes: [...]}`` interrupt that the web
+    UI renders as a route picker. On resume it finalizes ``trip_segments`` to the
+    chosen route. The LLM route generation already ran in ``segment_planner`` and
+    is persisted in ``proposed_routes``, so re-running this node on resume is
+    cheap and deterministic (it just reads state and applies the choice).
+    """
+
+    def __call__(self, state: AgentState) -> dict:
+        routes = state.get("proposed_routes") or []
+        if not routes:
+            return {}  # nothing proposed — segment_planner already seeded trip_segments
+
+        anchor = routes[0][0]["destination"]
+        total  = int(state.get("total_trip_days")
+                     or sum(int(s["days"]) for s in routes[0]))
+
+        options = [
+            {
+                "label":      f"Option {i + 1}",
+                "total_days": sum(int(s["days"]) for s in segs),
+                "segments":   [
+                    {
+                        "destination":     s["destination"],
+                        "days":            int(s["days"]),
+                        "drive_from_prev": s.get("drive_from_prev"),
+                    }
+                    for s in segs
+                ],
+            }
+            for i, segs in enumerate(routes)
+        ]
+
+        choice: str = interrupt({
+            "type": "route_selection",
+            "question": (
+                f"Your {total}-day trip from **{anchor}** is longer than one city "
+                "is best enjoyed for, so I've planned a few road-trip routes. "
+                "Pick the one you'd like me to build a full itinerary for:"
+            ),
+            "anchor":     anchor,
+            "total_days": total,
+            "routes":     options,
+        })
+
+        idx    = _parse_route_selection(choice, len(routes))
+        chosen = routes[idx]
+        return {
+            "trip_segments":        chosen,
+            "seg_index":            0,
+            "total_trip_days":      sum(int(s["days"]) for s in chosen),
+            "is_multi_destination": True,
+            "itineraries":          [],
+            "progress_log": [
+                "✅ **ROUTE SELECTED:** "
+                + " → ".join(f"{s['destination']} ({s['days']}d)" for s in chosen)
+            ],
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -420,8 +558,11 @@ class TripFormatterNode:
         return {"messages": [overview_msg, plans_msg], "ui": ui_messages}
 
     def _flight_section(self, state: AgentState, origin: str, anchor: str) -> tuple[float, str]:
-        outbound = _cheapest(state.get("flight_options"))
-        ret      = _cheapest(state.get("return_flight_options"))
+        # Prefer the user's booked flights (with_travel_data path) so the overview
+        # reflects what they actually chose; fall back to the cheapest searched
+        # option for standalone multi trips that never had a selection.
+        outbound = state.get("itinerary_selected_outbound_flight") or _cheapest(state.get("flight_options"))
+        ret      = state.get("itinerary_selected_return_flight")   or _cheapest(state.get("return_flight_options"))
         if not outbound and not ret:
             return 0.0, ""
         lines = ["## 🛫 Flights"]
@@ -440,8 +581,15 @@ class TripFormatterNode:
 # ---------------------------------------------------------------------------
 
 def after_segment_planner(state: AgentState) -> str:
-    """Multi trips search the entry-city flight once; single trips skip straight to the loop."""
-    return "multi_flight" if state.get("is_multi_destination") else "leg_dispatch"
+    """Multi trips pause for the user to pick a route; single trips skip to the loop."""
+    return "route_select" if state.get("is_multi_destination") else "leg_dispatch"
+
+
+def after_route_select(state: AgentState) -> str:
+    """After the user picks a route, search the entry-city flight — unless the trip
+    already has booked flights (with_travel_data path), in which case we keep them
+    and go straight to the leg loop."""
+    return "leg_dispatch" if state.get("has_flights") else "multi_flight"
 
 
 def after_leg_collect(state: AgentState) -> str:

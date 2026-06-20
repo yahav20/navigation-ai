@@ -237,15 +237,23 @@ export function TravelSelectionInterruptView({
   interrupt: TravelSelectionInterrupt;
 }) {
   const thread = useStreamContext();
-  const [selectedFlight, setSelectedFlight] = useState<number | null>(null);
-  const [selectedHotel,  setSelectedHotel]  = useState<number | null>(null);
+
+  const cfIdx = cheapestPairingIdx(interrupt.flight_pairings);
+  const chIdx = cheapestHotelIdx(interrupt.hotels);
+
+  // Pre-select the cheapest of each so "Confirm selection" is actionable
+  // immediately — picking BOTH a flight and a hotel is required, and a silently
+  // disabled button gave no hint that one side was still unselected.
+  const [selectedFlight, setSelectedFlight] = useState<number | null>(
+    interrupt.flight_pairings.length ? cfIdx : null,
+  );
+  const [selectedHotel, setSelectedHotel] = useState<number | null>(
+    interrupt.hotels.length ? chIdx : null,
+  );
   const [submitted, setSubmitted] = useState<string | null>(null);
 
   const isLoading = thread.isLoading;
   const isDisabled = isLoading || submitted !== null;
-
-  const cfIdx = cheapestPairingIdx(interrupt.flight_pairings);
-  const chIdx = cheapestHotelIdx(interrupt.hotels);
 
   const resume = (value: string) => {
     if (isDisabled) return;
@@ -344,6 +352,14 @@ export function TravelSelectionInterruptView({
             Confirm selection
           </motion.button>
         </div>
+
+        {submitted === null && !canConfirm && (
+          <p style={S.sendingNote}>
+            Select {selectedFlight === null ? "a flight" : ""}
+            {selectedFlight === null && selectedHotel === null ? " and " : ""}
+            {selectedHotel === null ? "a hotel" : ""} to continue.
+          </p>
+        )}
 
         {submitted !== null && (
           <p style={S.sendingNote}>Sending your selection…</p>

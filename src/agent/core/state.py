@@ -61,7 +61,8 @@ class AgentState(TypedDict):
     # --- Multi-destination trips (long trips split into a round route of cities) ---
     # Single-destination trips are simply a one-element trip_segments list, so the
     # whole itinerary pipeline runs the same way for 1 city or N cities.
-    trip_segments: NotRequired[list]          # [{destination, days, order, drive_from_prev}]
+    trip_segments: NotRequired[list]          # [{destination, days, order, drive_from_prev}] — the CHOSEN route
+    proposed_routes: NotRequired[list]        # [[segment, ...], ...] candidate routes shown to the user for selection (HITL)
     seg_index: NotRequired[int]               # which segment the leg loop is currently building
     total_trip_days: NotRequired[int]         # full trip length (legs carry their own per-city trip_days)
     is_multi_destination: NotRequired[bool]   # True when trip_segments has more than one city
