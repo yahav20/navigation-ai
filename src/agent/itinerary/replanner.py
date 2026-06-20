@@ -42,6 +42,10 @@ from agent.shared.travelers import compute_default_rooms
 
 MAX_REPLANS = 3   # must match planner.py
 
+# When False, we do NOT force every day to be full: sparse or empty days are shown
+# as-is ("show what we find") instead of triggering a replan or a hard failure.
+_ENFORCE_DAILY_ACTIVITIES = False
+
 # ── LLM prompt: final quality review + markdown generation ────────────────
 
 REVIEW_SYSTEM = """
@@ -397,7 +401,7 @@ class ItineraryReplannerNode:
             day_data = _unwrap(last_result)
             day_num  = day_data.get("day", "?")
             valid, reason = _validate_day_quality(day_data)
-            if not valid:
+            if not valid and _ENFORCE_DAILY_ACTIVITIES:
                 if replan_count >= MAX_REPLANS:
                     hard_reason = json.dumps({
                         "error_code":    "MAX_REPLANS",
@@ -497,7 +501,7 @@ class ItineraryReplannerNode:
                 rejection = json.loads(content)
                 if rejection.get("reject"):
                     reason = rejection.get("reason", "LLM quality check failed")
-                    if replan_count < MAX_REPLANS:
+                    if replan_count < MAX_REPLANS and _ENFORCE_DAILY_ACTIVITIES:
                         # For quality rejects we must rebuild the day schedules.
                         # Remove build_day_schedule from completed_steps so the
                         # Planner re-emits those steps with the corrective hint.

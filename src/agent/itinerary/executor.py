@@ -68,7 +68,10 @@ class ItineraryExecutorNode:
         ]
 
         ctx = dict(destination=destination, origin=origin,
-                   trip_days=trip_days, budget=budget, prefs=prefs)
+                   trip_days=trip_days, budget=budget, prefs=prefs,
+                   # On multi-destination legs the flight is searched once for the
+                   # entry city, so per-leg standalone pricing is hotel-only.
+                   include_flight=state.get("include_flight", True))
 
         current_plan_keys = {f"{s.step_type}_{s.step_id}" for s in plan.steps}
 

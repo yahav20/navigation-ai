@@ -212,6 +212,12 @@ def handle_fetch_avg_prices(step: PlanStep, results: dict, history: list, ctx: d
             "note": "estimated fallback",
         }
 
+    # On multi-destination legs the round-trip flight is searched once for the
+    # entry city; intermediate cities are reached by ground transfer, so their
+    # standalone estimate must be hotel-only to avoid counting a flight per city.
+    if not ctx.get("include_flight", True):
+        raw = {**raw, "avg_flight_price": 0.0, "avg_return_flight_price": 0.0}
+
     return _wrap_result(
         status="success", data=raw, error=None, replan_hint="",
         trace=_minimal_trace("fetch_avg_prices", args,
@@ -376,6 +382,27 @@ def handle_fetch_activities(
     )
 
 
+def _open_day_result(action: str, day_num: int, destination: str, reason: str) -> dict:
+    """A successful, empty 'open day' — used on multi-city legs when a small city
+    runs out of activities. We don't force the day full; we show what we found
+    (here, nothing) and leave it free rather than failing the whole leg."""
+    return _wrap_result(
+        status="success",
+        data={
+            "day":      day_num,
+            "theme":    f"Free day in {destination}",
+            "area":     "",
+            "slots":    [],
+            "day_cost": 0.0,
+            "hotel":    "",
+            "hotel_price_per_night": 0.0,
+        },
+        error=None,
+        replan_hint="",
+        trace=_minimal_trace(action, {"day": day_num}, reason, "Left as a free/open day."),
+    )
+
+
 def handle_build_day(
     step: PlanStep,
     results: dict,
@@ -447,17 +474,10 @@ def handle_build_day(
             day_plan_filtered = fallback_plan
 
     if not candidates:
-        return _wrap_result(
-            status="failed",
-            data=None,
-            error=f"Day {day_num}: no activity candidates after deduplication.",
-            replan_hint=(
-                f"Day {day_num} has no unscheduled candidates. "
-                "Re-run fetch_activities so ActivitySelector can reassign."
-            ),
-            trace=_minimal_trace(action, {"day": day_num},
-                                 "resolve_candidates returned [].", ""),
-        )
+        # Don't force a full day: if a city has run out of activities, show what we
+        # found and leave the rest as an open day rather than failing the build.
+        return _open_day_result(action, day_num, destination,
+                                "No activity candidates left — leaving this as an open day.")
 
     # Build DayConfig with weather + blocked times
     weather_cond  = _resolve_weather(results, destination)
@@ -490,17 +510,8 @@ def handle_build_day(
         )
 
     if not slots:
-        return _wrap_result(
-            status="failed",
-            data=None,
-            error=f"Day {day_num}: ScheduleEngine produced no slots.",
-            replan_hint=(
-                f"Day {day_num}: all candidates may be outside operating hours. "
-                "Try different activities or broaden the candidates pool."
-            ),
-            trace=_minimal_trace(action, {"day": day_num, "candidates": len(candidates)},
-                                 "build() returned [].", ""),
-        )
+        return _open_day_result(action, day_num, destination,
+                                "No schedulable slots — leaving this as an open day.")
 
     day_cost = round(sum(float(s.get("estimated_cost", 0)) for s in slots), 2)
     day_themes = {

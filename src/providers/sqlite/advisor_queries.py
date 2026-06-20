@@ -199,6 +199,18 @@ class AdvisorQueriesMixin:
             "notes": rows[0]["notes"],
         }
 
+    def get_city_country(self, city: str) -> str | None:
+        """Return the country name for a city, or None if the city is unknown."""
+        rows = self._query(
+            """SELECT co.name AS country
+                 FROM cities c
+                 JOIN countries co ON c.country_id = co.id
+                WHERE LOWER(c.name) = ?
+                LIMIT 1""",
+            (city.strip().lower(),),
+        )
+        return rows[0]["country"] if rows else None
+
     def get_city_profile(self, city: str) -> dict:
         """Return a rich profile of a city: activity breakdown, best visit months, and per-season temperatures."""
         city_lower = city.strip().lower()

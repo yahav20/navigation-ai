@@ -39,13 +39,22 @@ from agent.itinerary.plan_check import PlanCheckNode
 from agent.itinerary.planner import ItineraryPlannerNode
 from agent.itinerary.executor import ItineraryExecutorNode
 from agent.itinerary.replanner import ItineraryReplannerNode
-from agent.itinerary.formatter import ItineraryFormatterNode
 from agent.itinerary.critic import ItineraryCriticNode
 from agent.itinerary.itinerary_edges import (
     after_plan_check,
     after_itinerary_planner,
     after_itinerary_replanner,
     after_itinerary_critic,
+)
+from agent.itinerary.multi_dest import (
+    SegmentPlannerNode,
+    RouteSelectNode,
+    LegDispatchNode,
+    LegCollectNode,
+    TripFormatterNode,
+    after_segment_planner,
+    after_route_select,
+    after_leg_collect,
 )
 from tools import general_chat_tools
 from tools.destinations import advisor_tools
@@ -86,11 +95,16 @@ def _assemble_builder(provider: str = "google") -> StateGraph:
 
     #   -Itinerary
     plan_check_node           = PlanCheckNode()
+    segment_planner_node      = SegmentPlannerNode(extraction_model)
+    route_select_node         = RouteSelectNode()
+    multi_flight_node         = FlightSearchNode()
+    leg_dispatch_node         = LegDispatchNode()
     itinerary_planner_node    = ItineraryPlannerNode(response_model)
     itinerary_executor_node   = ItineraryExecutorNode(response_model)
     itinerary_replanner_node  = ItineraryReplannerNode(response_model)
     itinerary_critic_node     = ItineraryCriticNode()
-    itinerary_formatter_node  = ItineraryFormatterNode(response_model)
+    leg_collect_node          = LegCollectNode()
+    trip_formatter_node       = TripFormatterNode(response_model)
 
     # 2. Create nodes for the advisor path (uses its own model)
     _, advisor_extraction_model = get_models(provider, mode="advisor")
@@ -121,11 +135,16 @@ def _assemble_builder(provider: str = "google") -> StateGraph:
 
     # Itinerary nodes
     builder.add_node("plan_check",          plan_check_node)
+    builder.add_node("segment_planner",     segment_planner_node)
+    builder.add_node("route_select",        route_select_node)
+    builder.add_node("multi_flight",        multi_flight_node)
+    builder.add_node("leg_dispatch",        leg_dispatch_node)
     builder.add_node("itinerary_planner",   itinerary_planner_node)
     builder.add_node("itinerary_executor",  itinerary_executor_node)
     builder.add_node("itinerary_replanner", itinerary_replanner_node)
     builder.add_node("itinerary_critic",    itinerary_critic_node)
-    builder.add_node("itinerary_formatter", itinerary_formatter_node)
+    builder.add_node("leg_collect",         leg_collect_node)
+    builder.add_node("trip_formatter",      trip_formatter_node)
 
     # Advisor nodes
     builder.add_node("advisor_planner", advisor_planner_node)
@@ -214,23 +233,49 @@ def _assemble_builder(provider: str = "google") -> StateGraph:
         },
     )
 
-    # -----   -Itinerary (Plan & Execute + Replanner) -----
+    # -----   -Itinerary (Multi-destination round route → per-city Plan & Execute) -----
+    # Single destination and multi destination share one path: plan_check decides
+    # the mode, segment_planner builds the trip_segments list (1 city or N), and the
+    # leg loop runs the same Plan-and-Execute nodes once per city.
     builder.add_conditional_edges(
         "plan_check",
         after_plan_check,
         {
-            "itinerary_planner": "itinerary_planner",
-            "extract_metadata":  "extract_metadata",
-            "summary":           "summary",
+            "segment_planner":  "segment_planner",
+            "extract_metadata": "extract_metadata",
+            "summary":          "summary",
         }
     )
+
+    # segment_planner → (multi) pause for the user to pick a route → search the
+    # entry-city flight once → leg loop.  Single trips skip straight to the loop.
+    builder.add_conditional_edges(
+        "segment_planner",
+        after_segment_planner,
+        {
+            "route_select": "route_select",
+            "leg_dispatch": "leg_dispatch",
+        }
+    )
+    # Booked trips keep their flights and skip the re-search; standalone multi
+    # trips search the entry-city flight once before the leg loop.
+    builder.add_conditional_edges(
+        "route_select",
+        after_route_select,
+        {
+            "multi_flight": "multi_flight",
+            "leg_dispatch": "leg_dispatch",
+        }
+    )
+    builder.add_edge("multi_flight", "leg_dispatch")
+    builder.add_edge("leg_dispatch", "itinerary_planner")
 
     builder.add_conditional_edges(
         "itinerary_planner",
         after_itinerary_planner,
         {
-            "itinerary_executor":  "itinerary_executor",
-            "itinerary_formatter": "itinerary_formatter",
+            "itinerary_executor": "itinerary_executor",
+            "trip_formatter":     "trip_formatter",
         }
     )
 
@@ -250,12 +295,22 @@ def _assemble_builder(provider: str = "google") -> StateGraph:
         "itinerary_critic",
         after_itinerary_critic,
         {
-            "itinerary_planner":  "itinerary_planner",
-            "itinerary_formatter": "itinerary_formatter",
+            "itinerary_planner": "itinerary_planner",
+            "leg_collect":       "leg_collect",
         }
     )
 
-    builder.add_edge("itinerary_formatter", "summary")
+    # leg_collect → next city (loop) or render the whole trip
+    builder.add_conditional_edges(
+        "leg_collect",
+        after_leg_collect,
+        {
+            "leg_dispatch":   "leg_dispatch",
+            "trip_formatter": "trip_formatter",
+        }
+    )
+
+    builder.add_edge("trip_formatter", "summary")
     # ------------------------------------------------------
 
     builder.add_edge("summary", END)
