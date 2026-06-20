@@ -28,6 +28,7 @@ class PlanStep(BaseModel):
         "fetch_weather",
         "fetch_avg_prices",
         "fetch_min_prices",
+        "fetch_special_events",
         "switch_travel_options",
         "build_day_schedule",
         "verify_budget",

@@ -245,8 +245,8 @@ def select_activities_per_day(
     blocked_times = blocked_times or []
 
     # ── Token-safe payload caps ──────────────────────────────────────────────
-    MAX_ACT  = min(trip_days * 5, 12)   # 1d→5, 2d→10, 3d+→12
-    MAX_REST = min(trip_days * 4, 12)   # 1d→4, 2d→8, 3d+→12
+    MAX_ACT  = min(trip_days * 5, 25)   # 1d→5, 2d→10, 5d→25 (enough for full trip)
+    MAX_REST = min(trip_days * 4, 20)   # 1d→4, 2d→8, 5d→20
 
     sorted_acts  = sorted(activities,  key=lambda a: -(a.get("rating") or 0))
     sorted_rests = sorted(restaurants, key=lambda r: -(r.get("rating") or 0))

@@ -25,6 +25,7 @@ from agent.itinerary.step_handlers import (
     handle_fetch_activities,
     handle_fetch_avg_prices,
     handle_fetch_min_prices,
+    handle_fetch_special_events,
     handle_fetch_weather,
     handle_switch_travel_options,
     handle_build_day,
@@ -78,6 +79,11 @@ class ItineraryExecutorNode:
 
         elif step.step_type == "fetch_activities":
             result = handle_fetch_activities(step, results, history, ctx, trip_days, self.llm)
+
+        elif step.step_type == "fetch_special_events":
+            result = handle_fetch_special_events(
+                step, results, history, ctx, state=state, llm=self.llm,
+            )
 
         elif step.step_type == "fetch_avg_prices":
             result = handle_fetch_avg_prices(step, results, history, ctx)

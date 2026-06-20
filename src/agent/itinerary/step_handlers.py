@@ -182,6 +182,45 @@ def handle_switch_travel_options(step: PlanStep, results: dict, history: list, c
     return result
 
 
+def handle_fetch_special_events(
+    step: PlanStep,
+    results: dict,
+    history: list,
+    ctx: dict,
+    state: dict,
+    llm,
+) -> dict:
+    """Fetch and extract special events for the destination via Tavily + LLM."""
+    destination = ctx["destination"]
+    trip_start  = state.get("trip_start", "")
+
+    cache_args = _canonical_args({"city": destination, "trip_start": trip_start})
+    cached = _find_cached_result(results, history, "fetch_special_events", cache_args)
+    if cached is not None:
+        return _wrap_result(
+            status="success", data=cached, error=None, replan_hint="",
+            trace=_minimal_trace("fetch_special_events", cache_args, "Cache hit.", ""),
+        )
+
+    try:
+        from agent.itinerary.special_events_agent import SpecialEventsSubAgent  # noqa: PLC0415
+        events = SpecialEventsSubAgent(llm)(state)
+    except Exception:  # noqa: BLE001
+        events = []
+
+    data   = {"events": events}
+    result = _wrap_result(
+        status="success", data=data, error=None, replan_hint="",
+        trace=_minimal_trace(
+            "fetch_special_events", cache_args,
+            f"Found {len(events)} special event(s).", "",
+        ),
+    )
+    if events:
+        result["state_updates"] = {"special_events_data": events}
+    return result
+
+
 def handle_fetch_avg_prices(step: PlanStep, results: dict, history: list, ctx: dict) -> dict:
     """Fetch and cache average flight + hotel prices for standalone budget estimation."""
     destination = ctx["destination"]

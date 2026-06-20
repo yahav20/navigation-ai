@@ -28,7 +28,6 @@ Safety:
 """
 from __future__ import annotations
 
-import concurrent.futures
 import json
 import math
 from typing import Optional
@@ -49,6 +48,7 @@ VALID_STEP_TYPES = {
     "fetch_weather",
     "fetch_avg_prices",
     "fetch_min_prices",
+    "fetch_special_events",
     "switch_travel_options",
     "build_day_schedule",
     "verify_budget",
@@ -146,6 +146,7 @@ def _validate_and_fix(
     mode: str = "standalone",
     need_min_prices: bool = False,
     need_switch_travel: bool = False,
+    need_special_events: bool = False,
 ) -> ExecutionPlan:
     """Enforce hard ordering constraints and fill missing day steps."""
     steps = plan.steps
@@ -184,6 +185,13 @@ def _validate_and_fix(
             step_id=0,
             step_type="fetch_activities",
             description=f"Fetch and select activities in {destination}",
+        ))
+    # Inject fetch_special_events when needed and not already planned/completed
+    if need_special_events and "fetch_special_events" not in other_types and "fetch_special_events" not in completed:
+        other_steps.append(PlanStep(
+            step_id=0,
+            step_type="fetch_special_events",
+            description=f"Fetch special events in {destination}",
         ))
 
     # In standalone mode: inject fetch_avg_prices / fetch_min_prices if absent
@@ -255,6 +263,7 @@ def _default_plan(
     mode: str = "standalone",
     need_min_prices: bool = False,
     need_switch_travel: bool = False,
+    need_special_events: bool = False,
 ) -> ExecutionPlan:
     """Deterministic plan — only includes steps not already completed."""
     steps: list[PlanStep] = []
@@ -268,6 +277,8 @@ def _default_plan(
         sid += 1
 
     add("fetch_activities", f"Fetch and select activities in {destination}")
+    if need_special_events:
+        add("fetch_special_events", f"Fetch special events in {destination}")
     add("fetch_weather",    f"Seasonal weather in {destination}")
     if mode == "standalone":
         add("fetch_avg_prices", f"Fetch average flight + hotel prices for {destination}")
@@ -404,26 +415,6 @@ class ItineraryPlannerNode:
             llm.with_structured_output(DayUpdateInstruction, method="function_calling")
             if llm else None
         )
-        # Sub-agent that fetches special events in a background thread
-        from agent.itinerary.special_events_agent import SpecialEventsSubAgent  # noqa: PLC0415
-        self._events_agent = SpecialEventsSubAgent(llm) if llm else None
-
-    def _should_fetch_events(self, state: AgentState) -> bool:
-        """True only on the first planning pass when a travel date is known."""
-        if not self._events_agent:
-            return False
-        if not state.get("trip_start"):
-            return False
-        if state.get("special_events_data"):   # already fetched on a prior replan
-            return False
-        if state.get("itinerary_mode") == "update":
-            return False
-        prev_plan    = state.get("itinerary_plan") or {}
-        replan_count = prev_plan.get("replan_count", 0)
-        replan_raw   = prev_plan.get("replan_context", "")
-        if replan_count > 1 or replan_raw:     # skip on replans
-            return False
-        return True
 
     def __call__(self, state: AgentState) -> dict:
         destination = state.get("destination_city", "")
@@ -442,6 +433,15 @@ class ItineraryPlannerNode:
 
         is_replan = bool(replan_raw)
 
+        # Fetch special events once — only on the first planning pass when a travel date is known
+        # and events haven't already been fetched by the advisor.
+        need_special_events = (
+            bool(state.get("trip_start"))
+            and not state.get("special_events_data")
+            and mode != "update"
+            and not is_replan
+        )
+
         # ── Hard stop ──────────────────────────────────────────────────────
         if replan_count >= MAX_REPLANS:
             reason = replan_raw or "max_replans_exceeded"
@@ -456,15 +456,6 @@ class ItineraryPlannerNode:
                     name="planner_log",
                 )],
             }
-
-        # ── Special events sub-agent (parallel thread) ──────────────────────
-        # Start the Tavily search before the synchronous plan-generation logic so
-        # both run concurrently. Joined at the end of __call__ with a safe timeout.
-        _events_executor = None
-        _events_future   = None
-        if self._should_fetch_events(state):
-            _events_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-            _events_future   = _events_executor.submit(self._events_agent, state)
 
         # ── Update mode: first entry ────────────────────────────────────────
         # Detected by update_itinerary intent with no active replan context.
@@ -589,11 +580,11 @@ class ItineraryPlannerNode:
         else:
             plan = _default_plan(
                 destination, origin, trip_days, replan_count, completed,
-                mode, need_min_prices, need_switch_travel,
+                mode, need_min_prices, need_switch_travel, need_special_events,
             )
             plan = _validate_and_fix(
                 plan, completed, trip_days, destination, comp_days,
-                mode, need_min_prices, need_switch_travel,
+                mode, need_min_prices, need_switch_travel, need_special_events,
             )
 
         plan_md += "\n**Execution Plan:**\n"
@@ -624,16 +615,4 @@ class ItineraryPlannerNode:
             "progress_log": [plan_md.strip()],
         }
         result.update(extra_state)
-
-        # ── Join the special events background thread ────────────────────────
-        if _events_future is not None and _events_executor is not None:
-            try:
-                events = _events_future.result(timeout=20)
-                if events:
-                    result["special_events_data"] = events
-            except Exception:  # noqa: BLE001
-                pass  # graceful — itinerary builds without events
-            finally:
-                _events_executor.shutdown(wait=False)
-
         return result
