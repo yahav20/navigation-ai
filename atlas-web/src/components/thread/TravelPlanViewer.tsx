@@ -50,6 +50,10 @@ interface Restaurant {
   description?: string;
 }
 
+interface SpecialEvent {
+  name: string;
+}
+
 interface TravelPlanViewerProps {
   destination?: string;
   origin?: string;
@@ -64,6 +68,7 @@ interface TravelPlanViewerProps {
   restaurants?: Restaurant[];
   weather?: Record<string, string>;
   best_time?: { months?: string[]; reason?: string };
+  special_events?: SpecialEvent[];
 }
 
 // ─── Pure helpers (unchanged) ─────────────────────────────────────────────────
@@ -129,6 +134,15 @@ const IconUtensils: FC = () => (
     <path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2"/>
     <path d="M7 2v20"/>
     <path d="M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3Zm0 0v7"/>
+  </svg>
+);
+
+const IconCalendar: FC = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+    <line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/>
+    <line x1="3" y1="10" x2="21" y2="10"/>
   </svg>
 );
 
@@ -375,7 +389,26 @@ const RestaurantCard: FC<{ item: Restaurant }> = ({ item }) => (
   </div>
 );
 
-// ─── 5. Insights ─────────────────────────────────────────────────────────────
+// ─── 5. Events ───────────────────────────────────────────────────────────────
+
+const EventsSection: FC<{ events: SpecialEvent[] }> = ({ events }) => {
+  if (!events?.length) return null;
+  return (
+    <div style={S.sectionCard}>
+      <SectionHead icon={<IconCalendar />} title="Events" />
+      <div style={S.eventList}>
+        {events.map((ev, i) => (
+          <div key={i} style={S.eventRow}>
+            <span style={S.eventDot} />
+            <span style={S.eventName}>{ev.name}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+// ─── 6. Insights ─────────────────────────────────────────────────────────────
 
 const SEASONS = ["Spring", "Summer", "Autumn", "Winter"] as const;
 
@@ -447,6 +480,7 @@ export default function TravelPlanViewer({
   restaurants = [],
   weather = {},
   best_time = {},
+  special_events = [],
 }: TravelPlanViewerProps) {
   const stream = useStreamContext();
 
@@ -547,7 +581,12 @@ export default function TravelPlanViewer({
         </div>
       )}
 
-      {/* ── 5. Insights ── */}
+      {/* ── 5. Events ── */}
+      {special_events.length > 0 && (
+        <EventsSection events={special_events} />
+      )}
+
+      {/* ── 6. Insights ── */}
       <InsightsSection weather={weather} best_time={best_time} />
 
       {/* ── 6. CTA ── */}
@@ -960,6 +999,14 @@ const S: Record<string, CSSProperties> = {
     color:      "var(--color-text-secondary, #64748B)",
     lineHeight: 1.4,
   },
+
+  // ── Events ─────────────────────────────────────────────────────────────────
+  eventList: { display: "flex", flexDirection: "column" as const, gap: 2 },
+  eventRow:  { display: "flex", alignItems: "center", gap: 10, padding: "6px 0",
+               borderBottom: "1px solid var(--color-border-tertiary, #F1F5F9)" },
+  eventDot:  { width: 5, height: 5, borderRadius: "50%", flexShrink: 0,
+               background: "var(--tpv-blue, #103076)" },
+  eventName: { fontSize: 13, fontWeight: 500, color: "var(--color-text-primary, #0F172A)" },
 
   // ── Insights ───────────────────────────────────────────────────────────────
   insightsCard: {

@@ -13,7 +13,15 @@ class FormatterNode:
         if not plan:
             return {}
 
-        ui_props   = _build_viewer_props(plan)
+        ui_props = _build_viewer_props(plan)
+
+        events = state.get("special_events_data") or []
+        if events:
+            ui_props["special_events"] = [
+                {"name": ev["name"]}
+                for ev in events if ev.get("name")
+            ]
+
         ai_message = AIMessage(content="", name="formatter_output")
         ui_message = {
             "type":     "ui",

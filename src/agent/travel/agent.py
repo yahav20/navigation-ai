@@ -528,6 +528,7 @@ class TravelAgentNode:
     def __init__(self, response_model: Runnable) -> None:
         """Wrap the response model with structured output for curation."""
         self.curation_model = silent(response_model.with_structured_output(TravelPlanCuration))
+        self._llm = silent(response_model)
 
     def __call__(self, state: AgentState) -> dict:
         """Return either `travel_plan` (success) or a fallback `AIMessage` (no data)."""
@@ -649,4 +650,15 @@ class TravelAgentNode:
             travelers_label=payload.get("travelers_label"),
         )
 
-        return {"travel_plan": plan.model_dump()}
+        special_events: list[dict] = []
+        if payload.get("trip_start") and not state.get("special_events_data"):
+            try:
+                from agent.itinerary.special_events_agent import SpecialEventsSubAgent  # noqa: PLC0415
+                special_events = SpecialEventsSubAgent(self._llm)(state)
+            except Exception:  # noqa: BLE001
+                pass
+
+        result: dict = {"travel_plan": plan.model_dump()}
+        if special_events:
+            result["special_events_data"] = special_events
+        return result
