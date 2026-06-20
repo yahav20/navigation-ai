@@ -202,19 +202,25 @@ def handle_fetch_special_events(
             trace=_minimal_trace("fetch_special_events", cache_args, "Cache hit.", ""),
         )
 
+    _agent_error: str = ""
     try:
         from agent.itinerary.special_events_agent import SpecialEventsSubAgent  # noqa: PLC0415
         events = SpecialEventsSubAgent(llm)(state)
-    except Exception:  # noqa: BLE001
+    except Exception as _exc:  # noqa: BLE001
         events = []
+        _agent_error = f"{type(_exc).__name__}: {_exc}"
 
+    observation = (
+        f"Found {len(events)} special event(s)."
+        if not _agent_error
+        else f"Agent error — {_agent_error}"
+    )
     data   = {"events": events}
     result = _wrap_result(
-        status="success", data=data, error=None, replan_hint="",
-        trace=_minimal_trace(
-            "fetch_special_events", cache_args,
-            f"Found {len(events)} special event(s).", "",
-        ),
+        status="success", data=data,
+        error=_agent_error or None,
+        replan_hint="",
+        trace=_minimal_trace("fetch_special_events", cache_args, observation, ""),
     )
     if events:
         result["state_updates"] = {"special_events_data": events}
@@ -485,6 +491,16 @@ def handle_build_day(
         candidates = resolve_candidates(available_acts, fallback_plan, available_rests)
         if candidates:
             day_plan_filtered = fallback_plan
+
+    if not candidates:
+        # Soft-dedup fallback: the strict pool is exhausted (all attractions were used
+        # on earlier days). Allow reuse of the full activity list so the itinerary
+        # can still be built — this is better than failing the entire trip.
+        all_sorted = sorted(all_activities, key=lambda a: -(a.get("rating") or 0))
+        reuse_plan = {**day_plan_filtered, "activities": [a["name"] for a in all_sorted[:5]]}
+        candidates = resolve_candidates(all_activities, reuse_plan, available_rests)
+        if candidates:
+            day_plan_filtered = reuse_plan
 
     if not candidates:
         return _wrap_result(

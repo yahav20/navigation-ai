@@ -95,11 +95,18 @@ Travel window : {date_from} to {date_to}
 Destination   : {city}
 
 Rules:
-1. Only extract REAL, date-specific events (festivals, markets, concerts, seasonal celebrations).
+1. Only extract REAL events (festivals, markets, concerts, seasonal celebrations).
    Do NOT extract permanent attractions, restaurants, museums, or generic tourist spots.
 2. Only include events that physically take place IN {city} itself.
    Discard any event that requires travel to another city, island, or region.
-3. Fill applicable_dates with every date within [{date_from}, {date_to}] on which the event runs.
+3. Fill applicable_dates with every YYYY-MM-DD date within [{date_from}, {date_to}] on which
+   the event runs. Articles may describe events from a previous year — that is fine. Annual
+   recurring events (Christmas markets, summer festivals, pride parades, etc.) should be
+   assumed to also occur in {date_from[:4]} during the same seasonal window described.
+   Map the described date range onto the travel-window year and fill ALL matching dates.
+   Example: article says "runs November 25 – December 31"; travel window 2026-12-01 to
+   2026-12-05 → applicable_dates = ["2026-12-01","2026-12-02","2026-12-03","2026-12-04","2026-12-05"].
+   If the event clearly does NOT run during the travel window month, leave applicable_dates empty.
 4. Convert costs to USD. For free-entry events, estimate realistic snack/browsing spending.
 5. suggested_visit_hours = realistic visitor stay, not total event operating hours.
 6. Always fill location_hint with the most specific venue/area name from the text.

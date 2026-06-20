@@ -327,10 +327,15 @@ def select_activities_per_day(
     except Exception:
         pass
 
-    # ── Fallback: rating-sorted round-robin ──────────────────────────────────
+    # ── Fallback: rating-sorted round-robin (wraps when pool < trip_days × 5) ─
     names = [a["name"] for a in sorted_acts]
+    n = len(names)
+    if n == 0:
+        return {f"day_{d}": _list_to_day_plan([]) for d in range(1, trip_days + 1)}
     return {
-        f"day_{d}": _list_to_day_plan(names[(d - 1) * 5: d * 5])
+        f"day_{d}": _list_to_day_plan(
+            [names[i % n] for i in range((d - 1) * 5, d * 5)]
+        )
         for d in range(1, trip_days + 1)
     }
 
