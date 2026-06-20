@@ -1,7 +1,8 @@
 {
   "dependencies": ["./src"],
   "graphs": {
-    "agent": "./src/agent/core/graph.py:make_graph"
+    "agent": "./src/agent/core/graph.py:make_graph",
+    "explore": "./src/agent/explore/graph.py:make_explore_graph"
   },
   "env": ".env"
 }
