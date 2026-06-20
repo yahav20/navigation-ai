@@ -698,6 +698,7 @@ class AdvisorFormatterNode:
                         f"TODAY'S DATE: {today_str}\n"
                         f"TRAVEL YEAR: {year}\n"
                         f"DESTINATION CITY: {city}\n\n"
+                        f"MONTH FILTER: Only include events happening in {month}. Discard events from other months.\n\n"
                         "Extract date-specific special events, festivals, and seasonal happenings "
                         "from these travel article snippets.\n\n"
                         "CITY RULE: Include ONLY events physically held IN the destination city itself. "

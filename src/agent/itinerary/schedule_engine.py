@@ -575,6 +575,15 @@ class DayScheduleBuilder:
         # Flush any remaining rest blocks
         cursor = self._flush_rests(cursor, pending_rests, departure_anchor)
 
+        # Flush remaining daytime special events not placed during sightseeing loop.
+        # Daytime events (is_evening_only=False) are flushed inside the sightseeing loop,
+        # but if the loop exits early (few activities, early departure) they can be missed.
+        for _t_s, _t_e, ev in list(pending_day_events):
+            actual_s = max(cursor, _t_s)
+            if actual_s < departure_anchor:
+                cursor, location = self._insert_special_event(ev, actual_s, departure_anchor, location)
+        pending_day_events.clear()
+
         # Pinned dinner (18:00+ window)
         if not self._had_dinner and pinned_dinner and cursor.hour >= 18:
             cursor, location = self._insert_pinned_meal(
