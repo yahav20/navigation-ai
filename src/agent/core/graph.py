@@ -14,6 +14,8 @@ from agent.core.edge import (
     after_travel_formatter,
     after_travel_confirmation,
     after_security_gate,
+    after_alternative_destination,
+    after_flight_flexibility_gate,
 )
 from agent.core.llm import get_generation_model, get_models
 from agent.core.state import AgentState
@@ -29,6 +31,7 @@ from agent.shared.summary import SummaryNode
 from agent.travel.adjustments import AdjustmentsNode
 from agent.travel.agent import TravelAgentNode
 from agent.travel.alternatives import AlternativeDestinationNode, FormatterAlternativeNode
+from agent.travel.flight_flexibility import FlightFlexibilityGateNode
 from agent.travel.flight_search import FlightSearchNode
 from agent.travel.formatter import FormatterNode
 from agent.advisor.planner import AdvisorPlannerNode
@@ -89,6 +92,7 @@ def _assemble_builder(provider: str = "google") -> StateGraph:
     travel_confirmation_node = TravelConfirmationNode()
     alternative_destination_node = AlternativeDestinationNode(extraction_model)
     formatter_alternative = FormatterAlternativeNode(extraction_model)
+    flight_flexibility_gate_node = FlightFlexibilityGateNode()
     router_node = RouterNode(extraction_model)
     # save_plan_prompt HITL disabled for now — not wired into the graph below.
     # save_plan_prompt_node = SavePlanPromptNode()
@@ -131,6 +135,7 @@ def _assemble_builder(provider: str = "google") -> StateGraph:
     # builder.add_node("save_plan_prompt", save_plan_prompt_node)
     builder.add_node("alternative_destination", alternative_destination_node)
     builder.add_node("formatter_alternative", formatter_alternative)
+    builder.add_node("flight_flexibility_gate", flight_flexibility_gate_node)
     builder.add_node("summary", summary_node)
 
     # Itinerary nodes
@@ -211,7 +216,22 @@ def _assemble_builder(provider: str = "google") -> StateGraph:
             "summary": "summary",
         },
     )
-    builder.add_edge("alternative_destination", "formatter_alternative")
+    builder.add_conditional_edges(
+        "alternative_destination",
+        after_alternative_destination,
+        {
+            "formatter_alternative": "formatter_alternative",
+            "flight_flexibility_gate": "flight_flexibility_gate",
+        },
+    )
+    builder.add_conditional_edges(
+        "flight_flexibility_gate",
+        after_flight_flexibility_gate,
+        {
+            "adjustments": "adjustments",
+            "formatter_alternative": "formatter_alternative",
+        },
+    )
     builder.add_edge("formatter_alternative", "summary")
 
     # After the travel formatter renders flights + hotels, pause for user confirmation.
