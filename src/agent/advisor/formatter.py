@@ -731,6 +731,25 @@ class AdvisorFormatterNode:
         if not extraction.events:
             return [], f"[{label}]\nstatus: No special events found for this search."
 
+        # Fallback: fill empty applicable_dates with every day of the search month so the
+        # itinerary pipeline can inject the event even when the LLM omitted specific dates.
+        import calendar as _cal  # noqa: PLC0415
+        month_dates: list[str] = []
+        month_name_str = month.split()[0] if month else ""
+        try:
+            month_num   = list(_cal.month_name).index(month_name_str)  # 1–12
+            year_int    = int(year)
+            _, last_day = _cal.monthrange(year_int, month_num)
+            month_dates = [
+                f"{year_int}-{month_num:02d}-{d:02d}"
+                for d in range(1, last_day + 1)
+            ]
+        except (ValueError, IndexError):
+            pass
+        for ev in extraction.events:
+            if not ev.applicable_dates and month_dates:
+                ev.applicable_dates = month_dates
+
         # Build data block for formatter LLM (NO price — advisor shows what to do, not cost)
         lines = []
         for ev in extraction.events:

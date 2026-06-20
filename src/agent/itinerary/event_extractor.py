@@ -1,9 +1,25 @@
 """LLM-based structured parser for special event data scraped from timeout.com snippets."""
 from __future__ import annotations
 
+import datetime as _dt
 from typing import Optional
 
 from pydantic import BaseModel, Field
+
+
+def _all_dates_in_range(date_from: str, date_to: str) -> list[str]:
+    """Return every YYYY-MM-DD date in [date_from, date_to] inclusive."""
+    try:
+        start = _dt.date.fromisoformat(date_from)
+        end   = _dt.date.fromisoformat(date_to)
+        dates: list[str] = []
+        cur = start
+        while cur <= end:
+            dates.append(cur.isoformat())
+            cur += _dt.timedelta(days=1)
+        return dates
+    except (ValueError, TypeError):
+        return []
 
 
 # ---------------------------------------------------------------------------
@@ -130,7 +146,15 @@ def extract_special_events(
             HumanMessage(content=user_message),
         ])
         if isinstance(result, list):
-            return [e for e in result if isinstance(e, SpecialEventRaw)]
-        return []
+            result = [e for e in result if isinstance(e, SpecialEventRaw)]
+        else:
+            result = []
     except Exception:  # noqa: BLE001
-        return []
+        result = []
+
+    # Fallback: if LLM left applicable_dates empty, fill with every date in travel window
+    fallback_dates = _all_dates_in_range(date_from, date_to)
+    for ev in result:
+        if not ev.applicable_dates and fallback_dates:
+            ev.applicable_dates = fallback_dates
+    return result

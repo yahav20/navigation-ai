@@ -477,7 +477,7 @@ def handle_build_day(
     )
 
     # Retrieve and geocode special events for this calendar day
-    day_events = _enrich_event_coords(_get_day_events(state, day_num), destination)
+    day_events = _enrich_event_coords(_get_day_events(state, day_num, results), destination)
 
     try:
         slots = DayScheduleBuilder(cfg).build(
@@ -1514,15 +1514,40 @@ def _wrap_result(status, data, error, replan_hint, trace) -> dict:
 # Special-events helpers
 # ---------------------------------------------------------------------------
 
-def _get_day_events(state: dict, day_num: int) -> list[dict]:
+def _already_placed_event_names(
+    results: dict, up_to_day: int, candidate_names: set[str]
+) -> set[str]:
+    """Return which candidate event names were placed as activity slots in days < up_to_day."""
+    placed: set[str] = set()
+    for key, wrapped in results.items():
+        if not key.startswith("build_day_schedule") or not isinstance(wrapped, dict):
+            continue
+        day_data = wrapped.get("data", {})
+        if not isinstance(day_data, dict) or day_data.get("day", 0) >= up_to_day:
+            continue
+        for slot in day_data.get("slots", []):
+            if slot.get("slot_type") == "activity" and slot.get("name") in candidate_names:
+                placed.add(slot["name"])
+    return placed
+
+
+def _get_day_events(state: dict, day_num: int, results: dict | None = None) -> list[dict]:
     """Return special events that fall on the calendar date for *day_num*.
 
-    Uses state["trip_start"] (local destination date) to compute which calendar
-    date corresponds to this day number, then filters from special_events_data.
+    Uses state["trip_start"] to compute which calendar date corresponds to this day number,
+    then filters from special_events_data. Deduplicates against prior built days so an
+    all-month event (e.g. Christmas market) only appears once in the itinerary.
     """
     events     = (state or {}).get("special_events_data") or []
     trip_start = (state or {}).get("trip_start", "")
-    if not events or not trip_start:
+    if not events:
+        return []
+    # Fallback: when the user never stated a start date but flights are booked, use the
+    # outbound departure date so events still get scheduled.
+    if not trip_start:
+        fl = (state or {}).get("itinerary_selected_outbound_flight") or {}
+        trip_start = str(fl.get("departure_date") or fl.get("departure_time") or "")
+    if not trip_start:
         return []
     try:
         s = trip_start.strip()
@@ -1533,7 +1558,18 @@ def _get_day_events(state: dict, day_num: int) -> list[dict]:
         trip_date = (base + datetime.timedelta(days=day_num - 1)).isoformat()
     except (ValueError, TypeError):
         return []
-    return [e for e in events if trip_date in (e.get("applicable_dates") or [])]
+
+    matched = [e for e in events if trip_date in (e.get("applicable_dates") or [])]
+
+    # Dedup: skip events already placed as activity slots on a prior day.
+    # If the ScheduleEngine couldn't fit the event on day N, it won't appear in day N's
+    # slots, so it remains eligible for day N+1 — giving it a second chance.
+    if results and matched:
+        candidate_names = {e.get("name", "") for e in matched}
+        already = _already_placed_event_names(results, day_num, candidate_names)
+        matched = [e for e in matched if e.get("name") not in already]
+
+    return matched
 
 
 def _enrich_event_coords(events: list[dict], destination: str) -> list[dict]:
