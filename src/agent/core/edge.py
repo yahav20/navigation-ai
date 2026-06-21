@@ -35,6 +35,20 @@ def after_flight_search(state: AgentState) -> str:
     return "alternative_destination"
 
 
+def after_alternative_destination(state: AgentState) -> str:
+    """Offer budget/city flexibility only when no alternative destinations were found either."""
+    if state.get("alternative_destinations"):
+        return "formatter_alternative"
+    return "flight_flexibility_gate"
+
+
+def after_flight_flexibility_gate(state: AgentState) -> str:
+    """Re-run adjustments on a flexible answer, else render the dead-end message."""
+    if state.get("flexibility_action") == "flexible":
+        return "adjustments"
+    return "formatter_alternative"
+
+
 def after_travel_agent(state: AgentState) -> str:
     """Render the curated plan when the travel agent produced one, else skip the formatter."""
     return "formatter" if state.get("travel_plan") else "summary"

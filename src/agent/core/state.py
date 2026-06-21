@@ -33,6 +33,8 @@ class AgentState(TypedDict):
     summary: str                   # rolling conversation summary maintained by summary_node
     last_summarized_index: NotRequired[int]  # watermark: count of messages already folded into `summary`
     alternative_destinations: list # populated when fetch_flights returns no results for the route
+    flexibility_action: NotRequired[str]    # routing signal from FlightFlexibilityGateNode: "flexible" | "give_up"
+    flexibility_attempts: NotRequired[int]  # number of flexibility HITL rounds already offered (capped)
     trip_start: NotRequired[str]             # approximate trip start as YYYY-MM-DD or YYYY-MM
     flight_options: NotRequired[list[dict]]  # deterministic outbound flight results
     return_flight_options: NotRequired[list[dict]]  # deterministic return flight results (destination -> origin)
