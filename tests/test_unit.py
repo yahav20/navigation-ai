@@ -443,6 +443,28 @@ def test_router_multiturn_advisor_commit_transitions_to_new_travel_plan():
 
 
 @pytest.mark.unit
+def test_router_multiturn_advisor_commit_overrides_llm_misclassification():
+    """Guardrail 0b: commit phrase must force new_travel_plan even if the LLM still says 'advisor'.
+
+    This is the actual failure mode observed against the real model — the
+    TRANSITION RULE is only a prompt instruction, not always followed.
+    """
+    node = RouterNode(_StubRouterClassifier("advisor", has_explicit_destination=True))
+    state = _router_state(
+        messages=[
+            HumanMessage(content="What are popular tourist cities in Japan?"),
+            AIMessage(content="Tokyo, Kyoto, and Osaka are all popular. Want details on any of them?"),
+            HumanMessage(content="Let's go to Tokyo — I'm ready to plan this trip"),
+        ],
+        intent="advisor",
+        summary="User asked about popular cities in Japan. Agent mentioned Tokyo, Kyoto, Osaka.",
+        advisor_shown_cities=["Tokyo", "Kyoto", "Osaka"],
+    )
+    result = node(state)
+    assert result["intent"] == "new_travel_plan"
+
+
+@pytest.mark.unit
 def test_router_multiturn_enrichment_short_answer_stays_new_travel_plan():
     """Multi-turn: short enrichment answer ('7') must stay new_travel_plan via Guardrail 0."""
     node = RouterNode(_StubRouterClassifier("out_of_scope"))  # LLM confused by bare number

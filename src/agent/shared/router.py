@@ -119,6 +119,23 @@ class RouterNode:
                 and final_intent != "advisor"):
             final_intent = state.get("intent")
 
+        # Guardrail 0b: Hard-enforce the TRANSITION RULE above. The LLM is told in the
+        # prompt to catch commitment phrases during an active advisor flow, but it
+        # sometimes still returns 'advisor' anyway (e.g. "Let's go to Tokyo — I'm ready
+        # to plan this trip"). Re-check the same phrases deterministically so a real
+        # commitment signal can't be lost to an inconsistent classification.
+        if final_intent == "advisor" and is_advisor_flow:
+            content_lower = last_msg.content.lower()
+            commit_phrases = [
+                "let's go", "lets go", "book this", "book it",
+                "sounds good let's do it", "sounds good lets do it",
+                "i want to go there", "i'm ready", "im ready",
+                "let's book", "lets book", "plan this trip",
+                "ready to plan", "ready to book",
+            ]
+            if any(phrase in content_lower for phrase in commit_phrases):
+                final_intent = "new_travel_plan"
+
         # Guardrail 1: Both high-level planning and micro-planning require a destination.
         if final_intent in ["new_travel_plan", "build_itinerary"]:
             has_dest = classification.has_explicit_destination or state.get("destination_city")
