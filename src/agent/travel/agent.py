@@ -661,12 +661,12 @@ class TravelAgentNode:
             travelers_label=payload.get("travelers_label"),
         )
 
-        # Collect special events result (fetched in parallel with curation)
+        # Collect special events result (fetched in parallel with curation).
         special_events: list[dict] = []
         try:
             if _events_future is not None:
                 try:
-                    special_events = _events_future.result(timeout=30) or []
+                    special_events = _events_future.result(timeout=60) or []
                 except Exception:  # noqa: BLE001
                     pass
         finally:

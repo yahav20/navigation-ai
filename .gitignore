@@ -52,3 +52,6 @@ audit.log
 
 # Travel plans written by the save_plan node at runtime (keep the out/ samples)
 out/plan-*.md
+
+# Travel-agent prompt dump (debug artifact, only written when ATLAS_DEBUG_TRAVEL_AGENT=1)
+out/travel_agent_prompt.json

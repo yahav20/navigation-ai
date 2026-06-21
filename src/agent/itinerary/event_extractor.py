@@ -84,6 +84,20 @@ class SpecialEventRaw(BaseModel):
     )
 
 
+class _SpecialEventsList(BaseModel):
+    """Wrapper model for structured output.
+
+    LLM providers' ``with_structured_output`` require a single Pydantic model, not a
+    bare ``list[...]`` generic alias (which raises ``Unsupported schema type``). Wrapping
+    the list in a model keeps extraction provider-agnostic.
+    """
+
+    events: list[SpecialEventRaw] = Field(
+        default_factory=list,
+        description="All special events extracted from the snippets. Empty list if none found.",
+    )
+
+
 # ---------------------------------------------------------------------------
 # Extraction prompt
 # ---------------------------------------------------------------------------
@@ -94,9 +108,15 @@ def _build_prompt(city: str, date_from: str, date_to: str) -> str:
 Travel window : {date_from} to {date_to}
 Destination   : {city}
 
+GROUNDING (most important rule): Every event you output MUST come from the snippets below.
+NEVER add an event from your own knowledge or memory. If an event is not described in the
+snippets, do NOT include it — even if you are certain it really happens in {city}. You are an
+extractor, not a generator. When in doubt, leave it out.
+
 Rules:
-1. Only extract REAL events (festivals, markets, concerts, seasonal celebrations).
-   Do NOT extract permanent attractions, restaurants, museums, or generic tourist spots.
+1. Only extract REAL events (festivals, markets, concerts, seasonal celebrations) that appear
+   in the snippets. Do NOT extract permanent attractions, restaurants, museums, or generic
+   tourist spots.
 2. Only include events that physically take place IN {city} itself.
    Discard any event that requires travel to another city, island, or region.
 3. Fill applicable_dates with every YYYY-MM-DD date within [{date_from}, {date_to}] on which
@@ -147,13 +167,13 @@ def extract_special_events(
 
     try:
         from langchain_core.messages import HumanMessage, SystemMessage  # noqa: PLC0415
-        structured_llm = llm.with_structured_output(list[SpecialEventRaw])
-        result = structured_llm.invoke([
+        structured_llm = llm.with_structured_output(_SpecialEventsList)
+        extraction = structured_llm.invoke([
             SystemMessage(content=system_prompt),
             HumanMessage(content=user_message),
         ])
-        if isinstance(result, list):
-            result = [e for e in result if isinstance(e, SpecialEventRaw)]
+        if isinstance(extraction, _SpecialEventsList):
+            result = [e for e in extraction.events if isinstance(e, SpecialEventRaw)]
         else:
             result = []
     except Exception:  # noqa: BLE001
