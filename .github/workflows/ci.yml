@@ -32,10 +32,15 @@ jobs:
         run: pytest tests/test_unit.py -m unit -v --tb=short
 
   # ── Job 3: Integration Smoke ─────────────────────────────────────────────
+  # Non-blocking: every push/PR/re-run across the whole repo shares one
+  # GROQ_API_KEY's daily token quota, so this job fails on quota exhaustion
+  # alone fairly often, independent of code correctness. It still runs and
+  # reports results for visibility — it just can't block a merge on its own.
   integration:
     runs-on: ubuntu-latest
     needs: unit-tests
     if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request'
+    continue-on-error: true
     env:
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
       MODEL_PROVIDER: groq
