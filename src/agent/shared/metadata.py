@@ -214,6 +214,15 @@ class MetadataNode:
             if reset_alternatives:
                 updates["alternative_destinations"] = []
 
+        def _clear_special_events() -> None:
+            # Drop saved special events when (and only when) the destination changes or the
+            # FLIGHT MONTH changes — those make the previously-fetched events no longer apply,
+            # so the itinerary/travel flow re-fetches for the new city/month. Traveler-count,
+            # origin, budget or same-month date tweaks leave the destination's events valid.
+            if suppress_invalidation:
+                return
+            updates["special_events_data"] = []
+
         if metadata.current_city is not None:
             new_origin = metadata.current_city.split(",")[0].strip()
             updates["current_city"] = new_origin
@@ -225,6 +234,7 @@ class MetadataNode:
             updates["destination_city"] = new_dest
             if old_dest and new_dest.lower() != old_dest:
                 _invalidate_flights(reset_alternatives=True)
+                _clear_special_events()
 
         if metadata.budget is not None:
             updates["total_budget"] = metadata.budget
@@ -240,6 +250,10 @@ class MetadataNode:
             updates["trip_start"] = metadata.trip_start
             if old_start is not None and metadata.trip_start != old_start:
                 _invalidate_flights()
+                # Only a change of the trip MONTH invalidates the special events (a different
+                # day within the same month keeps the same seasonal/monthly events).
+                if old_start[:7] != metadata.trip_start[:7]:
+                    _clear_special_events()
 
         # Travellers / rooms. Scoped first step: these intentionally do NOT
         # invalidate flights or trigger a re-search — they only touch the new
