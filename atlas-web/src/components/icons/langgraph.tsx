@@ -29,7 +29,7 @@ export function LangGraphLogoSVG({
 
   return (
     <Image 
-      src={isDark ? "images/dark_logo.png" : "/light_logo.png"} 
+src={isDark ? "/images/Logos/dark_logo.png" : "/images/Logos/light_logo.png"}
       alt="Agent Logo" 
       width={width} 
       height={height} 
