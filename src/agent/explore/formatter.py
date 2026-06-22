@@ -203,6 +203,24 @@ def _extract_top_restaurants(restaurants: Any) -> list[str]:
     return names
 
 
+def _extract_top_hotels(hotels: Any) -> list[dict]:
+    """Return up to 3 hotels with name, stars, and price from fetch_hotels result."""
+    if not isinstance(hotels, list):
+        return []
+    result: list[dict] = []
+    for item in hotels:
+        if not isinstance(item, dict) or "message" in item or "name" not in item:
+            continue
+        result.append({
+            "name": item["name"],
+            "stars": item.get("stars"),
+            "price": item.get("price_per_night"),
+        })
+        if len(result) >= 3:
+            break
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Card builder
 # ---------------------------------------------------------------------------
@@ -219,6 +237,7 @@ def _build_card(snapshot: dict) -> dict:
         "flight_cost": _extract_flight_cost(snapshot.get("flights")),
         "top_attractions": _extract_top_attractions(snapshot.get("attractions")),
         "top_restaurants": _extract_top_restaurants(snapshot.get("restaurants")),
+        "top_hotels": _extract_top_hotels(snapshot.get("hotels")),
     }
 
 

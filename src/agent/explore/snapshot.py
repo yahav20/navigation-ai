@@ -13,6 +13,7 @@ from tools.activities import fetch_attractions, fetch_restaurants
 from tools.concerts import search_concerts
 from tools.destinations import get_average_weather, get_city_overview
 from tools.flights import fetch_flights
+from tools.hotels import fetch_hotels
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -88,14 +89,14 @@ def _fetch_country_snapshot(country: str, city: str) -> dict:
 
     attractions = _safe_invoke(fetch_attractions, {"city": city})
     restaurants = _safe_invoke(fetch_restaurants, {"city": city})
+    hotels = _safe_invoke(fetch_hotels, {"city": city})
 
     return {
         "country": country,
         "city": city,
         "season": season,
         "weather": weather,
-                "first_concert": first_concert,   
-
+        "first_concert": first_concert,
         "concerts": {
             current_month: concerts_current,
             next_month: concerts_next,
@@ -104,6 +105,7 @@ def _fetch_country_snapshot(country: str, city: str) -> dict:
         "flights": flights,
         "attractions": attractions,
         "restaurants": restaurants,
+        "hotels": hotels,
     }
 
 

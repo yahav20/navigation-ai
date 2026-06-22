@@ -5,6 +5,12 @@ import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 
 // Matches the shape in agent-selector/forms/ExploreForm.tsx
+export interface HotelSummary {
+  name: string;
+  stars?: number;
+  price?: number;
+}
+
 export interface ExploreCard {
   country: string;
   city: string;
@@ -15,6 +21,7 @@ export interface ExploreCard {
   flight_cost: string;
   top_attractions: string[];
   top_restaurants: string[];
+  top_hotels?: HotelSummary[];
 }
 
 interface ExploreViewProps {
@@ -248,6 +255,25 @@ function DestinationCard({
                     style={{ background: "oklch(0.55 0.18 230 / 0.5)" }}
                   />
                   {name}
+                </li>
+              ))}
+            </ul>
+          </InfoSection>
+        )}
+
+        {/* Hotels */}
+        {(card.top_hotels ?? []).length > 0 && (
+          <InfoSection delay={entranceDelay + 0.53} className="flex flex-col gap-1">
+            <p className="text-[11px] font-semibold text-[--foreground]">🏨 Hotels</p>
+            <ul className="flex flex-col gap-1">
+              {(card.top_hotels ?? []).map((hotel, i) => (
+                <li key={i} className="flex flex-col text-xs text-[--muted-foreground]">
+                  <span className="font-medium text-[--foreground] leading-snug">{hotel.name}</span>
+                  <span className="text-[10px] opacity-70">
+                    {hotel.stars ? "★".repeat(hotel.stars) : ""}
+                    {hotel.stars && hotel.price ? " · " : ""}
+                    {hotel.price ? `$${hotel.price}/night` : ""}
+                  </span>
                 </li>
               ))}
             </ul>
