@@ -81,7 +81,7 @@ def _fetch_country_snapshot(country: str, city: str) -> dict:
 
     concerts_current = _safe_invoke(search_concerts, {"city": city, "month": current_month})
     concerts_next = _safe_invoke(search_concerts, {"city": city, "month": next_month})
-
+    first_concert    = _fetch_first_concert_for_city(city)   
     overview = _safe_invoke(get_city_overview, {"city": city})
 
     flights = _safe_invoke(fetch_flights, {"origin": _ORIGIN, "destination": city})
@@ -94,6 +94,8 @@ def _fetch_country_snapshot(country: str, city: str) -> dict:
         "city": city,
         "season": season,
         "weather": weather,
+                "first_concert": first_concert,   
+
         "concerts": {
             current_month: concerts_current,
             next_month: concerts_next,
@@ -137,3 +139,25 @@ async def get_explore_snapshots() -> dict[str, dict]:
     results = await asyncio.gather(*tasks)
 
     return {snapshot["country"]: snapshot for snapshot in results}
+
+
+
+def _fetch_first_concert_for_city(city: str) -> dict | None:
+    """Fetch the first upcoming concert for a city.
+
+    Prefers individual event pages (/concerts/ URL) over generic listing pages,
+    so the formatter can display a real concert title rather than a page heading.
+    """
+    result = _safe_invoke(search_concerts, {"city": city})
+    if not isinstance(result, list):
+        return None
+    # Prefer individual Songkick event pages
+    for item in result:
+        if isinstance(item, dict) and "message" not in item:
+            if "/concerts/" in item.get("url", ""):
+                return item
+    # Fall back to first non-error result (listing page with parseable content)
+    for item in result:
+        if isinstance(item, dict) and "message" not in item:
+            return item
+    return None

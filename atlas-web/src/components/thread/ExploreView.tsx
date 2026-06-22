@@ -11,6 +11,7 @@ export interface ExploreCard {
   season: string;
   weather: string;
   events: string[];
+  first_concert?: string;
   flight_cost: string;
   top_attractions: string[];
   top_restaurants: string[];
@@ -183,8 +184,18 @@ function DestinationCard({
           <p className="text-xs text-[--muted-foreground]">✈️ {card.flight_cost}</p>
         </InfoSection>
 
+        {/* First concert */}
+        {card.first_concert && (
+          <InfoSection delay={entranceDelay + 0.30} className="flex flex-col gap-1">
+            <p className="text-[11px] font-semibold text-[--foreground]">🎵 Featured Concert</p>
+            <p className="text-xs text-[--muted-foreground] leading-snug line-clamp-2">
+              {card.first_concert}
+            </p>
+          </InfoSection>
+        )}
+
         {/* Events */}
-        {card.events.length > 0 && (
+        {/* {card.events.length > 0 && (
           <InfoSection delay={entranceDelay + 0.32} className="flex flex-col gap-1">
             <p className="text-[11px] font-semibold text-[--foreground]">🎟 Events</p>
             {card.events.slice(0, 2).map((ev, i) => (
@@ -199,7 +210,7 @@ function DestinationCard({
               </p>
             ))}
           </InfoSection>
-        )}
+        )} */}
 
         {/* Attractions */}
         {card.top_attractions.length > 0 && (

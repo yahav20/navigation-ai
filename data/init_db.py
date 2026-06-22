@@ -306,6 +306,8 @@ def seed_travel(conn: sqlite3.Connection) -> None:
         "new york":  "g60763",
         "berlin":    "g187323",
         "amsterdam": "g188590",
+        "athens":    "g189400",
+        "rome":      "g187791",
     }
     city_keys = {
         "tel aviv":  ("Tel Aviv",      "IL"),
@@ -315,6 +317,8 @@ def seed_travel(conn: sqlite3.Connection) -> None:
         "new york":  ("New York City", "US"),
         "berlin":    ("Berlin",        "DE"),
         "amsterdam": ("Amsterdam",     "NL"),
+        "athens":    ("Athens",        "GR"),
+        "rome":      ("Rome",          "IT"),
     }
     ids = {key: resolve_city(conn, name, alpha2) for key, (name, alpha2) in city_keys.items()}
 
@@ -553,6 +557,8 @@ def seed_travel(conn: sqlite3.Connection) -> None:
         ("amsterdam", "April,May,September",   "Tulip season in spring and mild cycling weather."),
         ("new york",  "April,May,September",   "Mild temperatures and fewer tourists than summer."),
         ("berlin",    "May,June,July",         "Warm summers with long daylight hours and festivals."),
+        ("athens",    "April,May,October",     "Mild weather before the summer heat, ideal for sightseeing."),
+        ("rome",      "April,May,September",   "Comfortable temperatures and fewer crowds than peak summer."),
     ]
     conn.executemany(
         "INSERT INTO best_time_to_visit (city_id, months, reason) VALUES (?, ?, ?)",
@@ -561,6 +567,8 @@ def seed_travel(conn: sqlite3.Connection) -> None:
 
     # average_weather  (city_key, season, temperature)
     weather = [
+        ("tel aviv",  "Spring", "22C"), ("tel aviv",  "Summer", "30C"),
+        ("tel aviv",  "Autumn", "24C"), ("tel aviv",  "Winter", "14C"),
         ("paris",     "Spring", "15C"), ("paris",     "Summer", "25C"),
         ("paris",     "Autumn", "16C"), ("paris",     "Winter",  "5C"),
         ("london",    "Spring", "12C"), ("london",    "Summer", "22C"),
@@ -573,6 +581,10 @@ def seed_travel(conn: sqlite3.Connection) -> None:
         ("new york",  "Autumn", "15C"), ("new york",  "Winter",  "2C"),
         ("berlin",    "Spring", "12C"), ("berlin",    "Summer", "25C"),
         ("berlin",    "Autumn", "13C"), ("berlin",    "Winter",  "1C"),
+        ("athens",    "Spring", "18C"), ("athens",    "Summer", "33C"),
+        ("athens",    "Autumn", "19C"), ("athens",    "Winter",  "9C"),
+        ("rome",      "Spring", "17C"), ("rome",      "Summer", "30C"),
+        ("rome",      "Autumn", "18C"), ("rome",      "Winter",  "8C"),
     ]
     conn.executemany(
         "INSERT INTO average_weather (city_id, season, temperature) VALUES (?, ?, ?)",
@@ -602,6 +614,12 @@ def seed_travel(conn: sqlite3.Connection) -> None:
         ("amsterdam", "cycling"),     ("amsterdam", "canals"),        ("amsterdam", "romantic"),
         ("amsterdam", "city-break"),  ("amsterdam", "cultural"),      ("amsterdam", "historic"),
         ("amsterdam", "liberal"),     ("amsterdam", "walkable"),
+        ("athens",    "historic"),    ("athens",    "ancient"),        ("athens",    "cultural"),
+        ("athens",    "sunny"),       ("athens",    "mediterranean"),  ("athens",    "foodie"),
+        ("athens",    "city-break"),  ("athens",    "walkable"),
+        ("rome",      "historic"),    ("rome",      "romantic"),       ("rome",      "cultural"),
+        ("rome",      "foodie"),      ("rome",      "ancient"),        ("rome",      "city-break"),
+        ("rome",      "luxury"),      ("rome",      "walkable"),
     ]
     conn.executemany(
         "INSERT OR IGNORE INTO city_tags (city_id, tag) VALUES (?, ?)",
@@ -631,6 +649,12 @@ def seed_travel(conn: sqlite3.Connection) -> None:
         ("amsterdam", 2, 4,
          "2-3 days is ideal for this compact city - you can walk or cycle almost everywhere. "
          "4 days lets you do a day trip to Keukenhof (tulip season) or Delft."),
+        ("athens",    3, 5,
+         "3 days covers the Acropolis, Plaka, and the main museums. "
+         "5 days lets you add a day trip to Cape Sounion or a ferry to a nearby island."),
+        ("rome",      3, 6,
+         "3 days for the Colosseum, Vatican, and main piazzas. "
+         "5-6 days to explore neighborhoods like Trastevere and take a day trip to Pompeii or Ostia Antica."),
     ]
     conn.executemany(
         "INSERT INTO recommended_duration (city_id, min_days, max_days, notes) VALUES (?, ?, ?, ?)",
