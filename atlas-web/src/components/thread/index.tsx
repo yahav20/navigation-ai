@@ -9,7 +9,7 @@ import { Checkpoint, Message } from "@langchain/langgraph-sdk";
 import { AssistantMessage, AssistantMessageLoading } from "./messages/ai";
 import { HumanMessage } from "./messages/human";
 import { useTheme } from "next-themes";
-import { Moon, Sun } from "lucide-react";
+import { Moon, Sun, Compass } from "lucide-react";
 import {
   DO_NOT_RENDER_ID_PREFIX,
   ensureToolCallsHaveResponses,
@@ -25,6 +25,13 @@ import {
   XIcon,
   Plus,
   Send,
+  Shuffle,
+  Dices,
+  Users,
+  Baby,
+  DollarSign,
+  Globe,
+  Minus,
 } from "lucide-react";
 import { useQueryState, parseAsBoolean } from "nuqs";
 import {
@@ -53,6 +60,10 @@ import {
   useArtifactContext,
 } from "./artifact";
 import { AgentSelector } from "./agent-selector";
+import { createClient } from "@/providers/client";
+import { getApiKey } from "@/lib/api-key";
+import ExploreView, { type ExploreCard } from "./ExploreView";
+import { inputCls, labelCls } from "../agent-selector/shared";
 
 /* ─────────────────────────────────────────
    Ambient background: animated ocean orbs
@@ -238,6 +249,307 @@ function PanelToggleButton({ isOpen, onToggle }: { isOpen: boolean; onToggle: ()
   );
 }
 
+const DESTINATIONS = ["Rome", "Bali", "Lisbon", "Bangkok", "Amsterdam", "Santorini", "Kyoto", "Cape Town", "Prague", "Vienna"];
+const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+const YEARS = [2026, 2027];
+
+function SurpriseMeModal({
+  open,
+  onClose,
+  onSubmit,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onSubmit: (text: string) => void;
+}) {
+  const [origin, setOrigin] = useState("");
+  const [budget, setBudget] = useState("");
+  const [adults, setAdults] = useState(1);
+  const [children, setChildren] = useState(0);
+  const [originError, setOriginError] = useState("");
+
+  useEffect(() => {
+    if (open) {
+      setOrigin("");
+      setBudget("");
+      setAdults(1);
+      setChildren(0);
+      setOriginError("");
+    }
+  }, [open]);
+
+  const handleSubmit = () => {
+    if (!origin.trim()) {
+      setOriginError("Origin city is required");
+      return;
+    }
+    setOriginError("");
+    const pick = <T,>(arr: T[]) => arr[Math.floor(Math.random() * arr.length)];
+    let destination = pick(DESTINATIONS);
+    while (destination.toLowerCase() === origin.trim().toLowerCase()) destination = pick(DESTINATIONS);
+    const month = pick(MONTHS);
+    const year = pick(YEARS);
+    const days = Math.floor(Math.random() * 10) + 5;
+    const travelers =
+      adults === 1 && children === 0
+        ? "1 adult"
+        : `${adults} adult${adults > 1 ? "s" : ""}` +
+          (children > 0 ? ` and ${children} child${children > 1 ? "ren" : ""}` : "");
+    const text =
+      [
+        `I'm looking for flights from ${origin.trim()} to ${destination}`,
+        `in ${month} ${year}`,
+        `for a ${days}-day trip`,
+        `for ${travelers}`,
+        budget.trim() ? `with a budget of $${Number(budget).toLocaleString()}` : null,
+      ].filter(Boolean).join(", ") + ".";
+    onSubmit(text);
+    onClose();
+  };
+
+  const stepperCls = cn(
+    "flex h-8 w-8 items-center justify-center rounded-lg",
+    "border border-[--border] bg-[--background]/60",
+    "text-[--muted-foreground] transition-colors duration-200",
+    "hover:border-[--ring] hover:text-[--foreground]",
+  );
+
+  return (
+    <AnimatePresence>
+      {open && (
+        <motion.div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-[--background]/80 backdrop-blur-md"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.2 }}
+          onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+        >
+          <motion.div
+            className={cn(
+              "relative mx-4 w-full max-w-md rounded-2xl p-6",
+              "border border-[--ring]/40 bg-[--card]/90",
+              "shadow-[0_0_48px_var(--glow-accent)]",
+            )}
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            transition={{ duration: 0.2, ease: "easeOut" }}
+          >
+            {/* Header */}
+            <div className="mb-5 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Dices className="size-5 text-[--ring]" />
+                <h2 className="text-base font-semibold text-[--foreground]">Surprise Me!</h2>
+              </div>
+              <motion.button
+                onClick={onClose}
+                className={cn(
+                  "flex h-7 w-7 items-center justify-center rounded-full",
+                  "text-[--muted-foreground] transition-all duration-200",
+                  "hover:bg-[--muted] hover:text-[--foreground]",
+                )}
+                whileHover={{ scale: 1.12, rotate: 90 }}
+                whileTap={{ scale: 0.9 }}
+              >
+                <XIcon className="size-4" />
+              </motion.button>
+            </div>
+
+            {/* Fields */}
+            <div className="flex flex-col gap-4">
+              {/* Origin */}
+              <div>
+                <label className={labelCls}>
+                  <Globe className="mb-0.5 mr-1 inline size-3" />
+                  Where are you flying from?<span className="ml-0.5 text-[--ring]">*</span>
+                </label>
+                <input
+                  className={cn(inputCls, originError && "border-red-500")}
+                  placeholder="e.g. Tel Aviv, London, New York…"
+                  value={origin}
+                  onChange={(e) => { setOrigin(e.target.value); if (e.target.value.trim()) setOriginError(""); }}
+                  dir="ltr"
+                  autoFocus
+                />
+                {originError && <p className="mt-1 text-xs text-red-500">{originError}</p>}
+              </div>
+
+              {/* Budget */}
+              <div>
+                <label className={labelCls}>
+                  <DollarSign className="mb-0.5 mr-1 inline size-3" />
+                  Budget ($)
+                </label>
+                <input
+                  className={inputCls}
+                  type="number"
+                  min={0}
+                  placeholder="e.g. 3000"
+                  value={budget}
+                  onChange={(e) => setBudget(e.target.value)}
+                  onWheel={(e) => e.currentTarget.blur()}
+                  dir="ltr"
+                />
+              </div>
+
+              {/* Travelers */}
+              <div>
+                <p className={labelCls}>Travelers</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className={labelCls}>
+                      <Users className="mb-0.5 mr-1 inline size-3" />
+                      Adults
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <motion.button
+                        type="button"
+                        onClick={() => setAdults((a) => Math.max(1, a - 1))}
+                        className={cn(stepperCls, adults <= 1 && "cursor-not-allowed opacity-40")}
+                        whileTap={adults > 1 ? { scale: 0.92 } : {}}
+                      >
+                        <Minus className="size-3.5" />
+                      </motion.button>
+                      <span className="w-6 text-center text-sm font-medium text-[--foreground]">{adults}</span>
+                      <motion.button
+                        type="button"
+                        onClick={() => setAdults((a) => Math.min(4, a + 1))}
+                        className={cn(stepperCls, adults >= 4 && "cursor-not-allowed opacity-40")}
+                        whileTap={adults < 4 ? { scale: 0.92 } : {}}
+                      >
+                        <Plus className="size-3.5" />
+                      </motion.button>
+                    </div>
+                  </div>
+                  <div>
+                    <label className={labelCls}>
+                      <Baby className="mb-0.5 mr-1 inline size-3" />
+                      Children
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <motion.button
+                        type="button"
+                        onClick={() => setChildren((c) => Math.max(0, c - 1))}
+                        className={cn(stepperCls, children <= 0 && "cursor-not-allowed opacity-40")}
+                        whileTap={children > 0 ? { scale: 0.92 } : {}}
+                      >
+                        <Minus className="size-3.5" />
+                      </motion.button>
+                      <span className="w-6 text-center text-sm font-medium text-[--foreground]">{children}</span>
+                      <motion.button
+                        type="button"
+                        onClick={() => setChildren((c) => Math.min(3, c + 1))}
+                        className={cn(stepperCls, children >= 3 && "cursor-not-allowed opacity-40")}
+                        whileTap={children < 3 ? { scale: 0.92 } : {}}
+                      >
+                        <Plus className="size-3.5" />
+                      </motion.button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="mt-6 flex items-center justify-end gap-3">
+              <motion.button
+                onClick={onClose}
+                className={cn(
+                  "rounded-xl border border-[--border] bg-transparent px-4 py-2",
+                  "text-sm text-[--muted-foreground]",
+                  "hover:border-[--ring]/60 hover:text-[--foreground]",
+                  "transition-all duration-200",
+                )}
+                whileHover={{ scale: 1.03 }}
+                whileTap={{ scale: 0.97 }}
+              >
+                Cancel
+              </motion.button>
+              <motion.button
+                onClick={handleSubmit}
+                className={cn(
+                  "flex items-center gap-2 rounded-xl px-5 py-2.5",
+                  "bg-[--primary] text-[--primary-foreground] text-sm font-medium",
+                  "shadow-[0_0_16px_var(--glow-primary)]",
+                  "hover:shadow-[0_0_28px_var(--glow-accent)]",
+                  "transition-all duration-300",
+                )}
+                whileHover={{ scale: 1.03 }}
+                whileTap={{ scale: 0.97 }}
+              >
+                <Dices className="size-4" />
+                Surprise Me!
+              </motion.button>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}
+
+function SurpriseMeButton({ onClick, disabled }: { onClick: () => void; disabled: boolean }) {
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <motion.button
+            onClick={onClick}
+            disabled={disabled}
+            className={cn(
+              "relative flex h-9 w-9 items-center justify-center rounded-full",
+              "border bg-[--card]/60 backdrop-blur-sm",
+              "transition-all duration-300",
+              disabled
+                ? "cursor-not-allowed border-[--border] opacity-40"
+                : "border-[--border] text-[--muted-foreground] hover:border-[--ring] hover:text-[--foreground] hover:shadow-[0_0_12px_var(--glow-accent)]",
+            )}
+            whileHover={disabled ? {} : { scale: 1.1 }}
+            whileTap={disabled ? {} : { scale: 0.92 }}
+            aria-label="Surprise me"
+          >
+            <Shuffle className="size-[1.1rem]" />
+          </motion.button>
+        </TooltipTrigger>
+        <TooltipContent side="left">
+          <p>Surprise me!</p>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
+function ExploreButton({ onClick, active }: { onClick: () => void; active: boolean }) {
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <motion.button
+            onClick={onClick}
+            className={cn(
+              "relative flex h-9 w-9 items-center justify-center rounded-full",
+              "border bg-[--card]/60 backdrop-blur-sm",
+              "transition-all duration-300",
+              active
+                ? "border-[--ring] text-[--ring] shadow-[0_0_14px_var(--glow-accent)]"
+                : "border-[--border] text-[--muted-foreground] hover:border-[--ring] hover:text-[--foreground] hover:shadow-[0_0_12px_var(--glow-accent)]",
+            )}
+            whileHover={{ scale: 1.1 }}
+            whileTap={{ scale: 0.92 }}
+            aria-label="Explore destinations"
+          >
+            <Compass className="size-[1.1rem]" />
+          </motion.button>
+        </TooltipTrigger>
+        <TooltipContent side="left">
+          <p>Explore destinations</p>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
 /* ─────────────────────────────────────────
    Main Thread component
 ───────────────────────────────────────── */
@@ -269,6 +581,13 @@ export function Thread() {
   const [inputFocused, setInputFocused] = useState(false);
   const isLargeScreen = useMediaQuery("(min-width: 1024px)");
 
+  const [exploreOpen, setExploreOpen] = useState(false);
+  const [surpriseMeOpen, setSurpriseMeOpen] = useState(false);
+  const [cards, setCards] = useState<ExploreCard[]>([]);
+  const [fetchStatus, setFetchStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
+  const [apiUrl] = useQueryState("apiUrl", { defaultValue: process.env.NEXT_PUBLIC_API_URL ?? "" });
+  const [authScheme] = useQueryState("authScheme", { defaultValue: process.env.NEXT_PUBLIC_AUTH_SCHEME ?? "" });
+
   const stream = useStreamContext();
   const messages = stream.messages;
   const isLoading = stream.isLoading;
@@ -284,6 +603,32 @@ export function Thread() {
     closeArtifact();
     setArtifactContext({});
   };
+
+  const fetchExplore = async () => {
+    setFetchStatus("loading");
+    try {
+      const client = createClient(
+        apiUrl || "http://localhost:2024",
+        getApiKey() ?? undefined,
+        authScheme || undefined,
+      );
+      const result = await client.runs.wait(null, "explore", { input: {} }) as { cards?: ExploreCard[] };
+      setCards(result.cards ?? []);
+      setFetchStatus("done");
+    } catch {
+      setFetchStatus("error");
+    }
+  };
+
+  const handleExploreToggle = () => {
+    const next = !exploreOpen;
+    setExploreOpen(next);
+    if (next && fetchStatus === "idle") {
+      void fetchExplore();
+    }
+  };
+
+  const handleSurpriseMe = () => setSurpriseMeOpen(true);
 
   useEffect(() => {
     if (!stream.error) {
@@ -469,7 +814,9 @@ export function Thread() {
                   />
                 )}
               </div>
-              <div className="absolute top-3 right-4 flex items-center">
+              <div className="absolute top-3 right-4 flex items-center gap-1">
+                <SurpriseMeButton onClick={handleSurpriseMe} disabled={isLoading} />
+                <ExploreButton onClick={handleExploreToggle} active={exploreOpen} />
                 <OpenGitHubRepo />
               </div>
             </motion.div>
@@ -501,6 +848,8 @@ export function Thread() {
               </div>
 
               <div className="flex items-center gap-2">
+                <SurpriseMeButton onClick={handleSurpriseMe} disabled={isLoading} />
+                <ExploreButton onClick={handleExploreToggle} active={exploreOpen} />
                 <OpenGitHubRepo />
                 <TooltipIconButton
                   size="lg"
@@ -801,6 +1150,86 @@ export function Thread() {
           </div>
         </div>
       </div>
+
+      {/* ── Surprise Me modal ── */}
+      <SurpriseMeModal
+        open={surpriseMeOpen}
+        onClose={() => setSurpriseMeOpen(false)}
+        onSubmit={handleAgentSubmit}
+      />
+
+      {/* ── Explore overlay ── */}
+      <AnimatePresence>
+        {exploreOpen && (
+          <motion.div
+            className="fixed inset-0 z-50 overflow-auto bg-[--background]/95 backdrop-blur-md"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.25 }}
+          >
+            <div className="min-h-full p-6">
+              {/* Header */}
+              <div className="mb-6 flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <Compass className="size-5 text-[--ring]" />
+                  <h2 className="text-lg font-semibold text-[--foreground]">Explore Destinations</h2>
+                </div>
+                <motion.button
+                  onClick={() => setExploreOpen(false)}
+                  className={cn(
+                    "flex h-9 w-9 items-center justify-center rounded-full",
+                    "border border-[--border] bg-[--card]/60 backdrop-blur-sm",
+                    "text-[--muted-foreground] transition-all duration-200",
+                    "hover:border-[--ring] hover:text-[--foreground]",
+                    "hover:shadow-[0_0_12px_var(--glow-accent)]",
+                  )}
+                  whileHover={{ scale: 1.1 }}
+                  whileTap={{ scale: 0.92 }}
+                >
+                  <XIcon className="size-4" />
+                </motion.button>
+              </div>
+
+              {/* Loading */}
+              {fetchStatus === "loading" && (
+                <div className="flex flex-col items-center gap-3 py-24">
+                  <motion.div
+                    className="size-10 rounded-full border-2 border-[--primary]/30 border-t-[--primary]"
+                    animate={{ rotate: 360 }}
+                    transition={{ duration: 0.9, repeat: Infinity, ease: "linear" }}
+                  />
+                  <p className="text-sm text-[--muted-foreground]">Fetching 5 destinations in parallel…</p>
+                </div>
+              )}
+
+              {/* Error */}
+              {fetchStatus === "error" && (
+                <div className="flex flex-col items-center gap-4 py-24">
+                  <p className="text-sm text-red-500">Could not load explore data.</p>
+                  <motion.button
+                    onClick={fetchExplore}
+                    className={cn(
+                      "rounded-xl border border-[--border] bg-[--card]/70 px-5 py-2.5",
+                      "text-sm text-[--foreground] transition-all duration-200",
+                      "hover:border-[--ring] hover:shadow-[0_0_12px_var(--glow-accent)]",
+                    )}
+                    whileHover={{ scale: 1.03 }}
+                    whileTap={{ scale: 0.97 }}
+                  >
+                    Retry
+                  </motion.button>
+                </div>
+              )}
+
+              {/* Cards */}
+              {fetchStatus === "done" && cards.length > 0 && (
+                <ExploreView cards={cards} />
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

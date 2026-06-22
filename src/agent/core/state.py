@@ -33,6 +33,8 @@ class AgentState(TypedDict):
     summary: str                   # rolling conversation summary maintained by summary_node
     last_summarized_index: NotRequired[int]  # watermark: count of messages already folded into `summary`
     alternative_destinations: list # populated when fetch_flights returns no results for the route
+    flexibility_action: NotRequired[str]    # routing signal from FlightFlexibilityGateNode: "flexible" | "give_up"
+    flexibility_attempts: NotRequired[int]  # number of flexibility HITL rounds already offered (capped)
     trip_start: NotRequired[str]             # approximate trip start as YYYY-MM-DD or YYYY-MM
     flight_options: NotRequired[list[dict]]  # deterministic outbound flight results
     return_flight_options: NotRequired[list[dict]]  # deterministic return flight results (destination -> origin)
@@ -57,6 +59,18 @@ class AgentState(TypedDict):
     use_min_prices_for_budget: NotRequired[bool]  # When True, verify_budget uses fetch_min_prices data instead of fetch_avg_prices
     switch_travel_triggered: NotRequired[bool]    # Set by critic; tells planner to inject switch_travel_options step
     itinerary_update_request: NotRequired[dict]  # Set by ItineraryPlannerNode (update mode); consumed by step handlers
+
+    # --- Multi-destination trips (long trips split into a round route of cities) ---
+    # Single-destination trips are simply a one-element trip_segments list, so the
+    # whole itinerary pipeline runs the same way for 1 city or N cities.
+    trip_segments: NotRequired[list]          # [{destination, days, order, drive_from_prev}] — the CHOSEN route
+    proposed_routes: NotRequired[list]        # [[segment, ...], ...] candidate routes shown to the user for selection (HITL)
+    seg_index: NotRequired[int]               # which segment the leg loop is currently building
+    total_trip_days: NotRequired[int]         # full trip length (legs carry their own per-city trip_days)
+    is_multi_destination: NotRequired[bool]   # True when trip_segments has more than one city
+    trip_total_budget: NotRequired[float]     # the whole trip's budget (legs run budget-free to skip per-leg HITL)
+    include_flight: NotRequired[bool]         # standalone fetch_avg_prices: include flight cost (False on multi legs)
+    itineraries: NotRequired[list]            # collected per-city results, appended by leg_collect (sequential → plain list)
 
     # --- Advisor ---
     advisor_plan: list                 # list of {tool_name, args} dicts produced by advisor_planner

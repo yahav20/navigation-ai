@@ -50,7 +50,11 @@ class FormatterNode:
                 for ev in events if ev.get("name")
             ][:8]
 
-        ai_message = AIMessage(content="", name="formatter_output")
+        # Web renders `ui_props` as a TravelPlanViewer card and hides the text
+        # on a message that has a viewer attached, but the CLI has no such
+        # renderer — so the message content must stand on its own as a plain
+        # markdown summary, not be left blank.
+        ai_message = AIMessage(content=_render_markdown(plan), name="formatter_output")
         ui_message = {
             "type":     "ui",
             "name":     "TravelPlanViewer",
@@ -58,6 +62,50 @@ class FormatterNode:
             "metadata": {"message_id": ai_message.id},
         }
         return {"messages": [ai_message], "ui": [ui_message]}
+
+
+# ── Plain-text fallback (CLI has no TravelPlanViewer renderer) ─────────────
+
+def _render_markdown(plan: dict) -> str:
+    """Render the curated TravelPlan as markdown, for clients with no UI renderer."""
+    lines: list[str] = [plan.get("intro", "").strip()]
+
+    for i, pairing in enumerate(plan.get("flight_pairings") or [], start=1):
+        outbound = pairing.get("outbound") or {}
+        ret      = pairing.get("return_flight") or {}
+        lines.append(
+            f"\n**Option {i} — ${pairing.get('total_price', 0):,.0f}**\n"
+            f"- Outbound: {outbound.get('label', 'flight')} "
+            f"({outbound.get('airline', '')}) — ${outbound.get('price', 0):,.0f}\n"
+            f"- Return: {ret.get('label', 'flight')} "
+            f"({ret.get('airline', '')}) — ${ret.get('price', 0):,.0f}\n"
+            f"- {pairing.get('description', '')}"
+        )
+
+    if plan.get("hotels"):
+        lines.append("\n**Hotels:**")
+        for hotel in plan["hotels"]:
+            lines.append(
+                f"- {hotel.get('name', 'Hotel')} — ${hotel.get('price_per_night', 0):,.0f}/night "
+                f"— {hotel.get('description', '')}"
+            )
+
+    if plan.get("activities"):
+        lines.append("\n**Activities:**")
+        for activity in plan["activities"]:
+            lines.append(f"- {activity.get('name', '')} — {activity.get('description', '')}")
+
+    if plan.get("restaurants"):
+        lines.append("\n**Restaurants:**")
+        for restaurant in plan["restaurants"]:
+            lines.append(f"- {restaurant.get('name', '')} — {restaurant.get('description', '')}")
+
+    estimate = plan.get("lowest_group_estimate") or plan.get("lowest_total_estimate")
+    if estimate is not None:
+        lines.append(f"\nEstimated total: **${estimate:,.0f}**")
+
+    lines.append(("\n" + plan.get("sign_off", "")).strip())
+    return "\n".join(line for line in lines if line).strip()
 
 
 # ── Props builder ──────────────────────────────────────────────────────────────
