@@ -63,6 +63,7 @@ import { AgentSelector } from "./agent-selector";
 import { createClient } from "@/providers/client";
 import { getApiKey } from "@/lib/api-key";
 import ExploreView, { type ExploreCard } from "./ExploreView";
+import ExploreLoadingScreen from "./ExploreLoadingScreen";
 import { inputCls, labelCls } from "../agent-selector/shared";
 
 /* ─────────────────────────────────────────
@@ -1192,16 +1193,7 @@ export function Thread() {
               </div>
 
               {/* Loading */}
-              {fetchStatus === "loading" && (
-                <div className="flex flex-col items-center gap-3 py-24">
-                  <motion.div
-                    className="size-10 rounded-full border-2 border-[--primary]/30 border-t-[--primary]"
-                    animate={{ rotate: 360 }}
-                    transition={{ duration: 0.9, repeat: Infinity, ease: "linear" }}
-                  />
-                  <p className="text-sm text-[--muted-foreground]">Fetching 5 destinations in parallel…</p>
-                </div>
-              )}
+              {fetchStatus === "loading" && <ExploreLoadingScreen />}
 
               {/* Error */}
               {fetchStatus === "error" && (

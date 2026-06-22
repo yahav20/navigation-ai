@@ -7,33 +7,63 @@ import {
   MapPin,
   Calendar,
   ChevronDown,
+  Music,
 } from "lucide-react";
 import { inputCls, labelCls, FormSubmitButton } from "../shared";
 
 export function EventsForm({ onSubmit }: { onSubmit: (text: string) => void }) {
   const [artist, setArtist] = useState("");
-  const [city, setCity] = useState("");
-  const [month, setMonth] = useState("");
+  const [city,   setCity]   = useState("");
+  const [genre,  setGenre]  = useState("");
+  const [month,  setMonth]  = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   const locationRe = /^[a-zA-ZÀ-ɏ\s-]+$/;
-  const canSubmit = !!(artist.trim() || city.trim() || month);
+
+  const a = artist.trim();
+  const c = city.trim();
+  const g = genre.trim();
+  const m = month;
+
+  const canSubmit = !!(a || c || m);
 
   const handleSubmit = () => {
     if (!canSubmit) return;
     const errs: Record<string, string> = {};
-    if (city.trim() && !locationRe.test(city.trim())) {
+    if (c && !locationRe.test(c)) {
       errs.city = "Please enter a valid location (letters only)";
     }
     if (Object.keys(errs).length > 0) { setErrors(errs); return; }
     setErrors({});
-    const base = artist.trim() ? `Find me shows of ${artist.trim()}` : "Find me shows";
-    const parts = [
-      base,
-      city.trim() && `in ${city.trim()}`,
-      month && `in ${month}`,
-    ].filter(Boolean);
-    onSubmit(parts.join(" ") + ".");
+
+    let prompt: string;
+
+    if (g) {
+      // Genre-centric: prepend genre naturally, then weave in the other fields
+      const parts = [`Find ${g} concerts`];
+      if (a) parts.push(`featuring ${a}`);
+      if (c) parts.push(`in ${c}`);
+      if (m) parts.push(`in ${m}`);
+      prompt = parts.join(" ") + ".";
+    } else if (a && c && m) {
+      prompt = `Is ${a} performing in ${c} in ${m}? Find all matching shows.`;
+    } else if (a && c) {
+      prompt = `When does ${a} perform in ${c}? Show all upcoming dates.`;
+    } else if (a && m) {
+      prompt = `Where is ${a} performing in ${m}? List all cities and dates.`;
+    } else if (c && m) {
+      prompt = `What concerts and shows are happening in ${c} in ${m}?`;
+    } else if (a) {
+      prompt = `Find all upcoming tour dates for ${a}.`;
+    } else {
+      // city-only or month-only fallback
+      const parts = ["Find upcoming concerts and shows"];
+      if (c) parts.push(`in ${c}`);
+      if (m) parts.push(`in ${m}`);
+      prompt = parts.join(" ") + ".";
+    }
+
+    onSubmit(prompt);
   };
 
   const currentMonth = new Date().toLocaleString("en-US", { month: "long" });
@@ -41,39 +71,79 @@ export function EventsForm({ onSubmit }: { onSubmit: (text: string) => void }) {
   return (
     <div className="flex flex-col gap-3">
       <div className="grid grid-cols-2 gap-3">
+
+        {/* Artist */}
         <div>
           <label className={labelCls}>
             <Ticket className="mb-0.5 mr-1 inline size-3" />
             Artist / Show
           </label>
-          <input className={inputCls} placeholder="Lady Gaga, Taylor Swift..." value={artist}
-            onChange={(e) => setArtist(e.target.value)} dir="ltr" />
+          <input
+            className={inputCls}
+            placeholder="Lady Gaga, Taylor Swift..."
+            value={artist}
+            onChange={(e) => setArtist(e.target.value)}
+            dir="ltr"
+          />
         </div>
+
+        {/* City */}
         <div>
           <label className={labelCls}>
             <MapPin className="mb-0.5 mr-1 inline size-3" />
             City
           </label>
-          <input className={cn(inputCls, errors.city && "border-red-500")} placeholder="London, New York..." value={city}
-            onChange={(e) => { setCity(e.target.value); if (e.target.value.trim() && locationRe.test(e.target.value.trim())) setErrors({}); }} dir="ltr" />
+          <input
+            className={cn(inputCls, errors.city && "border-red-500")}
+            placeholder="London, New York..."
+            value={city}
+            onChange={(e) => {
+              setCity(e.target.value);
+              if (e.target.value.trim() && locationRe.test(e.target.value.trim())) setErrors({});
+            }}
+            dir="ltr"
+          />
           {errors.city && <p className="mt-1 text-xs text-red-500">{errors.city}</p>}
         </div>
+
+        {/* Genre — between City and Month */}
+        <div className="col-span-2">
+          <label className={labelCls}>
+            <Music className="mb-0.5 mr-1 inline size-3" />
+            Genre
+          </label>
+          <input
+            className={inputCls}
+            placeholder="Rock, Jazz, Electronic..."
+            value={genre}
+            onChange={(e) => setGenre(e.target.value)}
+            dir="ltr"
+          />
+        </div>
+
+        {/* Month */}
         <div className="col-span-2">
           <label className={labelCls}>
             <Calendar className="mb-0.5 mr-1 inline size-3" />
             Month
           </label>
           <div className="relative">
-            <select className={cn(inputCls, "appearance-none pr-8")} value={month} onChange={(e) => setMonth(e.target.value)} dir="ltr">
+            <select
+              className={cn(inputCls, "appearance-none pr-8")}
+              value={month}
+              onChange={(e) => setMonth(e.target.value)}
+              dir="ltr"
+            >
               <option value="">Select month...</option>
               {["January","February","March","April","May","June",
-                "July","August","September","October","November","December"].map((m) => (
-                <option key={m} value={m}>{m}</option>
+                "July","August","September","October","November","December"].map((mo) => (
+                <option key={mo} value={mo}>{mo}</option>
               ))}
             </select>
             <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 size-3.5 -translate-y-1/2 text-[--muted-foreground]" />
           </div>
         </div>
+
       </div>
 
       <div className="flex flex-wrap gap-2">
@@ -95,8 +165,12 @@ export function EventsForm({ onSubmit }: { onSubmit: (text: string) => void }) {
       </div>
 
       <div className="flex justify-end pt-1">
-        <FormSubmitButton onClick={handleSubmit} disabled={!canSubmit}
-          label="Find Events" icon={<Ticket className="size-4" />} />
+        <FormSubmitButton
+          onClick={handleSubmit}
+          disabled={!canSubmit}
+          label="Find Events"
+          icon={<Ticket className="size-4" />}
+        />
       </div>
     </div>
   );

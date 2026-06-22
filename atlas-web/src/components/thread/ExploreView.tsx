@@ -264,7 +264,17 @@ function DestinationCard({
         {/* Hotels */}
         {(card.top_hotels ?? []).length > 0 && (
           <InfoSection delay={entranceDelay + 0.53} className="flex flex-col gap-1">
-            <p className="text-[11px] font-semibold text-[--foreground]">🏨 Hotels</p>
+            <p className="text-[11px] font-semibold text-[--foreground] flex items-center gap-1.5">
+              <svg width="11" height="11" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <rect x="2" y="4" width="12" height="11" rx="1" fill="currentColor" fillOpacity="0.15" stroke="currentColor" strokeWidth="1.35"/>
+                <rect x="4.5" y="6.5"  width="2.2" height="2" rx="0.4" fill="currentColor"/>
+                <rect x="9.3" y="6.5"  width="2.2" height="2" rx="0.4" fill="currentColor"/>
+                <rect x="4.5" y="10"   width="2.2" height="2" rx="0.4" fill="currentColor"/>
+                <rect x="9.3" y="10"   width="2.2" height="2" rx="0.4" fill="currentColor"/>
+                <path d="M6.2 15v-3h3.6v3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+              Hotels
+            </p>
             <ul className="flex flex-col gap-1">
               {(card.top_hotels ?? []).map((hotel, i) => (
                 <li key={i} className="flex flex-col text-xs text-[--muted-foreground]">
