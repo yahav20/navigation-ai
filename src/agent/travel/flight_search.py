@@ -62,7 +62,12 @@ def _align_by_trip_length(
         f for f in inbound
         if (d := _flight_date(f)) and abs((d - target).days) <= _RETURN_DATE_TOLERANCE_DAYS
     ]
-    return aligned
+    # Prefer returns that match the requested trip length, but never eliminate every
+    # option: on sparse routes the feed may only carry returns far from the ideal date.
+    # Falling back to the full set lets `_build_pairings` still surface flights (it ranks
+    # by day_gap proximity and the curation step flags the mismatch) instead of the agent
+    # wrongly reporting "no flights at all".
+    return aligned or inbound
 
 
 def _to_month(date_str: str) -> str:

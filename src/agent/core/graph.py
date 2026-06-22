@@ -1,4 +1,11 @@
 """Build the LangGraph state graph for the travel agent."""
+# Must run before any HTTPS client (TravelPayouts flights, Tavily, OpenAI, …) opens a
+# connection, so TLS verification uses the OS cert store on intercepted/corporate
+# networks. Without this, those APIs fail silently and the agent finds "no flights".
+from agent.core.ssl_trust import ensure_os_trust
+
+ensure_os_trust()
+
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
