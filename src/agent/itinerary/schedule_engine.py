@@ -122,6 +122,9 @@ class TimeSlot:
     estimated_cost: float = 0.0
     transport_mode: Optional[Literal["walk", "taxi"]] = None
     distance_km:    Optional[float] = None
+    lat:            Optional[float] = None
+    lng:            Optional[float] = None
+    is_special:     bool = False
 
     @property
     def duration_minutes(self) -> int:
@@ -141,6 +144,10 @@ class TimeSlot:
             d["transport_mode"] = self.transport_mode
         if self.distance_km is not None:
             d["distance_km"] = round(self.distance_km, 2)
+        if self.lat is not None and self.lng is not None:
+            d["lat"], d["lng"] = self.lat, self.lng
+        if self.is_special:
+            d["is_special"] = True
         return d
 
 
@@ -953,6 +960,9 @@ class DayScheduleBuilder:
                 name=ev.get("name", "Special Event"),
                 description=ev.get("description", "Special event"),
                 estimated_cost=float(ev.get("cost_usd") or 0),
+                lat=ev_lat or None,
+                lng=ev_lng or None,
+                is_special=True,
             ))
             cursor = ev_end
 

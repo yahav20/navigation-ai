@@ -52,6 +52,10 @@ interface Restaurant {
 
 interface SpecialEvent {
   name: string;
+  description?: string;
+  dates?: string;
+  location?: string;
+  cost?: number;
 }
 
 interface TravelPlanViewerProps {
@@ -395,14 +399,25 @@ const EventsSection: FC<{ events: SpecialEvent[] }> = ({ events }) => {
   if (!events?.length) return null;
   return (
     <div style={S.sectionCard}>
-      <SectionHead icon={<IconCalendar />} title="Events" />
+      <SectionHead icon={<span style={{ color: "#8A6A00", display: "flex" }}><IconCalendar /></span>} title="Events" />
       <div style={S.eventList}>
-        {events.map((ev, i) => (
-          <div key={i} style={S.eventRow}>
-            <span style={S.eventDot} />
-            <span style={S.eventName}>{ev.name}</span>
-          </div>
-        ))}
+        {events.map((ev, i) => {
+          const meta = [ev.dates, ev.location].filter(Boolean).join("  ·  ");
+          return (
+            <div key={i} style={S.eventCard}>
+              <div style={S.eventName}>{ev.name}</div>
+              {(meta || (ev.cost ?? 0) > 0) && (
+                <div style={S.eventMeta}>
+                  {meta && <span>{meta}</span>}
+                  {(ev.cost ?? 0) > 0 && (
+                    <span style={S.eventCost}>${Math.round(ev.cost as number)}</span>
+                  )}
+                </div>
+              )}
+              {ev.description && <div style={S.eventDesc}>{ev.description}</div>}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -1001,12 +1016,35 @@ const S: Record<string, CSSProperties> = {
   },
 
   // ── Events ─────────────────────────────────────────────────────────────────
-  eventList: { display: "flex", flexDirection: "column" as const, gap: 2 },
-  eventRow:  { display: "flex", alignItems: "center", gap: 10, padding: "6px 0",
-               borderBottom: "1px solid var(--color-border-tertiary, #F1F5F9)" },
-  eventDot:  { width: 5, height: 5, borderRadius: "50%", flexShrink: 0,
-               background: "var(--tpv-blue, #103076)" },
-  eventName: { fontSize: 13, fontWeight: 500, color: "var(--color-text-primary, #0F172A)" },
+  eventList: { display: "flex", flexDirection: "column" as const, gap: 8 },
+  eventCard: {
+    background:    "rgba(234,224,207,0.5)",
+    borderLeft:    "3px solid #EAE0CF",
+    borderRadius:  8,
+    padding:       "10px 12px",
+    display:       "flex",
+    flexDirection: "column" as const,
+    gap:           4,
+  },
+  eventName: { fontSize: 13, fontWeight: 600, color: "var(--color-text-primary, #0F172A)", lineHeight: 1.3 },
+  eventMeta: {
+    display:    "flex",
+    alignItems: "center",
+    gap:        8,
+    flexWrap:   "wrap" as const,
+    fontSize:   12,
+    fontWeight: 500,
+    color:      "#8A6A00",
+  },
+  eventCost: {
+    fontSize:   11,
+    fontWeight: 700,
+    color:      "#8A6A00",
+    background: "rgba(234,224,207,0.8)",
+    padding:    "1px 7px",
+    borderRadius: 4,
+  },
+  eventDesc: { fontSize: 11, color: "var(--color-text-secondary, #64748B)", lineHeight: 1.45 },
 
   // ── Insights ───────────────────────────────────────────────────────────────
   insightsCard: {
