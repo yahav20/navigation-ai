@@ -6,6 +6,7 @@ from langchain_core.language_models import BaseChatModel
 from agent.core.llm import silent
 from agent.core.models import TravelMetadata
 from agent.core.state import AgentState
+from agent.shared.budget import resolve_budget
 from agent.shared.travelers import apply_traveler_updates
 
 
@@ -47,6 +48,7 @@ class MetadataNode:
         extractor = silent(self.extraction_model.with_structured_output(TravelMetadata))
 
         current_trip_days = state.get("trip_days")
+        current_budget = state.get("total_budget")
         current_adults = state.get("num_adults")
         current_children = state.get("num_children")
         existing_summary = state.get("summary", "")
@@ -78,6 +80,18 @@ class MetadataNode:
                 recommended Berlin and London as options) and the user's message uses a vague
                 reference without naming a specific city, return null for destination_city so
                 the system can ask the user to clarify which one they meant.
+
+                IMPORTANT — budget resolution:
+                The current budget in state is: {current_budget}.
+                If the user gives an absolute number ("my budget is $5000", "make it $9000"),
+                return that directly as budget.
+                If the user says something relative in dollars ("add $10000", "raise it by
+                $500", "reduce by $300"), return ONLY the signed dollar amount as budget_delta
+                (e.g. "add $10000" -> 10000, "reduce by $300" -> -300). Do NOT add it to the
+                current budget yourself — the system computes the new total.
+                If the user says something relative as a percent ("increase budget by 20%",
+                "cut it by 10%"), return ONLY the signed percent as budget_delta_pct (e.g. -> 20
+                or -10). Do NOT compute the resulting dollar amount yourself.
 
                 IMPORTANT — trip_days resolution:
                 The current trip duration in state is: {current_trip_days} days.
@@ -156,9 +170,15 @@ class MetadataNode:
             if old_dest and new_dest.lower() != old_dest:
                 _invalidate_flights(reset_alternatives=True)
 
-        if metadata.budget is not None:
-            updates["total_budget"] = metadata.budget
-            if old_budget is not None and metadata.budget != old_budget:
+        new_budget = resolve_budget(
+            old_budget,
+            absolute=metadata.budget,
+            delta=metadata.budget_delta,
+            delta_pct=metadata.budget_delta_pct,
+        )
+        if new_budget is not None:
+            updates["total_budget"] = new_budget
+            if old_budget is not None and new_budget != old_budget:
                 _invalidate_flights()
 
         if metadata.trip_days is not None:

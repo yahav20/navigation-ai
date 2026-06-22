@@ -38,17 +38,16 @@ class AlternativeDestinationNode:
         destination = state.get("destination_city")
         origin = state.get("current_city")
         if not destination or not origin:
-            return {"alternative_destinations": []}
+            return {"alternative_destinations": [], "alternative_destinations_no_route": True}
 
         candidates = data_provider.get_reachable_destinations_by_distance(
             origin, destination, 10,
         )
 
         usable = [c for c in candidates if isinstance(c, dict) and c.get("city")]
-        for _c in usable:
-            pass
         if not usable:
-            return {"alternative_destinations": []}
+            # No other reachable cities from origin at all — not a budget issue.
+            return {"alternative_destinations": [], "alternative_destinations_no_route": True}
 
         candidate_lines = "\n".join(
             f"- {c['city']}, {c.get('country', 'Unknown')} "
@@ -75,7 +74,7 @@ Candidates:
             result: AlternativeDestinations = picker.invoke(prompt)
             shortlist = [s.model_dump() for s in result.suggestions]
         except Exception:  # noqa: BLE001
-            return {"alternative_destinations": []}
+            return {"alternative_destinations": [], "alternative_destinations_no_route": True}
 
         budget = state.get("total_budget")
         budget_optional = state.get("budget_optional", False)
@@ -119,7 +118,10 @@ Candidates:
 
             enriched.append({**pick, "flights": flights, "hotels": hotels})
 
-        return {"alternative_destinations": enriched}
+        # Candidates existed (this point is only reached when `usable` was non-empty) —
+        # an empty `enriched` here means they got filtered out by budget/hotel
+        # availability, not that no route exists at all.
+        return {"alternative_destinations": enriched, "alternative_destinations_no_route": False}
 
 
 class FormatterAlternativeNode:
