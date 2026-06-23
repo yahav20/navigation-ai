@@ -18,7 +18,13 @@ def fetch_activities(city: str) -> list[dict]:
 # ── Google Maps-backed tools ─────────────────────────────────────────────────
 
 @tool
-def fetch_attractions(city: str, query: str = "museums and attractions") -> list[dict]:
+def fetch_attractions(
+    city: str,
+    query: str = "tourist attractions",
+    place_type: str = "tourist_attraction",
+    limit: int = 20,
+    radius: int = 15_000,
+) -> list[dict]:
     """Fetch attractions, museums, and tourist sites in a city using Google Maps.
 
     Returns attractions with ratings, locations, and price levels.
@@ -26,9 +32,10 @@ def fetch_attractions(city: str, query: str = "museums and attractions") -> list
     city = validate_city(city)
     coords = geocode_city(city)
     if not coords:
-        return search_places(f"{query} in {city}", limit=15)
+        results = search_places(f"{query} in {city}")
+        return results[:limit]
 
-    return search_nearby_places(coords, place_type="museum", radius=15000, limit=15)
+    return search_nearby_places(coords, place_type=place_type, radius=radius, limit=limit)
 
 
 @tool

@@ -335,19 +335,53 @@ def handle_fetch_activities(
         )
 
     # ── 1. Fetch attractions ──────────────────────────────────────────────
+    # Target: 5 activities per day minimum. We cap at 25 to stay within the
+    # ActivitySelector's token budget, but fetch as many as the API allows
+    # so the selector has a good pool to draw from.
+    MIN_PER_DAY   = 5
+    MIN_FLOOR     = 3        # minimum acceptable count before radius fallback
+    RADIUS_BASE   = 15_000
+    RADIUS_WIDE   = 25_000
+
+    needed = min(trip_days * MIN_PER_DAY, 25)
+
     attraction_query = (
         f"attractions near {pref_loc} in {destination}"
         if pref_loc else
         f"tourist attractions in {destination}"
     )
-    raw_attractions: list[dict] = []
-    try:
-        raw_attractions = fetch_attractions.invoke({
-            "city":  destination,
-            "query": attraction_query,
-        }) or []
-    except Exception as exc:
-        pass
+
+    def _fetch(place_type: str, limit: int, radius: int) -> list[dict]:
+        try:
+            return fetch_attractions.invoke({
+                "city":       destination,
+                "query":      attraction_query,
+                "place_type": place_type,
+                "limit":      limit,
+                "radius":     radius,
+            }) or []
+        except Exception:
+            return []
+
+    def _merge(base: list[dict], extra: list[dict]) -> list[dict]:
+        seen = {a["name"] for a in base if a.get("name")}
+        for item in extra:
+            if item.get("name") and item["name"] not in seen:
+                base.append(item)
+                seen.add(item["name"])
+        return base
+
+    # Primary: tourist_attraction
+    raw_attractions: list[dict] = _fetch("tourist_attraction", needed, RADIUS_BASE)
+
+    # Secondary: park (outdoor spaces Maps often misses in the primary type)
+    park_limit = max(needed // 2, 5)
+    raw_attractions = _merge(raw_attractions, _fetch("park", park_limit, RADIUS_BASE))
+
+    # Radius fallback: if the combined pool is still thin, widen the search
+    if len(raw_attractions) < trip_days * MIN_FLOOR:
+        raw_attractions = _merge(raw_attractions, _fetch("tourist_attraction", needed, RADIUS_WIDE))
+        raw_attractions = _merge(raw_attractions, _fetch("park", park_limit, RADIUS_WIDE))
 
     if _is_empty(raw_attractions):
         # Google Maps returned nothing — fall back to local SQLite activities so
