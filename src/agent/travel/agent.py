@@ -3,6 +3,7 @@
 import json
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor, Future
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
@@ -528,6 +529,7 @@ class TravelAgentNode:
     def __init__(self, response_model: Runnable) -> None:
         """Wrap the response model with structured output for curation."""
         self.curation_model = silent(response_model.with_structured_output(TravelPlanCuration))
+        self._llm = silent(response_model)
 
     def __call__(self, state: AgentState) -> dict:
         """Return either `travel_plan` (success) or a fallback `AIMessage` (no data)."""
@@ -620,6 +622,16 @@ class TravelAgentNode:
             _PROMPT_DUMP_PATH.parent.mkdir(parents=True, exist_ok=True)
             _PROMPT_DUMP_PATH.write_text(json.dumps(messages, indent=2), encoding="utf-8")
 
+        # Launch special-events fetch in a thread so it overlaps with the curation LLM call.
+        _executor = ThreadPoolExecutor(max_workers=1)
+        _events_future: Future | None = None
+        if payload.get("trip_start") and not state.get("special_events_data"):
+            try:
+                from agent.itinerary.special_events_agent import SpecialEventsSubAgent  # noqa: PLC0415
+                _events_future = _executor.submit(SpecialEventsSubAgent(self._llm), state)
+            except Exception:  # noqa: BLE001
+                pass
+
         _t1 = time.perf_counter()
         curation: TravelPlanCuration = self.curation_model.invoke(messages)
         _llm_ms = (time.perf_counter() - _t1) * 1000
@@ -649,4 +661,18 @@ class TravelAgentNode:
             travelers_label=payload.get("travelers_label"),
         )
 
-        return {"travel_plan": plan.model_dump()}
+        # Collect special events result (fetched in parallel with curation).
+        special_events: list[dict] = []
+        try:
+            if _events_future is not None:
+                try:
+                    special_events = _events_future.result(timeout=60) or []
+                except Exception:  # noqa: BLE001
+                    pass
+        finally:
+            _executor.shutdown(wait=False)
+
+        result: dict = {"travel_plan": plan.model_dump()}
+        if special_events:
+            result["special_events_data"] = special_events
+        return result

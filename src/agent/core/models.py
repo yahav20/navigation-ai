@@ -46,9 +46,12 @@ class TravelMetadata(BaseModel):
         description=(
             "Approximate trip start. Use YYYY-MM-DD when the user names a specific day "
             "(e.g. 'leaving June 10' -> '2026-06-10'). Use YYYY-MM when the user only "
-            "names a month or a relative period (e.g. 'in June' -> '2026-06', "
-            "'next month' resolved against today's date). Return null if nothing about "
-            "timing is mentioned."
+            "names a month or a relative period. "
+            "FUTURE-MONTH RULE: if the user says a bare month name with no year (e.g. 'April') "
+            "and that month has already passed in the current year, resolve to NEXT year "
+            "(e.g. today is 2026-06, user says 'April' -> '2027-04'). "
+            "If the user supplies an explicit year (e.g. 'April 2028'), use it exactly. "
+            "Return null if nothing about timing is mentioned."
         ),
     )
     num_adults: int | None = Field(

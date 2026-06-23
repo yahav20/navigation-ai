@@ -11,6 +11,7 @@ from providers.sqlite.provider import SQLiteDataProvider
 from security import validate_city, validate_positive_number
 from tools.activities import fetch_activities
 from tools.concerts import search_concerts
+from tools.special_events_advisor import search_special_events
 from tools.weather import get_average_weather, get_best_time_to_visit
 
 _provider = SQLiteDataProvider()
@@ -732,4 +733,5 @@ advisor_tools = [
     get_local_customs,
     get_wikipedia_summary,
     search_concerts,
+    search_special_events,
 ]

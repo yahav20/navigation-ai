@@ -65,6 +65,12 @@ class AdjustmentsNode:
         if adjustment.new_destination:
             updates["destination_city"] = adjustment.new_destination
             summary_parts.append(f"Destination changed to {adjustment.new_destination}")
+            # Destination change → previously-fetched special events (for the old city) no
+            # longer apply; drop them so the itinerary re-fetches for the new destination.
+            # (Origin/budget/traveler changes below do NOT touch events — same destination.)
+            old_dest = (state.get("destination_city") or "").split(",")[0].strip().lower()
+            if adjustment.new_destination.split(",")[0].strip().lower() != old_dest:
+                updates["special_events_data"] = []
 
         if adjustment.new_origin:
             updates["current_city"] = adjustment.new_origin

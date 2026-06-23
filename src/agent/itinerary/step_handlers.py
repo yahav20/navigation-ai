@@ -15,6 +15,7 @@ Utility functions used by all handlers live at the bottom of this file.
 """
 from __future__ import annotations
 
+import datetime
 import json
 from typing import Optional
 
@@ -178,6 +179,51 @@ def handle_switch_travel_options(step: PlanStep, results: dict, history: list, c
     if state_updates:
         result["state_updates"] = state_updates
 
+    return result
+
+
+def handle_fetch_special_events(
+    step: PlanStep,
+    results: dict,
+    history: list,
+    ctx: dict,
+    state: dict,
+    llm,
+) -> dict:
+    """Fetch and extract special events for the destination via Tavily + LLM."""
+    destination = ctx["destination"]
+    trip_start  = state.get("trip_start", "")
+
+    cache_args = _canonical_args({"city": destination, "trip_start": trip_start})
+    cached = _find_cached_result(results, history, "fetch_special_events", cache_args)
+    if cached is not None:
+        return _wrap_result(
+            status="success", data=cached, error=None, replan_hint="",
+            trace=_minimal_trace("fetch_special_events", cache_args, "Cache hit.", ""),
+        )
+
+    _agent_error: str = ""
+    try:
+        from agent.itinerary.special_events_agent import SpecialEventsSubAgent  # noqa: PLC0415
+        events = SpecialEventsSubAgent(llm)(state)
+    except Exception as _exc:  # noqa: BLE001
+        events = []
+        _agent_error = f"{type(_exc).__name__}: {_exc}"
+
+    observation = (
+        f"Found {len(events)} special event(s)."
+        if not _agent_error
+        else f"Agent error — {_agent_error}"
+    )
+    data   = {"events": events}
+    result = _wrap_result(
+        status="success", data=data,
+        error=_agent_error or None,
+        replan_hint="",
+        trace=_minimal_trace("fetch_special_events", cache_args, observation, ""),
+    )
+    if events:
+        result["state_updates"] = {"special_events_data": events}
     return result
 
 
@@ -474,8 +520,18 @@ def handle_build_day(
             day_plan_filtered = fallback_plan
 
     if not candidates:
-        # Don't force a full day: if a city has run out of activities, show what we
-        # found and leave the rest as an open day rather than failing the build.
+        # Soft-dedup fallback: the strict pool is exhausted (all attractions were used
+        # on earlier days). Allow reuse of the full activity list so the itinerary
+        # can still be built — this is better than leaving an empty day.
+        all_sorted = sorted(all_activities, key=lambda a: -(a.get("rating") or 0))
+        reuse_plan = {**day_plan_filtered, "activities": [a["name"] for a in all_sorted[:5]]}
+        candidates = resolve_candidates(all_activities, reuse_plan, available_rests)
+        if candidates:
+            day_plan_filtered = reuse_plan
+
+    if not candidates:
+        # Don't force a full day: if a city has run out of activities even after reuse,
+        # show what we found and leave the rest as an open day rather than failing the build.
         return _open_day_result(action, day_num, destination,
                                 "No activity candidates left — leaving this as an open day.")
 
@@ -495,8 +551,15 @@ def handle_build_day(
                                       weather_cond, day_blocked, rest_blocks)
     )
 
+    # Retrieve and geocode special events for this calendar day
+    day_events = _enrich_event_coords(_get_day_events(state, day_num, results), destination)
+
     try:
-        slots = DayScheduleBuilder(cfg).build(candidates, day_plan=day_plan_filtered)
+        slots = DayScheduleBuilder(cfg).build(
+            candidates,
+            day_plan=day_plan_filtered,
+            special_events=day_events or None,
+        )
     except Exception as exc:
         return _wrap_result(
             status="failed",
@@ -535,7 +598,8 @@ def handle_build_day(
         error=None,
         replan_hint="",
         trace=_minimal_trace(action, {"day": day_num, "candidates": len(candidates)},
-                             f"Built {len(slots)} slots. Day cost: ${day_cost}.",
+                             f"Built {len(slots)} slots. Day cost: ${day_cost}."
+                             + (f" {len(day_events)} special event(s) injected." if day_events else ""),
                              f"Day {day_num} complete."),
     )
 
@@ -1510,3 +1574,91 @@ def _drop_stale_budget(results: dict) -> dict:
 def _wrap_result(status, data, error, replan_hint, trace) -> dict:
     return {"status": status, "data": data, "error": error,
             "replan_hint": replan_hint, "trace": trace}
+
+
+# ---------------------------------------------------------------------------
+# Special-events helpers
+# ---------------------------------------------------------------------------
+
+def _already_placed_event_names(
+    results: dict, up_to_day: int, candidate_names: set[str]
+) -> set[str]:
+    """Return which candidate event names were placed as activity slots in days < up_to_day."""
+    placed: set[str] = set()
+    for key, wrapped in results.items():
+        if not key.startswith("build_day_schedule") or not isinstance(wrapped, dict):
+            continue
+        day_data = wrapped.get("data", {})
+        if not isinstance(day_data, dict) or day_data.get("day", 0) >= up_to_day:
+            continue
+        for slot in day_data.get("slots", []):
+            if slot.get("slot_type") == "activity" and slot.get("name") in candidate_names:
+                placed.add(slot["name"])
+    return placed
+
+
+def _get_day_events(state: dict, day_num: int, results: dict | None = None) -> list[dict]:
+    """Return special events that fall on the calendar date for *day_num*.
+
+    Uses state["trip_start"] to compute which calendar date corresponds to this day number,
+    then filters from special_events_data. Deduplicates against prior built days so an
+    all-month event (e.g. Christmas market) only appears once in the itinerary.
+    """
+    events     = (state or {}).get("special_events_data") or []
+    trip_start = (state or {}).get("trip_start", "")
+    if not events:
+        return []
+    # Fallback: when the user never stated a start date but flights are booked, use the
+    # outbound departure date so events still get scheduled.
+    if not trip_start:
+        fl = (state or {}).get("itinerary_selected_outbound_flight") or {}
+        trip_start = str(fl.get("departure_date") or fl.get("departure_time") or "")
+    if not trip_start:
+        return []
+    try:
+        s = trip_start.strip()
+        # "YYYY-MM" (month-only) → assume the 1st; keeps generic itineraries working
+        if len(s) == 7 and s[4] == "-":
+            s = s + "-01"
+        base      = datetime.date.fromisoformat(s[:10])
+        trip_date = (base + datetime.timedelta(days=day_num - 1)).isoformat()
+    except (ValueError, TypeError):
+        return []
+
+    matched = [e for e in events if trip_date in (e.get("applicable_dates") or [])]
+
+    # Dedup: skip events already placed as activity slots on a prior day.
+    # If the ScheduleEngine couldn't fit the event on day N, it won't appear in day N's
+    # slots, so it remains eligible for day N+1 — giving it a second chance.
+    if results and matched:
+        candidate_names = {e.get("name", "") for e in matched}
+        already = _already_placed_event_names(results, day_num, candidate_names)
+        matched = [e for e in matched if e.get("name") not in already]
+
+    return matched
+
+
+def _enrich_event_coords(events: list[dict], destination: str) -> list[dict]:
+    """Attempt to geocode events that have a location_hint but no lat/lng.
+
+    Uses the existing _search_activity helper (Google Maps) so the schedule engine
+    can compute realistic transit times. Mutates each event dict in-place and
+    returns the list unchanged (for chaining).
+    """
+    for ev in events:
+        if ev.get("lat") and ev.get("lng"):
+            continue
+        hint = str(ev.get("location_hint") or "").strip()
+        if not hint:
+            continue
+        try:
+            query  = f"{hint} {destination}" if destination.lower() not in hint.lower() else hint
+            result = _search_activity(hint, destination)
+            lat = float(result.get("lat") or result.get("latitude") or 0)
+            lng = float(result.get("lng") or result.get("longitude") or 0)
+            if lat or lng:
+                ev["lat"] = lat
+                ev["lng"] = lng
+        except Exception:  # noqa: BLE001
+            pass
+    return events

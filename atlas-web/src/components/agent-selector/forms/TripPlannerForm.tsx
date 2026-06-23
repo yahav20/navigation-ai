@@ -65,8 +65,7 @@ export function TripPlannerForm({ onSubmit }: { onSubmit: (text: string) => void
     const effectiveYear   = year.trim() ? parseInt(year) : new Date().getFullYear();
 
     const parts = [
-      `Build a 3-day itinerary from ${origin} to ${destination}`,
-      `for ${days} days`,
+      `Build a ${days}-day itinerary from ${origin} to ${destination}`,
       `for ${travelers}`,
       numRooms > 1 ? `in ${numRooms} rooms` : "",
       `with a budget of ${effectiveBudget}`,

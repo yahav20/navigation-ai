@@ -1,8 +1,30 @@
 """Emit the curated TravelPlan as a generative-UI message for TravelPlanViewer."""
 
+import calendar
+
 from langchain_core.messages import AIMessage
 
 from agent.core.state import AgentState
+
+
+def _fmt_event_dates(dates: list[str]) -> str:
+    """Turn a list of YYYY-MM-DD strings into a compact human range, e.g. 'Dec 1 – 31'."""
+    valid = sorted(d for d in dates if isinstance(d, str) and len(d) == 10)
+    if not valid:
+        return ""
+    try:
+        lo, hi = valid[0], valid[-1]
+        mon_lo = calendar.month_abbr[int(lo[5:7])]
+        day_lo = int(lo[8:10])
+        if lo == hi:
+            return f"{mon_lo} {day_lo}"
+        mon_hi = calendar.month_abbr[int(hi[5:7])]
+        day_hi = int(hi[8:10])
+        if mon_lo == mon_hi:
+            return f"{mon_lo} {day_lo} – {day_hi}"
+        return f"{mon_lo} {day_lo} – {mon_hi} {day_hi}"
+    except (ValueError, IndexError):
+        return ""
 
 
 class FormatterNode:
@@ -13,7 +35,21 @@ class FormatterNode:
         if not plan:
             return {}
 
-        ui_props   = _build_viewer_props(plan)
+        ui_props = _build_viewer_props(plan)
+
+        events = state.get("special_events_data") or []
+        if events:
+            ui_props["special_events"] = [
+                {
+                    "name":        ev["name"],
+                    "description": ev.get("description", ""),
+                    "dates":       _fmt_event_dates(ev.get("applicable_dates") or []),
+                    "location":    ev.get("location_hint", ""),
+                    "cost":        float(ev.get("cost_usd") or 0),
+                }
+                for ev in events if ev.get("name")
+            ][:8]
+
         # Web renders `ui_props` as a TravelPlanViewer card and hides the text
         # on a message that has a viewer attached, but the CLI has no such
         # renderer — so the message content must stand on its own as a plain

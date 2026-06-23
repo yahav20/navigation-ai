@@ -4,7 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta
 
 from agent.core.state import AgentState
-from providers.flights import search_flights_with_fallback
+from providers.flights import search_flights_with_fallback, search_round_trip_legs_with_fallback
 
 # Both legs are queried month-wide (see `_to_month`/`_return_date`) because the
 # flight feed is sparse for a single exact date, so the "best value" outbound
@@ -63,16 +63,16 @@ def _align_by_trip_length(
         return inbound
 
     target = outbound_date + timedelta(days=max(trip_days, 1))
-    dated = [(f, d) for f in inbound if (d := _flight_date(f)) is not None]
-    if not dated:
-        return inbound  # no parseable dates to compare — don't filter blind
-
-    aligned = [f for f, d in dated if abs((d - target).days) <= _RETURN_DATE_TOLERANCE_DAYS]
-    if aligned:
-        return aligned
-
-    dated.sort(key=lambda pair: abs((pair[1] - target).days))
-    return [f for f, _d in dated]
+    aligned = [
+        f for f in inbound
+        if (d := _flight_date(f)) and abs((d - target).days) <= _RETURN_DATE_TOLERANCE_DAYS
+    ]
+    # Prefer returns that match the requested trip length, but never eliminate every
+    # option: on sparse routes the feed may only carry returns far from the ideal date.
+    # Falling back to the full set lets `_build_pairings` still surface flights (it ranks
+    # by day_gap proximity and the curation step flags the mismatch) instead of the agent
+    # wrongly reporting "no flights at all".
+    return aligned or inbound
 
 
 def _to_month(date_str: str) -> str:
@@ -121,16 +121,28 @@ class FlightSearchNode:
 
         outbound_at = _to_month(trip_start)
         return_at = _return_date(trip_start, trip_days)
-        with ThreadPoolExecutor(max_workers=2) as pool:
+        with ThreadPoolExecutor(max_workers=3) as pool:
             outbound_future = pool.submit(
                 search_flights_with_fallback, origin, destination, outbound_at,
             )
             return_future = pool.submit(
                 search_flights_with_fallback, destination, origin, return_at,
             )
+            # Round-trip-matched legs run in parallel — the one-way feed clusters the
+            # outbound and return on far-apart dates, so without these a 3-day request
+            # can only be paired with a ~3-week return.
+            roundtrip_future = pool.submit(
+                search_round_trip_legs_with_fallback, origin, destination, outbound_at, return_at,
+            )
 
         outbound = _usable_flights(outbound_future.result())
-        inbound = _align_by_trip_length(outbound, _usable_flights(return_future.result()), trip_days)
+        inbound = _usable_flights(return_future.result())
+        rt_outbound, rt_inbound = roundtrip_future.result()
+
+        # Merge the round-trip legs into the pools; _build_pairings (gap-scored downstream)
+        # then prefers pairs whose length is close to trip_days over the far-apart one-way pairs.
+        outbound = outbound + rt_outbound
+        inbound = _align_by_trip_length(outbound, inbound + rt_inbound, trip_days)
 
         return {
             "flight_options": outbound,

@@ -62,7 +62,7 @@ const AGENTS: AgentCard[] = [
   {
     id: "events",
     label: "Shows & Events",
-    description: "Find concerts, shows and events worldwide",
+    description: "Find concerts, shows, festivals and special events worldwide",
     icon: <Ticket className="size-5" />,
     color: "oklch(0.58 0.22 320)",
     hasForm: true,

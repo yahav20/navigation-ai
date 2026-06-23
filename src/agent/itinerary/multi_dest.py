@@ -421,6 +421,11 @@ class LegDispatchNode:
             update["total_budget"]               = 0.0
             update["use_min_prices_for_budget"]  = False
             update["switch_travel_triggered"]    = False
+            # Each leg plans a different city — drop the previous leg's events so the planner
+            # re-fetches special events for THIS destination (set above) instead of leaking the
+            # prior city's events (e.g. Rome's "Estate Romane" into a Naples day). Already-built
+            # legs keep their events: they're baked into each leg's stored itinerary_plan.
+            update["special_events_data"]        = []
         else:
             # Single destination: leave mode/budget exactly as plan_check set them.
             update["include_flight"] = True

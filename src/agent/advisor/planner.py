@@ -139,6 +139,7 @@ ToolName = Literal[
     "get_local_customs",
     "get_wikipedia_summary",
     "search_concerts",
+    "search_special_events",
 ]
 
 
@@ -294,6 +295,8 @@ def _sanitize_plan(steps: list[PlannedToolCall]) -> list[PlannedToolCall]:
         steps = [s for s in steps if s.tool_name not in _DISCOVERY_TOOLS]
     if "search_concerts" in tool_names:
         steps = [s for s in steps if s.tool_name == "search_concerts"]
+    if "search_special_events" in tool_names:
+        steps = [s for s in steps if s.tool_name == "search_special_events"]
     return steps
 
 
@@ -527,6 +530,34 @@ PRACTICAL TRAVEL TOOLS (informational — each needs exactly ONE call, no combin
       "when is Hardwell in Amsterdam"               → artist="Hardwell",    city="Amsterdam"
       "upcoming Coldplay shows"                     → artist="Coldplay"
 
+- search_special_events
+    Set: city = <city>, month = <"Month YYYY" e.g. "December 2026">
+    -> For questions about special events, festivals, seasonal markets, or local happenings
+    -> Trigger phrases: "events in X", "festivals in X", "Christmas markets", "Oktoberfest",
+                        "what's on in X", "what's happening in X", "what's going on in X",
+                        "any events in X in [month]", "what to do in X in [month]" (when user
+                        is specifically asking about events/happenings, not general activities)
+    -> Examples: "what events are in Berlin in December?", "any festivals in Prague?",
+                 "Christmas markets in Vienna?", "what's happening in Munich in October?"
+    -> Sources: timeout.com, theculturetrip.com, lonelyplanet.com
+    -> ALWAYS ONE call only — NEVER combine with ANY other tool
+    -> city is required; month is strongly recommended — derive from user message or trip_start
+    -> Do NOT use for general "what to do" questions (use fetch_activities instead);
+       use ONLY when the user is specifically asking about events, festivals, or happenings
+    -> NOT for concerts/shows/live performances — those go to search_concerts (see below)
+
+- CONCERTS vs SPECIAL EVENTS — never confuse these two tools:
+    -> The deciding factor is the NOUN the user used, NOT the "in [city] in [month]" shape
+       (both tools take city + month, so the phrasing alone does not disambiguate).
+    -> "concert(s)", "show(s)", "gig(s)", "live music", "performance(s)", "DJ set", "tour",
+       "touring", a named performer/band/artist This holds even when NO artist
+       is named and even when phrased exactly like "shows in Berlin in December".
+    -> "event(s)", "festival(s)", "market(s)", "Christmas markets", "Oktoberfest", "carnival",
+       "parade", "what's on", "what's happening", "seasonal celebrations" → search_special_events.
+    -> If the user asks for "shows" / "concerts", you MUST NOT route to
+       search_special_events. If they ask for "festivals" / "markets" / "events", you MUST NOT
+       route to search_concerts.
+
 - get_wikipedia_summary
     Set: topic = <specific place, attraction, or landmark name>
     -> For questions about a SPECIFIC ATTRACTION, LANDMARK, or HISTORICAL SITE (NOT a city as a whole)
@@ -641,7 +672,9 @@ MULTI-FILTER RULE — User specifies TWO or more distinct destination preference
       "customs in X / tipping in X / etiquette / phrases"   → get_local_customs
       "tell me about [landmark] / what is [landmark]"       → get_wikipedia_summary
       (city-level: "tell me about Rome" → get_city_overview, NOT wikipedia)
-      "concerts / shows / gigs / events / touring / DJ set" → search_concerts
+      "concerts / shows / gigs / touring / DJ set / performances / הופעות" → search_concerts
+      "events / festivals / markets / what's on / what's happening / what's going on" → search_special_events
+      (shows/concerts/performances are NEVER search_special_events; festivals/markets are NEVER search_concerts)
 
 COUNTRY -> CITY RESOLUTION:
 Apply this mapping to both KNOWN USER CONTEXT and the user's message:
