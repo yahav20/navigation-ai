@@ -1,8 +1,9 @@
 """HITL gate offering budget/city flexibility when no flights or alternatives exist."""
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.types import interrupt
 
 from agent.core.state import AgentState
+from security import sanitize_resume
 
 MAX_FLEXIBILITY_ATTEMPTS = 2
 
@@ -82,6 +83,16 @@ class FlightFlexibilityGateNode:
             ),
             "options": [],
         })
+
+        # This resume bypasses security_gate entirely (LangGraph resumes this node
+        # directly, never re-entering from START) — validate/sanitize here instead.
+        try:
+            adjustment_text = sanitize_resume(adjustment_text)
+        except ValueError as e:
+            return {
+                "flexibility_action": "give_up",
+                "messages": [AIMessage(content=str(e))],
+            }
 
         return {
             "flexibility_action": "flexible",

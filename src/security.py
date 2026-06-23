@@ -153,6 +153,19 @@ def sanitize_message(user_input: str, session_id: str = "unknown") -> str:
     return cleaned
 
 
+def sanitize_resume(text: object, session_id: str = "unknown") -> str:
+    """Validate + sanitize free text captured from a mid-graph HITL resume.
+
+    LangGraph resumes an interrupted node directly (Command(resume=...)) without
+    re-entering the graph from START, so security_gate — which only runs on
+    START → security_gate — never sees this text. Any interrupt() with an
+    open-ended "options": [] must route its resumed value through this before
+    using it in a prompt. Raises ValueError on blocked input, same as
+    security_gate's own validate_input.
+    """
+    return sanitize_message(validate_input(text, session_id), session_id)
+
+
 _SAFE_TRAVEL_RESPONSE = "I can only help with travel planning. How can I assist you with your trip?"
 
 def scan_output(text: str, session_id: str = "unknown") -> str:
