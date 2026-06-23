@@ -697,7 +697,7 @@ const S: Record<string, any> = {
   },
   slotRowSpecial: {
     borderLeft: "3px solid #EAE0CF",
-    background: "rgba(234,224,207,0.45)",
+    background: "transparent",
     borderRadius: 8,
     paddingLeft: 10,
     paddingTop: 6,
@@ -868,7 +868,7 @@ if (typeof document !== "undefined") {
     ".dark .itv-root [data-slot=checkin]   { background: rgba(107,143,212,0.12) !important; color: #9BB8F0 !important; }",
     // Dark mode special event (after data-slot rules so it wins over [data-slot=activity])
     ".dark .itv-root [data-special='1'] { background: rgba(234,224,207,0.16) !important; color: #EAE0CF !important; }",
-    ".dark .itv-root .itv-slot-special  { background: rgba(234,224,207,0.08) !important; }",
+    ".dark .itv-root .itv-slot-special  { background: transparent !important; }",
     // Dark mode map inner glow
     ".dark .itv-root .itv-map-container { box-shadow: inset 0 0 0 1px rgba(255,255,255,0.06); }",
     // Dark mode legend dot ring (match dark bg)
