@@ -326,7 +326,11 @@ def handle_fetch_activities(
     pref_loc    = str(prefs.get("preferred_location") or "").strip()
 
     cache_args = _canonical_args({"city": destination})
-    cached = _find_cached_result(results, history, "fetch_activities", cache_args)
+    _min_needed = trip_days * 3   # floor: 3 unique activities per day
+    cached = _find_cached_result(
+        results, history, "fetch_activities", cache_args,
+        validator=lambda d: len((d or {}).get("activities", [])) >= _min_needed,
+    )
     if cached is not None:
         return _wrap_result(
             status="success", data=cached, error=None, replan_hint="",
@@ -335,19 +339,53 @@ def handle_fetch_activities(
         )
 
     # ── 1. Fetch attractions ──────────────────────────────────────────────
+    # Target: 5 activities per day minimum. We cap at 25 to stay within the
+    # ActivitySelector's token budget, but fetch as many as the API allows
+    # so the selector has a good pool to draw from.
+    MIN_PER_DAY   = 5
+    MIN_FLOOR     = 3        # minimum acceptable count before radius fallback
+    RADIUS_BASE   = 15_000
+    RADIUS_WIDE   = 25_000
+
+    needed = min(trip_days * MIN_PER_DAY, 25)
+
     attraction_query = (
         f"attractions near {pref_loc} in {destination}"
         if pref_loc else
         f"tourist attractions in {destination}"
     )
-    raw_attractions: list[dict] = []
-    try:
-        raw_attractions = fetch_attractions.invoke({
-            "city":  destination,
-            "query": attraction_query,
-        }) or []
-    except Exception as exc:
-        pass
+
+    def _fetch(place_type: str, limit: int, radius: int) -> list[dict]:
+        try:
+            return fetch_attractions.invoke({
+                "city":       destination,
+                "query":      attraction_query,
+                "place_type": place_type,
+                "limit":      limit,
+                "radius":     radius,
+            }) or []
+        except Exception:
+            return []
+
+    def _merge(base: list[dict], extra: list[dict]) -> list[dict]:
+        seen = {a["name"] for a in base if a.get("name")}
+        for item in extra:
+            if item.get("name") and item["name"] not in seen:
+                base.append(item)
+                seen.add(item["name"])
+        return base
+
+    # Primary: tourist_attraction
+    raw_attractions: list[dict] = _fetch("tourist_attraction", needed, RADIUS_BASE)
+
+    # Secondary: park (outdoor spaces Maps often misses in the primary type)
+    park_limit = max(needed // 2, 5)
+    raw_attractions = _merge(raw_attractions, _fetch("park", park_limit, RADIUS_BASE))
+
+    # Radius fallback: if the combined pool is still thin, widen the search
+    if len(raw_attractions) < trip_days * MIN_FLOOR:
+        raw_attractions = _merge(raw_attractions, _fetch("tourist_attraction", needed, RADIUS_WIDE))
+        raw_attractions = _merge(raw_attractions, _fetch("park", park_limit, RADIUS_WIDE))
 
     if _is_empty(raw_attractions):
         # Google Maps returned nothing — fall back to local SQLite activities so
@@ -518,6 +556,22 @@ def handle_build_day(
         candidates = resolve_candidates(available_acts, fallback_plan, available_rests)
         if candidates:
             day_plan_filtered = fallback_plan
+
+    # Top-up: if the LLM assigned fewer than 4 activities to this day, pull the
+    # highest-rated unused attractions to fill the gap before the schedule runs.
+    MIN_ACTS_PER_DAY = 4
+    sight_count = sum(1 for c in candidates if not c.is_meal_venue)
+    if sight_count < MIN_ACTS_PER_DAY:
+        already_named = {c.name for c in candidates if not c.is_meal_venue}
+        sorted_avail  = sorted(
+            [a for a in available_acts if a.get("name") not in already_named],
+            key=lambda a: -(a.get("rating") or 0),
+        )
+        top_up = [a["name"] for a in sorted_avail[: MIN_ACTS_PER_DAY - sight_count]]
+        if top_up:
+            augmented = {**day_plan_filtered, "activities": list(already_named) + top_up}
+            candidates = resolve_candidates(available_acts, augmented, available_rests)
+            day_plan_filtered = augmented
 
     if not candidates:
         # Soft-dedup fallback: the strict pool is exhausted (all attractions were used
@@ -1226,7 +1280,13 @@ def _canonical_args(args: dict) -> dict:
     return {k: v for k, v in sorted(args.items())}
 
 
-def _find_cached_result(results: dict, history: list, step_type: str, args: dict) -> Optional[dict]:
+def _find_cached_result(
+    results: dict,
+    history: list,
+    step_type: str,
+    args: dict,
+    validator=None,          # optional: callable(data) -> bool; cache miss when False
+) -> Optional[dict]:
     never_cache = {"build_day_schedule"}
     if step_type in never_cache:
         return None
@@ -1240,7 +1300,9 @@ def _find_cached_result(results: dict, history: list, step_type: str, args: dict
                 None,
             )
             if k:
-                return _inner_data(results[k])
+                data = _inner_data(results[k])
+                if validator is None or validator(data):
+                    return data
     return None
 
 
