@@ -286,3 +286,107 @@ def search_flights(
         seen_flights.add(key)
         diverse.append(offer)
     return diverse[:limit]
+
+
+def _round_trip_offers(
+    origin_iata: str, destination_iata: str, departure_at: str, return_at: str,
+    *, token: str, limit: int,
+) -> list[dict]:
+    """Raw round-trip (`one_way=false`) offers — each carries matched departure_at + return_at."""
+    try:
+        r = requests.get(
+            f"{_AVIASALES}/prices_for_dates",
+            params={
+                "origin": origin_iata,
+                "destination": destination_iata,
+                "departure_at": departure_at,
+                "return_at": return_at,
+                "currency": "usd",
+                "limit": limit,
+                "sorting": "price",
+                "one_way": "false",
+                "token": token,
+            },
+            timeout=_TIMEOUT,
+        )
+        r.raise_for_status()
+        payload = r.json() or {}
+    except (requests.RequestException, ValueError):
+        return []
+    return payload.get("data") or []
+
+
+def search_round_trip_legs(
+    origin_city: str,
+    destination_city: str,
+    departure_at: str,
+    return_at: str,
+    *,
+    limit: int = _DEFAULT_LIMIT,
+) -> tuple[list[dict], list[dict]]:
+    """Round-trip search → (outbound_legs, return_legs) with matched, realistic trip lengths.
+
+    The one-way feed is sparse and clusters the outbound and return legs on far-apart dates,
+    so two independent one-way searches can only ever pair a (e.g.) 3-day request with a
+    3-week return. The round-trip feed returns matched departure/return pairs; we split each
+    offer into an outbound and a return leg (in the same shape as one-way offers) so the
+    caller's pairing step can recombine them into sane-length trips.
+
+    The endpoint only exposes a single round-trip ``price`` (not per leg), so it is split
+    evenly across the two legs — the *pair total* stays exact while the per-leg figure is an
+    estimate, which suits the agent's "estimated, no bookings confirmed" framing.
+    """
+    token = _api_key()
+    if not token:
+        return [], []
+
+    with ThreadPoolExecutor(max_workers=2) as pool_exec:
+        origin_iata, destination_iata = pool_exec.map(
+            _iata_for_city, (origin_city, destination_city)
+        )
+    if not origin_iata or not destination_iata:
+        return [], []
+
+    offers = _round_trip_offers(
+        origin_iata, destination_iata, departure_at, return_at,
+        token=token, limit=max(limit * 5, 30),
+    )
+
+    outbound_legs: list[dict] = []
+    return_legs: list[dict] = []
+    for offer in offers:
+        if not isinstance(offer, dict):
+            continue
+        price = offer.get("price")
+        if not isinstance(price, (int, float)):
+            continue
+        dep = offer.get("departure_at") or ""
+        ret = offer.get("return_at") or ""
+        if not dep or not ret:
+            continue
+        half = round(float(price) / 2, 2)
+        airline = _airline_name(offer.get("airline")) or offer.get("airline") or ""
+        flight_no = offer.get("flight_number") or ""
+        o_air = offer.get("origin_airport") or origin_iata
+        d_air = offer.get("destination_airport") or destination_iata
+
+        outbound_legs.append({
+            "origin_city": origin_city, "destination_city": destination_city,
+            "origin_airport": o_air, "destination_airport": d_air,
+            "stop_airports": [], "airline": airline, "flight_number": flight_no,
+            "price": half, "availability": "available",
+            "departure_time": dep, "arrival_time": "",
+            "duration_minutes": offer.get("duration_to"),
+            "transfers": int(offer.get("transfers") or 0),
+        })
+        return_legs.append({
+            "origin_city": destination_city, "destination_city": origin_city,
+            "origin_airport": d_air, "destination_airport": o_air,
+            "stop_airports": [], "airline": airline, "flight_number": flight_no,
+            "price": half, "availability": "available",
+            "departure_time": ret, "arrival_time": "",
+            "duration_minutes": offer.get("duration_back"),
+            "transfers": int(offer.get("return_transfers") or 0),
+        })
+
+    return outbound_legs, return_legs

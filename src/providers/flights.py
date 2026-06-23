@@ -11,6 +11,7 @@ from datetime import date, timedelta
 
 from providers.sqlite import SQLiteDataProvider
 from providers.travelpayouts import search_flights as _api_search_flights
+from providers.travelpayouts.flight_api import search_round_trip_legs as _api_round_trip_legs
 
 _db = SQLiteDataProvider()
 
@@ -48,3 +49,19 @@ def search_flights_with_fallback(
         return direct
 
     return _usable(_db.find_connecting_flights(origin, destination))
+
+
+def search_round_trip_legs_with_fallback(
+    origin: str,
+    destination: str,
+    departure_at: str,
+    return_at: str,
+) -> tuple[list[dict], list[dict]]:
+    """Round-trip-matched (outbound_legs, return_legs) from the live feed.
+
+    Supplements the one-way search so trip lengths stay close to the request. No SQLite
+    fallback — the static fixtures are single-leg — so this returns empty lists when the
+    live round-trip feed has nothing, leaving the one-way results untouched.
+    """
+    out, ret = _api_round_trip_legs(origin, destination, departure_at, return_at)
+    return _usable(out), _usable(ret)
