@@ -138,11 +138,7 @@ Candidates:
 
 
 class FormatterAlternativeNode:
-    """Render the alternative-destination Markdown response."""
-
-    def __init__(self, extraction_model: BaseChatModel) -> None:
-        """Store the chat model used to format the alternative response."""
-        self.extraction_model = extraction_model
+    """Render the alternative-destination Markdown response deterministically."""
 
     def __call__(self, state: AgentState) -> dict:
         """Format the alternative-destination response as Markdown."""
@@ -165,6 +161,7 @@ class FormatterAlternativeNode:
             )
             return {"messages": [AIMessage(content=text)]}
 
+<<<<<<< hot_fix_flexibillity
         over_budget = state.get("alternative_destinations_over_budget", False)
 
         payload = {
@@ -226,8 +223,72 @@ Let us know if any of these spark your interest, or if you'd like to adjust your
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": f"<data>\n{payload}\n</data>"},
         ]
-
-        response = self.extraction_model.invoke(messages_to_pass)
-
-        return {"messages": [response],
+=======
+        text = _render_markdown(origin, original_destination, budget, alternatives)
+        return {"messages": [AIMessage(content=text)],
                  "has_existing_trip_context": True}
+>>>>>>> main
+
+
+def _render_markdown(origin: str, original_destination: str, budget: float | None,
+                      alternatives: list[dict]) -> str:
+    """Render the alternative-destinations payload as the agreed Markdown template."""
+    budget_text = f"${budget:g}" if isinstance(budget, (int, float)) and budget else "Not specified"
+
+    lines = [
+        f"Good news — while **{original_destination}** isn't reachable from **{origin}** "
+        "right now, we found some great alternatives for you.",
+        "",
+        f"Unfortunately, we could not find any flights from **{origin}** to "
+        f"**{original_destination}**. Below are reachable alternatives that fit your trip.",
+        "",
+        "---",
+        "",
+        "### 🌍 **Suggested Alternatives**",
+        "",
+        f"**Total Budget:** {budget_text}",
+        "",
+        "---",
+        "",
+    ]
+
+    for i, alt in enumerate(alternatives, start=1):
+        city = alt.get("city", "Unknown")
+        country = alt.get("country", "Unknown")
+        reason = alt.get("reason", "")
+        flights = alt.get("flights") or []
+        hotels = alt.get("hotels") or []
+
+        lines.append(f"#### ✈️ **Option {i} — {city}, {country}**")
+        lines.append("")
+        lines.append(f"*Why this alternative:* {reason}")
+        lines.append("")
+        lines.append(f"**Flights from {origin}:**")
+        if flights:
+            lines.extend(
+                f"* **Airline:** {f.get('airline', 'Unknown')}  \n"
+                f"  **Flight Number:** {f.get('flight_number', 'Unknown')}  \n"
+                f"  **Price:** ${f.get('price', 0):g}"
+                for f in flights
+            )
+        else:
+            lines.append("No flights available.")
+        lines.append("")
+        lines.append(f"**Hotels in {city}:**")
+        if hotels:
+            lines.extend(
+                f"* **{h.get('name', 'Unknown')}** — {h.get('stars', '?')} stars, "
+                f"${h.get('price_per_night', 0):g}/night"
+                for h in hotels
+            )
+        else:
+            lines.append("No hotels within your budget for this city.")
+        lines.append("")
+        lines.append("---")
+        lines.append("")
+
+    lines.append(
+        "Let us know if any of these spark your interest, or if you'd like to adjust "
+        "your budget or pick a different region!",
+    )
+    return "\n".join(lines)
