@@ -92,7 +92,7 @@ const PIN_COLOR: Record<string, string> = {
 // Special events get a distinct soft-cream treatment across the schedule + map.
 const SPECIAL_COLOR = "#EAE0CF";              // fill / border / dot / pin
 const SPECIAL_INK   = "#8A6A00";              // dark companion for foreground marks (pin label, text)
-const SPECIAL_CFG = { dot: SPECIAL_COLOR, bg: "#F4EFE3", text: SPECIAL_INK, label: "🎪 Special event" };
+const SPECIAL_CFG = { dot: SPECIAL_COLOR, bg: "#F4EFE3", text: SPECIAL_INK, label: "Special event" };
 
 // ─── Leaflet helpers ──────────────────────────────────────────────────────────
 
