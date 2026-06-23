@@ -321,7 +321,7 @@ export function AssistantMessage({
         ) : (
           <>
             {contentString.length > 0 && !hasItineraryViewer && (
-              <div className="py-1">
+              <div className="rounded-2xl bg-muted/50 px-4 py-3">
                 <MarkdownText>{contentString}</MarkdownText>
               </div>
             )}
