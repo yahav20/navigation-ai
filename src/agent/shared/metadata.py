@@ -1,5 +1,6 @@
 """Extract travel metadata from the conversation history."""
 import copy
+import logging
 import re
 from datetime import date
 
@@ -10,6 +11,10 @@ from agent.core.models import TravelMetadata
 from agent.core.state import AgentState
 from agent.shared.budget import resolve_budget
 from agent.shared.travelers import apply_traveler_updates
+from providers.sqlite.provider import SQLiteDataProvider
+
+_logger = logging.getLogger(__name__)
+_db = SQLiteDataProvider()
 
 # ---------------------------------------------------------------------------
 # Common month-name typo normalization — runs before the LLM call so a single
@@ -239,16 +244,22 @@ class MetadataNode:
 
         if metadata.current_city is not None:
             new_origin = metadata.current_city.split(",")[0].strip()
-            updates["current_city"] = new_origin
-            if old_origin and new_origin.lower() != old_origin:
-                _invalidate_flights()
+            if _db.city_or_country_exists(new_origin):
+                updates["current_city"] = new_origin
+                if old_origin and new_origin.lower() != old_origin:
+                    _invalidate_flights()
+            else:
+                _logger.warning("extract_metadata: source '%s' not found in DB — skipping", new_origin)
 
         if metadata.destination_city is not None:
             new_dest = metadata.destination_city.split(",")[0].strip()
-            updates["destination_city"] = new_dest
-            if old_dest and new_dest.lower() != old_dest:
-                _invalidate_flights(reset_alternatives=True)
-                _clear_special_events()
+            if _db.city_or_country_exists(new_dest):
+                updates["destination_city"] = new_dest
+                if old_dest and new_dest.lower() != old_dest:
+                    _invalidate_flights(reset_alternatives=True)
+                    _clear_special_events()
+            else:
+                _logger.warning("extract_metadata: destination '%s' not found in DB — skipping", new_dest)
 
         new_budget = resolve_budget(
             old_budget,

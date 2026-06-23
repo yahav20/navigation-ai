@@ -2,6 +2,17 @@
 class SQLiteFlightQueriesMixin:
     """Query flight rows from the SQLite database."""
 
+    def city_or_country_exists(self, name: str) -> bool:
+        """Return True if name matches a city or country in the database."""
+        rows = self._query(
+            """SELECT 1 FROM cities    WHERE LOWER(name) = ?
+               UNION ALL
+               SELECT 1 FROM countries WHERE LOWER(name) = ?
+               LIMIT 1""",
+            (name.strip().lower(), name.strip().lower()),
+        )
+        return bool(rows)
+
     def fetch_flights(self, origin: str, destination: str) -> list:
         """Return flights from origin to destination, falling back to other cities in the same country."""
         rows = self._query(
