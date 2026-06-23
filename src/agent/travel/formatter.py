@@ -18,7 +18,7 @@ class FormatterNode:
         # on a message that has a viewer attached, but the CLI has no such
         # renderer — so the message content must stand on its own as a plain
         # markdown summary, not be left blank.
-        ai_message = AIMessage(content=_render_markdown(plan), name="formatter_output")
+        ai_message = AIMessage(content=_render_markdown(plan), name="travel_formatter")
         ui_message = {
             "type":     "ui",
             "name":     "TravelPlanViewer",

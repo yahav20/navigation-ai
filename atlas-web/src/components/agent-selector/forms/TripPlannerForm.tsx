@@ -11,6 +11,11 @@ import {
 } from "lucide-react";
 import { inputCls, labelCls, TravelersRow, FormSubmitButton } from "../shared";
 
+const MONTHS = [
+  "January","February","March","April","May","June",
+  "July","August","September","October","November","December",
+];
+
 export function TripPlannerForm({ onSubmit }: { onSubmit: (text: string) => void }) {
   const [origin, setOrigin] = useState("");
   const [destination, setDestination] = useState("");
@@ -25,6 +30,19 @@ export function TripPlannerForm({ onSubmit }: { onSubmit: (text: string) => void
 
   const clearError = (key: string) =>
     setErrors((p) => { const n = { ...p }; delete n[key]; return n; });
+
+  const now = new Date();
+  const thisYear = now.getFullYear();
+  const thisMonthIdx = now.getMonth(); // 0-indexed
+
+  // Returns true when a month (0-indexed) is past or current given the selected year.
+  const isMonthDisabled = (monthIdx: number): boolean => {
+    const yr = parseInt(year);
+    if (!year.trim() || isNaN(yr)) return monthIdx <= thisMonthIdx;
+    if (yr < thisYear) return true;
+    if (yr === thisYear) return monthIdx <= thisMonthIdx;
+    return false;
+  };
 
   const locationRe = /^[a-zA-ZÀ-ɏ\s-]+$/;
 
@@ -48,10 +66,22 @@ export function TripPlannerForm({ onSubmit }: { onSubmit: (text: string) => void
     }
     if (year.trim()) {
       const numYear = parseInt(year);
-      if (isNaN(numYear) || numYear < 2025 || numYear > 2030) errs.year = "Please enter a valid year (2025–2030)";
+      if (isNaN(numYear) || numYear < thisYear || numYear > 2030)
+        errs.year = `Please enter a valid year (${thisYear}–2030)`;
+    }
+    // Validate that the month/year combination is strictly in the future.
+    if (!errs.year) {
+      const nextMonthDate = new Date(thisYear, thisMonthIdx + 1, 1);
+      const resolvedMonthIdx = month ? MONTHS.indexOf(month) : nextMonthDate.getMonth();
+      const resolvedYear = year.trim() ? parseInt(year) : nextMonthDate.getFullYear();
+      const isPastOrCurrent =
+        resolvedYear < thisYear ||
+        (resolvedYear === thisYear && resolvedMonthIdx <= thisMonthIdx);
+      if (isPastOrCurrent) errs.month = "Please select a future month";
     }
     if (Object.keys(errs).length > 0) { setErrors(errs); return; }
     setErrors({});
+
     const numAdults   = parseInt(adults)   || 1;
     const numChildren = parseInt(children) || 0;
     const numRooms    = parseInt(rooms)    || 1;
@@ -61,8 +91,10 @@ export function TripPlannerForm({ onSubmit }: { onSubmit: (text: string) => void
         : `${numAdults} adult${numAdults > 1 ? "s" : ""}` +
           (numChildren > 0 ? ` and ${numChildren} child${numChildren > 1 ? "ren" : ""}` : "");
     const effectiveBudget = budget.trim() || "$5,000";
-    const effectiveMonth  = month || new Date().toLocaleString("en", { month: "long" });
-    const effectiveYear   = year.trim() ? parseInt(year) : new Date().getFullYear();
+    // Default to next month so we never send a past/current date.
+    const nextMonthDate = new Date(thisYear, thisMonthIdx + 1, 1);
+    const effectiveMonth = month || MONTHS[nextMonthDate.getMonth()];
+    const effectiveYear  = year.trim() ? parseInt(year) : nextMonthDate.getFullYear();
 
     const parts = [
       `Build a 3-day itinerary from ${origin} to ${destination}`,
@@ -113,24 +145,50 @@ export function TripPlannerForm({ onSubmit }: { onSubmit: (text: string) => void
               Month
             </label>
             <div className="relative">
-              <select className={cn(inputCls, "appearance-none pr-8")} value={month} onChange={(e) => setMonth(e.target.value)} dir="ltr">
+              <select
+                className={cn(inputCls, "appearance-none pr-8", errors.month && "border-red-500")}
+                value={month}
+                onChange={(e) => { setMonth(e.target.value); clearError("month"); }}
+                dir="ltr"
+              >
                 <option value="">Select month...</option>
-                {["January","February","March","April","May","June",
-                  "July","August","September","October","November","December"].map((m) => (
-                  <option key={m} value={m}>{m}</option>
+                {MONTHS.map((m, idx) => (
+                  <option key={m} value={m} disabled={isMonthDisabled(idx)}>{m}</option>
                 ))}
               </select>
               <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 size-3.5 -translate-y-1/2 text-[--muted-foreground]" />
             </div>
+            {errors.month && <p className="mt-1 text-xs text-red-500">{errors.month}</p>}
           </div>
           <div>
             <label className={labelCls}>
               <Calendar className="mb-0.5 mr-1 inline size-3" />
               Year
             </label>
-            <input className={cn(inputCls, errors.year && "border-red-500")} type="number" placeholder="2026" min={2025} max={2030}
-              value={year} onChange={(e) => { setYear(e.target.value); const y = parseInt(e.target.value); if (y >= 2025 && y <= 2030) clearError("year"); }}
-              onWheel={(e) => e.currentTarget.blur()} dir="ltr" />
+            <input
+              className={cn(inputCls, errors.year && "border-red-500")}
+              type="number"
+              placeholder={String(thisYear + 1)}
+              min={thisYear}
+              max={2030}
+              value={year}
+              onChange={(e) => {
+                const newYear = e.target.value;
+                setYear(newYear);
+                // Clear a month that becomes invalid when the year changes.
+                const yr = parseInt(newYear);
+                if (!isNaN(yr) && month) {
+                  const monthIdx = MONTHS.indexOf(month);
+                  if (yr < thisYear || (yr === thisYear && monthIdx <= thisMonthIdx)) {
+                    setMonth("");
+                  }
+                }
+                const y = parseInt(newYear);
+                if (y >= thisYear && y <= 2030) clearError("year");
+              }}
+              onWheel={(e) => e.currentTarget.blur()}
+              dir="ltr"
+            />
             {errors.year && <p className="mt-1 text-xs text-red-500">{errors.year}</p>}
           </div>
         </div>

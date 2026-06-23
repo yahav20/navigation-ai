@@ -86,7 +86,8 @@ function CustomComponent({
   const lastAiMessageHasContent =
     getContentString(lastAiMessage?.content ?? []).length > 0;
   const lastAiMessageIsItinerary =
-    (lastAiMessage as any)?.name === "itinerary_formatter";
+    (lastAiMessage as any)?.name === "itinerary_formatter" ||
+    (lastAiMessage as any)?.name === "travel_formatter";
   const allowFallback = !lastAiMessageHasContent || lastAiMessageIsItinerary;
 
   const customComponents = resolveCustomComponents(
@@ -132,7 +133,8 @@ function useHasItineraryViewer(
   const lastAiMessageHasContent =
     getContentString(lastAiMessage?.content ?? []).length > 0;
   const lastAiMessageIsItinerary =
-    (lastAiMessage as any)?.name === "itinerary_formatter";
+    (lastAiMessage as any)?.name === "itinerary_formatter" ||
+    (lastAiMessage as any)?.name === "travel_formatter";
   const allowFallback = !lastAiMessageHasContent || lastAiMessageIsItinerary;
 
   const components = resolveCustomComponents(

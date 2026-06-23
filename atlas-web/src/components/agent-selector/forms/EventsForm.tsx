@@ -66,7 +66,10 @@ export function EventsForm({ onSubmit }: { onSubmit: (text: string) => void }) {
     onSubmit(prompt);
   };
 
-  const currentMonth = new Date().toLocaleString("en-US", { month: "long" });
+  const now = new Date();
+  const thisMonthIdx = now.getMonth(); // 0-indexed
+  const nextMonthDate = new Date(now.getFullYear(), thisMonthIdx + 1, 1);
+  const nextMonthName = nextMonthDate.toLocaleString("en-US", { month: "long" });
 
   return (
     <div className="flex flex-col gap-3">
@@ -136,8 +139,8 @@ export function EventsForm({ onSubmit }: { onSubmit: (text: string) => void }) {
             >
               <option value="">Select month...</option>
               {["January","February","March","April","May","June",
-                "July","August","September","October","November","December"].map((mo) => (
-                <option key={mo} value={mo}>{mo}</option>
+                "July","August","September","October","November","December"].map((mo, idx) => (
+                <option key={mo} value={mo} disabled={idx <= thisMonthIdx}>{mo}</option>
               ))}
             </select>
             <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 size-3.5 -translate-y-1/2 text-[--muted-foreground]" />
@@ -153,9 +156,9 @@ export function EventsForm({ onSubmit }: { onSubmit: (text: string) => void }) {
           🎤 Artist in city
         </button>
         <button type="button"
-          onClick={() => setMonth(currentMonth)}
+          onClick={() => setMonth(nextMonthName)}
           className="rounded-lg bg-[--accent] px-2.5 py-1 text-xs font-medium text-[--foreground] transition-colors duration-150 hover:bg-[--accent]/80">
-          📅 Events this month
+          📅 Events next month
         </button>
         <button type="button"
           onClick={() => { setCity("near me"); setErrors({}); }}

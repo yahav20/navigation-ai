@@ -18,11 +18,16 @@ export function RecommendationsForm({ onSubmit }: { onSubmit: (text: string) => 
 
   const locationRe = /^[a-zA-ZÀ-ɏ\s-]+$/;
 
+  const now = new Date();
+  const thisMonthIdx = now.getMonth(); // 0-indexed
+  const nextMonthDate = new Date(now.getFullYear(), thisMonthIdx + 1, 1);
+
   const handleSubmit = () => {
     if (!origin.trim()) { setErrors({ origin: "Required" }); return; }
     if (!locationRe.test(origin.trim())) { setErrors({ origin: "Please enter a valid location (letters only)" }); return; }
     setErrors({});
-    const effectiveMonth = month || new Date().toLocaleString("en", { month: "long" });
+    // Default to next month so we never send a past/current date.
+    const effectiveMonth = month || nextMonthDate.toLocaleString("en", { month: "long" });
     const parts = [
       "I'm looking for travel recommendations",
       `from ${origin}`,
@@ -52,8 +57,8 @@ export function RecommendationsForm({ onSubmit }: { onSubmit: (text: string) => 
           <select className={cn(inputCls, "appearance-none pr-8")} value={month} onChange={(e) => setMonth(e.target.value)} dir="ltr">
             <option value="">Select month...</option>
             {["January","February","March","April","May","June",
-              "July","August","September","October","November","December"].map((m) => (
-              <option key={m} value={m}>{m}</option>
+              "July","August","September","October","November","December"].map((m, idx) => (
+              <option key={m} value={m} disabled={idx <= thisMonthIdx}>{m}</option>
             ))}
           </select>
           <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 size-3.5 -translate-y-1/2 text-[--muted-foreground]" />
