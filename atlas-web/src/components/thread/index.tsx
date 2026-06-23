@@ -270,13 +270,13 @@ function PlaneHero() {
         <LangGraphLogoSVG width={160} height={160} className="relative z-10 flex-shrink-0" />
 
         <h1
-          className="text-[2.75rem] font-semibold text-foreground dark:text-white"
-          style={{ letterSpacing: "-0.03em", lineHeight: 1.1 }}
+          className="text-[2.75rem] text-foreground dark:text-white"
+          style={{ fontFamily: "var(--font-marcellus), sans-serif", letterSpacing: "0.01em", lineHeight: 1.1 }}
         >
           Navigation AI
         </h1>
 
-        <p className="text-sm text-[--muted-foreground]">
+        <p className="text-sm text-[--muted-foreground]" style={{ fontFamily: "var(--font-marcellus), sans-serif" }}>
           Choose an agent or type a freeform question below
         </p>
       </motion.div>
