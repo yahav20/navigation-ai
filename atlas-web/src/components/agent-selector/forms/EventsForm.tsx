@@ -13,11 +13,6 @@ import {
 import { inputCls, labelCls, FormSubmitButton } from "../shared";
 
 export function EventsForm({ onSubmit }: { onSubmit: (text: string) => void }) {
-  const [artist, setArtist] = useState("");
-  const [city,   setCity]   = useState("");
-  const [genre,  setGenre]  = useState("");
-  const [month,  setMonth]  = useState("");
-  const [errors, setErrors] = useState<Record<string, string>>({});
   const [mode, setMode] = useState<"concerts" | "special">("concerts");
 
   // Concerts fields
@@ -32,51 +27,11 @@ export function EventsForm({ onSubmit }: { onSubmit: (text: string) => void }) {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const locationRe = /^[a-zA-ZÀ-ɏ\s-]+$/;
 
-  const a = artist.trim();
-  const c = city.trim();
-  const g = genre.trim();
-  const m = month;
-
-  const canSubmit = !!(a || c || m);
   const canSubmitConcerts = !!(artist.trim() || concertCity.trim() || concertMonth);
   const canSubmitSpecial  = !!(eventCity.trim() || eventMonth);
 
   const handleSubmit = () => {
     const errs: Record<string, string> = {};
-    if (c && !locationRe.test(c)) {
-      errs.city = "Please enter a valid location (letters only)";
-    }
-    if (Object.keys(errs).length > 0) { setErrors(errs); return; }
-    setErrors({});
-
-    let prompt: string;
-
-    if (g) {
-      // Genre-centric: prepend genre naturally, then weave in the other fields
-      const parts = [`Find ${g} concerts`];
-      if (a) parts.push(`featuring ${a}`);
-      if (c) parts.push(`in ${c}`);
-      if (m) parts.push(`in ${m}`);
-      prompt = parts.join(" ") + ".";
-    } else if (a && c && m) {
-      prompt = `Is ${a} performing in ${c} in ${m}? Find all matching shows.`;
-    } else if (a && c) {
-      prompt = `When does ${a} perform in ${c}? Show all upcoming dates.`;
-    } else if (a && m) {
-      prompt = `Where is ${a} performing in ${m}? List all cities and dates.`;
-    } else if (c && m) {
-      prompt = `What concerts and shows are happening in ${c} in ${m}?`;
-    } else if (a) {
-      prompt = `Find all upcoming tour dates for ${a}.`;
-    } else {
-      // city-only or month-only fallback
-      const parts = ["Find upcoming concerts and shows"];
-      if (c) parts.push(`in ${c}`);
-      if (m) parts.push(`in ${m}`);
-      prompt = parts.join(" ") + ".";
-    }
-
-    onSubmit(prompt);
 
     if (mode === "concerts") {
       if (!canSubmitConcerts) return;
@@ -109,10 +64,7 @@ export function EventsForm({ onSubmit }: { onSubmit: (text: string) => void }) {
     }
   };
 
-  const now = new Date();
-  const thisMonthIdx = now.getMonth(); // 0-indexed
-  const nextMonthDate = new Date(now.getFullYear(), thisMonthIdx + 1, 1);
-  const nextMonthName = nextMonthDate.toLocaleString("en-US", { month: "long" });
+  const currentMonth = new Date().toLocaleString("en-US", { month: "long" });
 
   const toggleCls = (active: boolean) =>
     cn(
