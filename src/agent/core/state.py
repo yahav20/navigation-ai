@@ -33,6 +33,9 @@ class AgentState(TypedDict):
     summary: str                   # rolling conversation summary maintained by summary_node
     last_summarized_index: NotRequired[int]  # watermark: count of messages already folded into `summary`
     alternative_destinations: list # populated when fetch_flights returns no results for the route
+    alternative_destinations_no_route: NotRequired[bool]  # True when no reachable candidate cities exist at all (vs. candidates existing but filtered out by budget) — lets the flexibility gate phrase its message correctly
+    alternative_destinations_unfiltered: NotRequired[list]  # same candidates as alternative_destinations but before the budget cut — lets the flexibility gate offer "show me anyway" when budget filtered everything out
+    alternative_destinations_over_budget: NotRequired[bool]  # True when the rendered alternatives came from the unfiltered list — tells the formatter to flag that prices may exceed the stated budget
     flexibility_action: NotRequired[str]    # routing signal from FlightFlexibilityGateNode: "flexible" | "give_up"
     flexibility_attempts: NotRequired[int]  # number of flexibility HITL rounds already offered (capped)
     trip_start: NotRequired[str]             # approximate trip start as YYYY-MM-DD or YYYY-MM

@@ -33,10 +33,12 @@ from __future__ import annotations
 import json
 from typing import Optional
 
+from langchain_core.messages import AIMessage
 from langgraph.types import interrupt
 
 from agent.itinerary.step_handlers import handle_verify_budget, _extract_activity_costs
 from agent.core.state import AgentState
+from security import sanitize_resume
 
 MAX_CRITIC_ATTEMPTS = 3  # safety ceiling (step 1 is still limited to one attempt)
 
@@ -332,6 +334,17 @@ class ItineraryCriticNode:
                 ),
                 "options": [],
             })
+
+            # This resume bypasses security_gate entirely (LangGraph resumes this
+            # node directly, never re-entering from START) — validate/sanitize here.
+            try:
+                adjustment_text = sanitize_resume(adjustment_text)
+            except ValueError as e:
+                return {
+                    "critic_action": "abort",
+                    "messages": [AIMessage(content=str(e))],
+                }
+
             updated_plan = _plan_for_replan(plan_state, json.dumps({
                 "error_code":    "user_adjustment",
                 "error_message": "User requested preference adjustment after budget exceeded.",

@@ -4,6 +4,7 @@ from langchain_core.language_models import BaseChatModel
 from agent.core.llm import silent
 from agent.core.models import TravelAdjustments
 from agent.core.state import AgentState
+from agent.shared.budget import resolve_budget
 from agent.shared.travelers import apply_traveler_updates
 
 
@@ -40,6 +41,13 @@ class AdjustmentsNode:
         User's latest message: "{last_msg.content}"
 
         Is the user explicitly asking to adjust any of these parameters?
+        For budget: if the user states an absolute total directly ("make it $9000"),
+        return new_budget. If the user says something relative in dollars ("add $10000",
+        "raise it by $500", "reduce by $300"), return ONLY the signed dollar amount as
+        new_budget_delta (e.g. "add $10000" -> 10000) — do NOT add it to the current
+        budget yourself. If relative as a percent ("increase budget by 20%"), return
+        ONLY the signed percent as new_budget_delta_pct (e.g. -> 20) — do NOT compute
+        the resulting dollar amount yourself.
         For travellers/rooms return ABSOLUTE counts (resolve "2 more adults"
         against the current value). Set new_num_rooms only for an explicit room
         TOTAL and rooms_delta for add/remove-a-room phrasing. Never calculate
@@ -62,10 +70,16 @@ class AdjustmentsNode:
             updates["current_city"] = adjustment.new_origin
             summary_parts.append(f"Origin changed to {adjustment.new_origin}")
 
-        if adjustment.new_budget is not None:
-            updates["total_budget"] = adjustment.new_budget
+        new_budget = resolve_budget(
+            state.get("total_budget"),
+            absolute=adjustment.new_budget,
+            delta=adjustment.new_budget_delta,
+            delta_pct=adjustment.new_budget_delta_pct,
+        )
+        if new_budget is not None:
+            updates["total_budget"] = new_budget
             updates["budget_optional"] = False
-            summary_parts.append(f"Budget changed to {adjustment.new_budget}")
+            summary_parts.append(f"Budget changed to {new_budget}")
 
         if adjustment.new_trip_days is not None:
             updates["trip_days"] = adjustment.new_trip_days
@@ -104,7 +118,7 @@ class AdjustmentsNode:
         needs_travel_reset = bool(
             adjustment.new_destination
             or adjustment.new_origin
-            or adjustment.new_budget is not None
+            or new_budget is not None
         )
 
         if needs_travel_reset:
