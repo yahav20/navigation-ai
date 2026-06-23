@@ -253,6 +253,15 @@ class ItineraryFormatterNode:
         if budget_md:
             content = content + "\n" + budget_md
 
+        # Special events hint — lets the user know events were found and woven in
+        events = state.get("special_events_data") or []
+        if events:
+            names = [e["name"] for e in events if e.get("name")]
+            if names:
+                display = ", ".join(f"**{n}**" for n in names[:3])
+                suffix  = f" +{len(names) - 3} more" if len(names) > 3 else ""
+                content += f"\n\n> 🎪 Special events woven into your itinerary: {display}{suffix}"
+
         if critic_action == "ignore_budget":
             content = self._prepend_over_budget_banner(state, content)
 

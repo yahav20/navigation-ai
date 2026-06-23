@@ -1,4 +1,6 @@
 """Extract travel metadata from the conversation history."""
+import copy
+import re
 from datetime import date
 
 from langchain_core.language_models import BaseChatModel
@@ -6,7 +8,61 @@ from langchain_core.language_models import BaseChatModel
 from agent.core.llm import silent
 from agent.core.models import TravelMetadata
 from agent.core.state import AgentState
+from agent.shared.budget import resolve_budget
 from agent.shared.travelers import apply_traveler_updates
+
+# ---------------------------------------------------------------------------
+# Common month-name typo normalization — runs before the LLM call so a single
+# OCR / autocorrect error ("decmber", "janaury") doesn't silently drop trip_start.
+# ---------------------------------------------------------------------------
+
+_MONTH_TYPOS: list[tuple[str, str]] = [
+    # January
+    (r"\bjanu[ae]ry\b",   "january"), (r"\bjanur[iy]\b",   "january"),
+    (r"\bjanaury\b",      "january"),
+    # February
+    (r"\bfebu[ar]{0,2}ry\b", "february"), (r"\bfebr?ua?ry\b", "february"),
+    (r"\bfebury\b",       "february"), (r"\bfebruary\b",    "february"),
+    # March — short, rarely typo'd
+    (r"\bmacrh\b",        "march"),
+    # April
+    (r"\barp?il\b",       "april"),   (r"\bapirl\b",        "april"),
+    # June
+    (r"\bjune?\b",        "june"),
+    # July
+    (r"\bjul[yi]\b",      "july"),
+    # August
+    (r"\bagu?gu?st\b",    "august"),  (r"\baug?u?st\b",     "august"),
+    (r"\bauguest\b",      "august"),
+    # September
+    (r"\bsep[te]{0,2}m?be?r\b", "september"),
+    # October
+    (r"\boct[ao]?be?r\b", "october"), (r"\botco?be?r\b",    "october"),
+    # November
+    (r"\bnov[em]{0,2}be?r\b", "november"),
+    # December — the most commonly typo'd
+    (r"\bdec[em]{0,2}be?r\b", "december"), (r"\bdeecember\b",  "december"),
+    (r"\bdeember\b",      "december"),
+]
+
+# Additional common travel-message typos (cities, phrases)
+_TRAVEL_TYPOS: list[tuple[str, str]] = [
+    (r"\bisreal\b",  "israel"),
+    (r"\bisrael\b",  "israel"),
+    (r"\bberlan\b",  "berlin"),
+    (r"\bpargue\b",  "prague"),
+    (r"\bprauge\b",  "prague"),
+    (r"\bpargue\b",  "prague"),
+    (r"\blonond\b",  "london"),
+    (r"\bbarceloan\b", "barcelona"),
+]
+
+
+def _normalise_text(text: str) -> str:
+    """Fix common typos in month names and city names before LLM extraction."""
+    for pattern, replacement in _MONTH_TYPOS + _TRAVEL_TYPOS:
+        text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+    return text
 
 
 def _same_month_refinement(old: str | None, new: str) -> bool:
@@ -38,15 +94,25 @@ class MetadataNode:
             return updates
 
         messages = state.get("messages", [])
-        recent_messages = [
+        raw_recent = [
             msg for msg in messages[-10:]
             if getattr(msg, "type", "") in ("human", "ai")
             and not getattr(msg, "tool_calls", None)
         ][-6:]
 
+        # Normalise typos in human messages so the LLM doesn't miss month names
+        # like "decmber" or city names like "isreal".
+        recent_messages = []
+        for msg in raw_recent:
+            if getattr(msg, "type", "") == "human" and isinstance(msg.content, str):
+                msg = copy.copy(msg)
+                msg.content = _normalise_text(msg.content)
+            recent_messages.append(msg)
+
         extractor = silent(self.extraction_model.with_structured_output(TravelMetadata))
 
         current_trip_days = state.get("trip_days")
+        current_budget = state.get("total_budget")
         current_adults = state.get("num_adults")
         current_children = state.get("num_children")
         existing_summary = state.get("summary", "")
@@ -79,6 +145,18 @@ class MetadataNode:
                 reference without naming a specific city, return null for destination_city so
                 the system can ask the user to clarify which one they meant.
 
+                IMPORTANT — budget resolution:
+                The current budget in state is: {current_budget}.
+                If the user gives an absolute number ("my budget is $5000", "make it $9000"),
+                return that directly as budget.
+                If the user says something relative in dollars ("add $10000", "raise it by
+                $500", "reduce by $300"), return ONLY the signed dollar amount as budget_delta
+                (e.g. "add $10000" -> 10000, "reduce by $300" -> -300). Do NOT add it to the
+                current budget yourself — the system computes the new total.
+                If the user says something relative as a percent ("increase budget by 20%",
+                "cut it by 10%"), return ONLY the signed percent as budget_delta_pct (e.g. -> 20
+                or -10). Do NOT compute the resulting dollar amount yourself.
+
                 IMPORTANT — trip_days resolution:
                 The current trip duration in state is: {current_trip_days} days.
                 If the user says something relative like "increase by 2 days", "add 3 days",
@@ -93,6 +171,12 @@ class MetadataNode:
                 - Specific day ("June 10", "leaving August 3rd", "on 2026-07-15") -> YYYY-MM-DD.
                 - Month or season only ("in June", "next month", "around August", "late autumn")
                   -> YYYY-MM. Resolve relative phrases against today's date above.
+                - FUTURE-MONTH RULE: if the user says a bare month name with no year and that
+                  month is already in the past for the current year, resolve it to NEXT year.
+                  Example: today is 2026-06, user says "April" -> "2027-04" (not "2026-04").
+                  Example: today is 2026-06, user says "August" -> "2026-08" (still future).
+                - EXPLICIT YEAR: if the user includes an explicit year ("April 2028",
+                  "April in two years"), use that year exactly as stated. Do NOT shift it.
                 - If the user says nothing about timing, return null.
                 Never invent a date when none was implied.
 
@@ -144,6 +228,15 @@ class MetadataNode:
             if reset_alternatives:
                 updates["alternative_destinations"] = []
 
+        def _clear_special_events() -> None:
+            # Drop saved special events when (and only when) the destination changes or the
+            # FLIGHT MONTH changes — those make the previously-fetched events no longer apply,
+            # so the itinerary/travel flow re-fetches for the new city/month. Traveler-count,
+            # origin, budget or same-month date tweaks leave the destination's events valid.
+            if suppress_invalidation:
+                return
+            updates["special_events_data"] = []
+
         if metadata.current_city is not None:
             new_origin = metadata.current_city.split(",")[0].strip()
             updates["current_city"] = new_origin
@@ -155,10 +248,17 @@ class MetadataNode:
             updates["destination_city"] = new_dest
             if old_dest and new_dest.lower() != old_dest:
                 _invalidate_flights(reset_alternatives=True)
+                _clear_special_events()
 
-        if metadata.budget is not None:
-            updates["total_budget"] = metadata.budget
-            if old_budget is not None and metadata.budget != old_budget:
+        new_budget = resolve_budget(
+            old_budget,
+            absolute=metadata.budget,
+            delta=metadata.budget_delta,
+            delta_pct=metadata.budget_delta_pct,
+        )
+        if new_budget is not None:
+            updates["total_budget"] = new_budget
+            if old_budget is not None and new_budget != old_budget:
                 _invalidate_flights()
 
         if metadata.trip_days is not None:
@@ -170,6 +270,10 @@ class MetadataNode:
             updates["trip_start"] = metadata.trip_start
             if old_start is not None and metadata.trip_start != old_start:
                 _invalidate_flights()
+                # Only a change of the trip MONTH invalidates the special events (a different
+                # day within the same month keeps the same seasonal/monthly events).
+                if old_start[:7] != metadata.trip_start[:7]:
+                    _clear_special_events()
 
         # Travellers / rooms. Scoped first step: these intentionally do NOT
         # invalidate flights or trigger a re-search — they only touch the new

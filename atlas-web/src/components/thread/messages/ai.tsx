@@ -85,9 +85,13 @@ function CustomComponent({
   const isLastAiMessage = message.id === lastAiMessage?.id;
   const lastAiMessageHasContent =
     getContentString(lastAiMessage?.content ?? []).length > 0;
+  // Both the itinerary formatter ("itinerary_formatter") and the travel formatter
+  // ("formatter_output") attach a rich viewer while also sending markdown content
+  // (so CLI clients aren't blank). Allow the viewer fallback for both so the web
+  // renders the card and suppresses the duplicate plain-text body.
   const lastAiMessageIsItinerary =
     (lastAiMessage as any)?.name === "itinerary_formatter" ||
-    (lastAiMessage as any)?.name === "travel_formatter";
+    (lastAiMessage as any)?.name === "formatter_output";
   const allowFallback = !lastAiMessageHasContent || lastAiMessageIsItinerary;
 
   const customComponents = resolveCustomComponents(
@@ -132,9 +136,13 @@ function useHasItineraryViewer(
   const lastAiMessage = messages.filter((m) => m.type === "ai").at(-1);
   const lastAiMessageHasContent =
     getContentString(lastAiMessage?.content ?? []).length > 0;
+  // Both the itinerary formatter ("itinerary_formatter") and the travel formatter
+  // ("formatter_output") attach a rich viewer while also sending markdown content
+  // (so CLI clients aren't blank). Allow the viewer fallback for both so the web
+  // renders the card and suppresses the duplicate plain-text body.
   const lastAiMessageIsItinerary =
     (lastAiMessage as any)?.name === "itinerary_formatter" ||
-    (lastAiMessage as any)?.name === "travel_formatter";
+    (lastAiMessage as any)?.name === "formatter_output";
   const allowFallback = !lastAiMessageHasContent || lastAiMessageIsItinerary;
 
   const components = resolveCustomComponents(

@@ -50,6 +50,14 @@ interface Restaurant {
   description?: string;
 }
 
+interface SpecialEvent {
+  name: string;
+  description?: string;
+  dates?: string;
+  location?: string;
+  cost?: number;
+}
+
 interface TravelPlanViewerProps {
   destination?: string;
   origin?: string;
@@ -64,6 +72,7 @@ interface TravelPlanViewerProps {
   restaurants?: Restaurant[];
   weather?: Record<string, string>;
   best_time?: { months?: string[]; reason?: string };
+  special_events?: SpecialEvent[];
 }
 
 // ─── Pure helpers (unchanged) ─────────────────────────────────────────────────
@@ -129,6 +138,15 @@ const IconUtensils: FC = () => (
     <path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2"/>
     <path d="M7 2v20"/>
     <path d="M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3Zm0 0v7"/>
+  </svg>
+);
+
+const IconCalendar: FC = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+    <line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/>
+    <line x1="3" y1="10" x2="21" y2="10"/>
   </svg>
 );
 
@@ -375,7 +393,37 @@ const RestaurantCard: FC<{ item: Restaurant }> = ({ item }) => (
   </div>
 );
 
-// ─── 5. Insights ─────────────────────────────────────────────────────────────
+// ─── 5. Events ───────────────────────────────────────────────────────────────
+
+const EventsSection: FC<{ events: SpecialEvent[] }> = ({ events }) => {
+  if (!events?.length) return null;
+  return (
+    <div style={S.sectionCard}>
+      <SectionHead icon={<span style={{ color: "#8A6A00", display: "flex" }}><IconCalendar /></span>} title="Events" />
+      <div style={S.eventList}>
+        {events.map((ev, i) => {
+          const meta = [ev.dates, ev.location].filter(Boolean).join("  ·  ");
+          return (
+            <div key={i} style={S.eventCard}>
+              <div style={S.eventName}>{ev.name}</div>
+              {(meta || (ev.cost ?? 0) > 0) && (
+                <div style={S.eventMeta}>
+                  {meta && <span>{meta}</span>}
+                  {(ev.cost ?? 0) > 0 && (
+                    <span style={S.eventCost}>${Math.round(ev.cost as number)}</span>
+                  )}
+                </div>
+              )}
+              {ev.description && <div style={S.eventDesc}>{ev.description}</div>}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
+// ─── 6. Insights ─────────────────────────────────────────────────────────────
 
 const SEASONS = ["Spring", "Summer", "Autumn", "Winter"] as const;
 
@@ -447,6 +495,7 @@ export default function TravelPlanViewer({
   restaurants = [],
   weather = {},
   best_time = {},
+  special_events = [],
 }: TravelPlanViewerProps) {
   const stream = useStreamContext();
 
@@ -547,7 +596,12 @@ export default function TravelPlanViewer({
         </div>
       )}
 
-      {/* ── 5. Insights ── */}
+      {/* ── 5. Events ── */}
+      {special_events.length > 0 && (
+        <EventsSection events={special_events} />
+      )}
+
+      {/* ── 6. Insights ── */}
       <InsightsSection weather={weather} best_time={best_time} />
 
       {/* ── 6. CTA ── */}
@@ -960,6 +1014,37 @@ const S: Record<string, CSSProperties> = {
     color:      "var(--color-text-secondary, #64748B)",
     lineHeight: 1.4,
   },
+
+  // ── Events ─────────────────────────────────────────────────────────────────
+  eventList: { display: "flex", flexDirection: "column" as const, gap: 8 },
+  eventCard: {
+    background:    "rgba(234,224,207,0.5)",
+    borderLeft:    "3px solid #EAE0CF",
+    borderRadius:  8,
+    padding:       "10px 12px",
+    display:       "flex",
+    flexDirection: "column" as const,
+    gap:           4,
+  },
+  eventName: { fontSize: 13, fontWeight: 600, color: "var(--color-text-primary, #0F172A)", lineHeight: 1.3 },
+  eventMeta: {
+    display:    "flex",
+    alignItems: "center",
+    gap:        8,
+    flexWrap:   "wrap" as const,
+    fontSize:   12,
+    fontWeight: 500,
+    color:      "#8A6A00",
+  },
+  eventCost: {
+    fontSize:   11,
+    fontWeight: 700,
+    color:      "#8A6A00",
+    background: "rgba(234,224,207,0.8)",
+    padding:    "1px 7px",
+    borderRadius: 4,
+  },
+  eventDesc: { fontSize: 11, color: "var(--color-text-secondary, #64748B)", lineHeight: 1.45 },
 
   // ── Insights ───────────────────────────────────────────────────────────────
   insightsCard: {

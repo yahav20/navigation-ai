@@ -48,6 +48,7 @@ VALID_STEP_TYPES = {
     "fetch_weather",
     "fetch_avg_prices",
     "fetch_min_prices",
+    "fetch_special_events",
     "switch_travel_options",
     "build_day_schedule",
     "verify_budget",
@@ -145,6 +146,7 @@ def _validate_and_fix(
     mode: str = "standalone",
     need_min_prices: bool = False,
     need_switch_travel: bool = False,
+    need_special_events: bool = False,
 ) -> ExecutionPlan:
     """Enforce hard ordering constraints and fill missing day steps."""
     steps = plan.steps
@@ -183,6 +185,13 @@ def _validate_and_fix(
             step_id=0,
             step_type="fetch_activities",
             description=f"Fetch and select activities in {destination}",
+        ))
+    # Inject fetch_special_events when needed and not already planned/completed
+    if need_special_events and "fetch_special_events" not in other_types and "fetch_special_events" not in completed:
+        other_steps.append(PlanStep(
+            step_id=0,
+            step_type="fetch_special_events",
+            description=f"Fetch special events in {destination}",
         ))
 
     # In standalone mode: inject fetch_avg_prices / fetch_min_prices if absent
@@ -254,6 +263,7 @@ def _default_plan(
     mode: str = "standalone",
     need_min_prices: bool = False,
     need_switch_travel: bool = False,
+    need_special_events: bool = False,
 ) -> ExecutionPlan:
     """Deterministic plan — only includes steps not already completed."""
     steps: list[PlanStep] = []
@@ -267,6 +277,8 @@ def _default_plan(
         sid += 1
 
     add("fetch_activities", f"Fetch and select activities in {destination}")
+    if need_special_events:
+        add("fetch_special_events", f"Fetch special events in {destination}")
     add("fetch_weather",    f"Seasonal weather in {destination}")
     if mode == "standalone":
         add("fetch_avg_prices", f"Fetch average flight + hotel prices for {destination}")
@@ -421,6 +433,15 @@ class ItineraryPlannerNode:
 
         is_replan = bool(replan_raw)
 
+        # Fetch special events once — only on the first planning pass when a travel date is known
+        # and events haven't already been fetched by the advisor.
+        need_special_events = (
+            bool(state.get("trip_start"))
+            and not state.get("special_events_data")
+            and mode != "update"
+            and not is_replan
+        )
+
         # ── Hard stop ──────────────────────────────────────────────────────
         if replan_count >= MAX_REPLANS:
             reason = replan_raw or "max_replans_exceeded"
@@ -559,11 +580,11 @@ class ItineraryPlannerNode:
         else:
             plan = _default_plan(
                 destination, origin, trip_days, replan_count, completed,
-                mode, need_min_prices, need_switch_travel,
+                mode, need_min_prices, need_switch_travel, need_special_events,
             )
             plan = _validate_and_fix(
                 plan, completed, trip_days, destination, comp_days,
-                mode, need_min_prices, need_switch_travel,
+                mode, need_min_prices, need_switch_travel, need_special_events,
             )
 
         plan_md += "\n**Execution Plan:**\n"

@@ -32,6 +32,7 @@ interface TimeSlot {
   distance_km?: number;
   lat?: number;
   lng?: number;
+  is_special?: boolean;
 }
 
 interface FlightInfo {
@@ -88,6 +89,11 @@ const PIN_COLOR: Record<string, string> = {
   hotel:     "#6B8FD4",
 };
 
+// Special events get a distinct soft-cream treatment across the schedule + map.
+const SPECIAL_COLOR = "#EAE0CF";              // fill / border / dot / pin
+const SPECIAL_INK   = "#8A6A00";              // dark companion for foreground marks (pin label, text)
+const SPECIAL_CFG = { dot: SPECIAL_COLOR, bg: "#F4EFE3", text: SPECIAL_INK, label: "🎪 Special event" };
+
 // ─── Leaflet helpers ──────────────────────────────────────────────────────────
 
 function ensureLeafletCss() {
@@ -109,12 +115,12 @@ function loadLeaflet(): Promise<any> {
   });
 }
 
-function makePinIcon(L: any, color: string, label: string) {
+function makePinIcon(L: any, color: string, label: string, textColor: string = "#fff") {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="30" height="40" viewBox="0 0 30 40">
     <path d="M15 0C7 0 0 7 0 15c0 11 15 25 15 25S30 26 30 15C30 7 23 0 15 0z"
           fill="${color}" stroke="#fff" stroke-width="1.5"/>
     <text x="15" y="20" text-anchor="middle" font-size="11" font-weight="700"
-          font-family="system-ui,sans-serif" fill="#fff">${label}</text>
+          font-family="system-ui,sans-serif" fill="${textColor}">${label}</text>
   </svg>`;
   return L.divIcon({
     html: svg,
@@ -260,15 +266,17 @@ const DayNav: FC<{
 };
 
 const SlotRow: FC<{ slot: TimeSlot; isLast: boolean; index: number }> = ({ slot, isLast, index }) => {
-  const cfg = SLOT_CONFIG[slot.slot_type] ?? SLOT_CONFIG.activity;
+  const cfg = slot.is_special ? SPECIAL_CFG : (SLOT_CONFIG[slot.slot_type] ?? SLOT_CONFIG.activity);
   const isSecondary = slot.slot_type === "transport" || slot.slot_type === "rest";
   const animName = isSecondary ? "slideUpDim" : "slideUp";
 
   return (
     <div
+      className={slot.is_special ? "itv-slot-special" : undefined}
       style={{
         ...S.slotRow,
         ...(isLast ? { borderBottom: "none" } : {}),
+        ...(slot.is_special ? S.slotRowSpecial : {}),
         animationName: animName,
         animationDuration: "0.4s",
         animationTimingFunction: "ease",
@@ -291,6 +299,7 @@ const SlotRow: FC<{ slot: TimeSlot; isLast: boolean; index: number }> = ({ slot,
         <div style={S.slotTags}>
           <span
             data-slot={slot.slot_type}
+            data-special={slot.is_special ? "1" : undefined}
             style={{ ...S.tag, background: cfg.bg, color: cfg.text }}
           >
             {cfg.label}
@@ -381,13 +390,14 @@ const DayMap: FC<{ day: DaySchedule; hotels: HotelInfo[] }> = ({ day, hotels }) 
 
       let pinNum = 1;
       slotsWithCoords.forEach(({ slot, lat, lng }) => {
-        const color = PIN_COLOR[slot.slot_type] ?? PIN_COLOR.activity;
-        const cfg = SLOT_CONFIG[slot.slot_type] ?? SLOT_CONFIG.activity;
-        L.marker([lat, lng], { icon: makePinIcon(L, color, String(pinNum++)) })
+        const color = slot.is_special ? SPECIAL_COLOR : (PIN_COLOR[slot.slot_type] ?? PIN_COLOR.activity);
+        const label = slot.is_special ? "★" : String(pinNum++);
+        const cfgLabel = slot.is_special ? SPECIAL_CFG.label : (SLOT_CONFIG[slot.slot_type] ?? SLOT_CONFIG.activity).label;
+        L.marker([lat, lng], { icon: makePinIcon(L, color, label, slot.is_special ? SPECIAL_INK : "#fff") })
           .addTo(map)
           .bindPopup(
             `<b>${slot.name}</b><br>` +
-            `<span style="font-size:11px;color:#666">${cfg.label}${slot.time ? " · " + slot.time : ""}</span>` +
+            `<span style="font-size:11px;color:#666">${cfgLabel}${slot.time ? " · " + slot.time : ""}</span>` +
             (slot.description ? `<br><span style="font-size:11px">${slot.description}</span>` : ""),
           );
       });
@@ -464,6 +474,7 @@ const DayMap: FC<{ day: DaySchedule; hotels: HotelInfo[] }> = ({ day, hotels }) 
             { color: "#4CAF85", label: "Attraction" },
             { color: "#E8895A", label: "Restaurant" },
             { color: "#6B8FD4", label: "Hotel"      },
+            ...(day.slots.some((s) => s.is_special) ? [{ color: SPECIAL_COLOR, label: "Special event" }] : []),
           ].map((l) => (
             <div key={l.label} style={S.legendItem}>
               <div
@@ -684,6 +695,14 @@ const S: Record<string, any> = {
     borderBottom: "0.5px solid var(--color-border-tertiary, rgba(0,0,0,0.07))",
     marginBottom: 4,
   },
+  slotRowSpecial: {
+    borderLeft: "3px solid #EAE0CF",
+    background: "rgba(234,224,207,0.45)",
+    borderRadius: 8,
+    paddingLeft: 10,
+    paddingTop: 6,
+    marginLeft: -2,
+  },
   slotTime: {
     fontSize: 11,
     fontFamily: "'JetBrains Mono', 'Fira Code', 'Courier New', monospace",
@@ -847,6 +866,9 @@ if (typeof document !== "undefined") {
     ".dark .itv-root [data-slot=transport] { background: rgba(152,152,187,0.12) !important; color: #B8B8D4 !important; }",
     ".dark .itv-root [data-slot=rest]      { background: rgba(155,135,200,0.12) !important; color: #C4B4E4 !important; }",
     ".dark .itv-root [data-slot=checkin]   { background: rgba(107,143,212,0.12) !important; color: #9BB8F0 !important; }",
+    // Dark mode special event (after data-slot rules so it wins over [data-slot=activity])
+    ".dark .itv-root [data-special='1'] { background: rgba(234,224,207,0.16) !important; color: #EAE0CF !important; }",
+    ".dark .itv-root .itv-slot-special  { background: rgba(234,224,207,0.08) !important; }",
     // Dark mode map inner glow
     ".dark .itv-root .itv-map-container { box-shadow: inset 0 0 0 1px rgba(255,255,255,0.06); }",
     // Dark mode legend dot ring (match dark bg)

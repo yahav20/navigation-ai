@@ -10,16 +10,48 @@ class TravelMetadata(BaseModel):
 
     current_city: str | None = Field(default=None, description="The city the user is currently in / starting from")
     destination_city: str | None = Field(default=None, description="The city the user wants to travel to")
-    budget: float | None = Field(default=None, description="The user's travel budget as a number, if mentioned")
+    budget: float | None = Field(
+        default=None,
+        description=(
+            "Absolute target budget, ONLY when the user states an explicit total "
+            "(e.g. 'my budget is $5000', 'make it $9000'). Do NOT use this for relative "
+            "phrases like 'add $10000' or 'raise it by 20%' — use budget_delta / "
+            "budget_delta_pct for those instead, since computing the resulting total "
+            "yourself is error-prone. Null otherwise."
+        ),
+    )
+    budget_delta: float | None = Field(
+        default=None,
+        description=(
+            "Signed dollar amount to add to (positive) or subtract from (negative) the "
+            "CURRENT budget, when the user phrases the change relatively (e.g. 'add $10000' "
+            "-> 10000, 'raise it by $500' -> 500, 'reduce by $300' -> -300). Extract ONLY the "
+            "raw stated amount and sign — do NOT add it to the current budget yourself; the "
+            "system computes the new total. Null when the user gives an absolute total or "
+            "says nothing about budget."
+        ),
+    )
+    budget_delta_pct: float | None = Field(
+        default=None,
+        description=(
+            "Signed percentage to apply to the CURRENT budget, when the user phrases the "
+            "change as a percent (e.g. 'increase budget by 20%' -> 20, 'cut it by 10%' -> -10). "
+            "Extract ONLY the raw stated percent — do NOT compute the resulting dollar amount "
+            "yourself. Null otherwise."
+        ),
+    )
     trip_days: int | None = Field(default=None, description="Number of days the user wants to spend on the trip, if mentioned")
     trip_start: str | None = Field(
         default=None,
         description=(
             "Approximate trip start. Use YYYY-MM-DD when the user names a specific day "
             "(e.g. 'leaving June 10' -> '2026-06-10'). Use YYYY-MM when the user only "
-            "names a month or a relative period (e.g. 'in June' -> '2026-06', "
-            "'next month' resolved against today's date). Return null if nothing about "
-            "timing is mentioned."
+            "names a month or a relative period. "
+            "FUTURE-MONTH RULE: if the user says a bare month name with no year (e.g. 'April') "
+            "and that month has already passed in the current year, resolve to NEXT year "
+            "(e.g. today is 2026-06, user says 'April' -> '2027-04'). "
+            "If the user supplies an explicit year (e.g. 'April 2028'), use it exactly. "
+            "Return null if nothing about timing is mentioned."
         ),
     )
     num_adults: int | None = Field(
@@ -85,7 +117,33 @@ class TravelAdjustments(BaseModel):
     is_adjustment: bool = Field(default=False, description="True ONLY if the user is explicitly changing their destination, origin, budget, trip days, number of travellers (adults/children), or number of hotel rooms.")
     new_destination: str | None = Field(default=None, description="The new destination city, if updated.")
     new_origin: str | None = Field(default=None, description="The new origin city, if updated.")
-    new_budget: float | None = Field(default=None, description="The new total budget, if updated.")
+    new_budget: float | None = Field(
+        default=None,
+        description=(
+            "Absolute target budget, ONLY when the user states an explicit total directly "
+            "(e.g. 'make it $9000'). Do NOT use this for relative phrases like 'add $10000' "
+            "or 'raise it by 20%' — use new_budget_delta / new_budget_delta_pct for those "
+            "instead, since computing the resulting total yourself is error-prone. Null "
+            "otherwise."
+        ),
+    )
+    new_budget_delta: float | None = Field(
+        default=None,
+        description=(
+            "Signed dollar amount to add to (positive) or subtract from (negative) the "
+            "CURRENT budget (e.g. 'add $10000' -> 10000, 'reduce by $300' -> -300). Extract "
+            "ONLY the raw stated amount and sign — the system computes the new total. Null "
+            "when the user gives an absolute total or says nothing about budget."
+        ),
+    )
+    new_budget_delta_pct: float | None = Field(
+        default=None,
+        description=(
+            "Signed percentage to apply to the CURRENT budget (e.g. 'increase budget by 20%' "
+            "-> 20, 'cut it by 10%' -> -10). Extract ONLY the raw stated percent. Null "
+            "otherwise."
+        ),
+    )
     new_trip_days: int | None = Field(default=None, description="The new trip duration in days, if updated.")
     new_num_adults: int | None = Field(default=None, description="The new ABSOLUTE number of adults. Resolve relative phrases against the current adult count (e.g. current 2, '2 more adults' -> 4). Null if unchanged.")
     new_num_children: int | None = Field(default=None, description="The new ABSOLUTE number of children. Resolve relative phrases against the current child count. Null if unchanged.")
