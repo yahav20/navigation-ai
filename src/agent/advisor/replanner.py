@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 from agent.core.llm import silent
 from agent.core.state import AgentState
-from agent.advisor.planner import AdvisorPlan, PlannedToolCall, _step_to_args
+from agent.advisor.planner import AdvisorPlan, PlannedToolCall, _step_to_args, _ALL_DESTINATION_TOOLS, _LIVE_EVENT_TOOLS
 from agent.advisor.executor import _is_empty, format_tool_result
 from ui import render_node, render_node_status
 
@@ -17,6 +17,75 @@ from ui import render_node, render_node_status
 MAX_TOOL_EXECUTIONS = 12
 
 _DISCOVERY_TOOLS = frozenset({"find_destinations_by_vibe", "find_destinations_by_tag"})
+
+# How many discovered cities to run concert searches for in mixed-intent queries
+_MAX_CONCERT_CITIES = 3
+
+
+def _inject_per_city_events(
+    last_tool_name: str,
+    remaining_plan: list[dict],
+    past_results: list[dict],
+) -> list[dict] | None:
+    """Replace cityless live-event placeholders with per-city searches.
+
+    Handles both search_concerts and search_special_events placeholders.
+    Waits until ALL destination tools have run so multi-filter intersection
+    is complete before selecting cities. Returns the updated plan or None.
+    """
+    if last_tool_name not in _ALL_DESTINATION_TOOLS:
+        return None
+
+    # Don't inject yet if more destination tools are still pending.
+    if any(s["tool_name"] in _ALL_DESTINATION_TOOLS for s in remaining_plan):
+        return None
+
+    cityless_events = [
+        s for s in remaining_plan
+        if s["tool_name"] in _LIVE_EVENT_TOOLS and not s.get("args", {}).get("city")
+    ]
+    if not cityless_events:
+        return None
+
+    # Collect cities from all destination results that ran this turn.
+    dest_results = [
+        r for r in past_results
+        if r["tool_name"] in _ALL_DESTINATION_TOOLS and not _is_empty(r.get("result"))
+    ]
+    if not dest_results:
+        return None
+
+    def _city_set(result: Any) -> set[str]:
+        if not isinstance(result, list):
+            return set()
+        return {item["city"] for item in result if isinstance(item, dict) and "city" in item}
+
+    if len(dest_results) == 1:
+        cities = list(_city_set(dest_results[0]["result"]))[:_MAX_CONCERT_CITIES]
+    else:
+        # Multi-filter: intersect so only cities matching ALL criteria get events.
+        sets = [_city_set(r["result"]) for r in dest_results]
+        intersection = sets[0].intersection(*sets[1:])
+        cities = (sorted(intersection)[:_MAX_CONCERT_CITIES]
+                  if intersection else
+                  list(_city_set(dest_results[0]["result"]))[:_MAX_CONCERT_CITIES])
+
+    if not cities:
+        return None
+
+    # Expand each cityless placeholder into per-city searches.
+    injected: list[dict] = []
+    for placeholder in cityless_events:
+        base_args = {k: v for k, v in placeholder.get("args", {}).items() if k != "city"}
+        injected.extend(
+            {"tool_name": placeholder["tool_name"], "args": {"city": city, **base_args}}
+            for city in cities
+        )
+
+    # Keep non-event remaining steps (e.g. city-dive/practical) ahead of the new event steps.
+    other = [s for s in remaining_plan
+             if s["tool_name"] not in _LIVE_EVENT_TOOLS or s.get("args", {}).get("city")]
+    return other + injected
 
 # Only these two filter-discovery tools participate in intersection logic
 _FILTER_DISCOVERY_TOOLS = frozenset({"find_destinations_by_vibe", "find_destinations_by_tag"})
@@ -148,6 +217,24 @@ class AdvisorReplannerNode:
         messages = list(state.get("messages", []))
 
         remaining_plan = plan[1:] if plan else []
+
+        # Mixed-intent injection: once all destination tools have run, replace any cityless
+        # event placeholders with per-city searches — before any other replanning logic.
+        if plan and past_results:
+            injected = _inject_per_city_events(
+                plan[0]["tool_name"],
+                remaining_plan,
+                past_results,
+            )
+            if injected is not None:
+                event_steps = [s for s in injected if s["tool_name"] in _LIVE_EVENT_TOOLS]
+                cities      = [s["args"].get("city") for s in event_steps]
+                kinds       = sorted({s["tool_name"] for s in event_steps})
+                render_node_status(f"[Replanner] Injecting {kinds} searches for: {cities}")
+                return {
+                    "advisor_plan": injected,
+                    "advisor_replan_count": replan_count + 1,
+                }
 
         needs_substitution_check = False
         if plan and past_results:

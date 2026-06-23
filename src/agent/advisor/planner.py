@@ -278,25 +278,58 @@ def _step_to_args(step: PlannedToolCall) -> dict:
 
 _BUDGET_TOOLS = frozenset({"find_destinations_within_budget", "find_destinations_within_budget_auto"})
 _DISCOVERY_TOOLS = frozenset({"find_destinations_by_tag", "find_destinations_by_vibe"})
+_LIVE_EVENT_TOOLS = frozenset({"search_concerts", "search_special_events"})
+
+# All tools that return a list of city dicts — used for mixed-intent event injection.
+# Matches ALL_DISCOVERY_TOOLS in result_formatters.py (kept in sync manually).
+_ALL_DESTINATION_TOOLS = frozenset({
+    "find_destinations_by_tag",
+    "find_destinations_by_vibe",
+    "find_destinations_within_budget",
+    "find_destinations_within_budget_auto",
+    "get_reachable_destinations",
+})
 
 
 def _sanitize_plan(steps: list[PlannedToolCall]) -> list[PlannedToolCall]:
     """Enforce hard architectural constraints the LLM occasionally ignores.
 
-    Rule A: when a budget tool is present, discovery tools are redundant and misleading
-    (they return cities without cost/reachability filtering). Remove them.
+    Rule A: budget tools present → remove filter-discovery tools (redundant without
+    cost/reachability filtering).
 
-    Rule B: when search_concerts is present, it must be the only tool.
-    Adding get_best_time_to_visit or any other tool causes the formatter to ignore
-    the concert results and answer with irrelevant general-travel data instead.
+    Rule B: live-event tools (concerts / special events) ordering:
+    - With destination tools → destination first, events last. The replanner injects
+      per-city event searches once all destination cities are returned.
+    - Without destination tools but city IS set on all event steps → city is already
+      known; City Deep-Dive and Practical tools may coexist freely.
+    - Without destination tools and city NOT set → degenerate; keep event tools only.
     """
     tool_names = {s.tool_name for s in steps}
+
+    # Rule A
     if tool_names & _BUDGET_TOOLS:
         steps = [s for s in steps if s.tool_name not in _DISCOVERY_TOOLS]
-    if "search_concerts" in tool_names:
-        steps = [s for s in steps if s.tool_name == "search_concerts"]
-    if "search_special_events" in tool_names:
-        steps = [s for s in steps if s.tool_name == "search_special_events"]
+
+    # Rule B — recompute names after Rule A so budget+concert is handled correctly.
+    current_names = {s.tool_name for s in steps}
+    if current_names & _LIVE_EVENT_TOOLS:
+        dest_steps  = [s for s in steps if s.tool_name in _ALL_DESTINATION_TOOLS]
+        event_steps = [s for s in steps if s.tool_name in _LIVE_EVENT_TOOLS]
+        other_steps = [s for s in steps
+                       if s.tool_name not in _ALL_DESTINATION_TOOLS | _LIVE_EVENT_TOOLS]
+
+        if dest_steps:
+            # Discovery + events: destination first, city-dive/practical in the middle,
+            # events last as cityless placeholders for per-city injection.
+            steps = dest_steps + other_steps + event_steps
+        else:
+            cityless = [s for s in event_steps if not s.city]
+            if cityless:
+                # No city known and no discovery running: keep event tools only.
+                steps = event_steps
+            # else: all event steps carry a city → allow City Deep-Dive and Practical
+            # to coexist freely (no stripping needed).
+
     return steps
 
 
@@ -520,15 +553,29 @@ PRACTICAL TRAVEL TOOLS (informational — each needs exactly ONE call, no combin
                         "when is [artist] in [city]", "where can I see [artist]"
     -> Searches exclusively: Songkick, Bandsintown, Ticketmaster, Live Nation, Resident Advisor
     -> Returns live web results — the formatter will extract event names, dates, venues, and cities
-    -> ALWAYS ONE call only — NEVER combine with ANY other tool (not get_best_time_to_visit,
-       not get_city_overview, not fetch_activities, not any discovery tool).
-       Concert date data IS the answer; general travel timing is irrelevant here.
+    -> When a city IS known: combine freely with City Deep-Dive tools (get_city_overview,
+       fetch_activities, get_best_time_to_visit) and Practical tools (visa, safety, etc.).
+       NEVER add destination-discovery tools when the city is already set.
+    -> When no city is known but the user wants destination + concerts: see MIXED INTENT below.
 
     Query-mode examples:
       "concerts in London in August 2026"           → city="London",       month="August 2026"
       "where is John Legend touring September 2026" → artist="John Legend", month="September 2026"
       "when is Hardwell in Amsterdam"               → artist="Hardwell",    city="Amsterdam"
       "upcoming Coldplay shows"                     → artist="Coldplay"
+
+    MIXED INTENT — destination discovery + live events (no city known yet):
+    When the user wants BOTH a destination recommendation AND concerts or events there:
+    → Plan discovery tools FIRST, then the event tool (search_concerts OR search_special_events)
+      AFTER with month/artist/genre set but NO city.
+    → ORDER IS CRITICAL: all destination steps must precede the event step.
+    → The system automatically searches for events in each discovered city once cities are known.
+    → Do NOT set city on the event step — leave it unset for automatic city injection.
+    Examples:
+      "romantic destination with concerts in August"
+        → find_destinations_by_tag(tag="romantic") + search_concerts(month="August 2026")
+      "beach destination with Christmas markets"
+        → find_destinations_by_tag(tag="beach") + search_special_events(month="December 2026")
 
 - search_special_events
     Set: city = <city>, month = <"Month YYYY" e.g. "December 2026">
@@ -540,8 +587,11 @@ PRACTICAL TRAVEL TOOLS (informational — each needs exactly ONE call, no combin
     -> Examples: "what events are in Berlin in December?", "any festivals in Prague?",
                  "Christmas markets in Vienna?", "what's happening in Munich in October?"
     -> Sources: timeout.com, theculturetrip.com, lonelyplanet.com
-    -> ALWAYS ONE call only — NEVER combine with ANY other tool
-    -> city is required; month is strongly recommended — derive from user message or trip_start
+    -> When a city IS known: combine freely with City Deep-Dive and Practical tools.
+       NEVER add destination-discovery tools when the city is already set.
+    -> When no city is known but the user wants destination + events: see MIXED INTENT above
+       (same pattern as search_concerts — discovery first, event step without city).
+    -> city is required when city is known; month is strongly recommended
     -> Do NOT use for general "what to do" questions (use fetch_activities instead);
        use ONLY when the user is specifically asking about events, festivals, or happenings
     -> NOT for concerts/shows/live performances — those go to search_concerts (see below)

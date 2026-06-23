@@ -31,6 +31,7 @@ from agent.core.state import AgentState
 from agent.advisor.result_formatters import (
     format_results_for_llm,
     closer_guidance_for,
+    ALL_DISCOVERY_TOOLS,
 )
 from security import SECURITY_RULES
 
@@ -435,19 +436,55 @@ class AdvisorFormatterNode:
             tool_names = {tr["tool_name"] for tr in tool_results}
             intent     = state.get("advisor_intent_summary", "")
 
-            if "search_concerts" in tool_names:
+            _LIVE = {"search_concerts", "search_special_events"}
+            has_concerts  = "search_concerts" in tool_names
+            has_se        = "search_special_events" in tool_names
+            has_discovery = bool(tool_names & ALL_DISCOVERY_TOOLS)
+            has_other     = bool(tool_names - _LIVE)   # any non-event tool present
+
+            custom_closer    = None
+            extracted_events = None
+            events_args      = {}
+
+            if has_concerts and has_other:
+                # Concerts + City Deep-Dive / Practical / Discovery
+                data_block   = self._extract_mixed_concert_data(tool_results)
+                concert_args = {}
+                browse_url   = None
+                custom_closer = (
+                    "Tell me which destination stands out and I can search for flights "
+                    "and build a full itinerary around the concert dates."
+                    if has_discovery else
+                    "Would you like me to build a full day-by-day itinerary that fits "
+                    "these concerts into your trip?"
+                )
+
+            elif has_concerts:
+                # Pure concerts
                 data_block   = self._extract_concert_data(tool_results)
                 concert_tr   = next(tr for tr in tool_results if tr["tool_name"] == "search_concerts")
                 concert_args = concert_tr.get("args", {})
-                # _browse_url is injected by _tavily_extract_metro into the first snippet
                 snippets     = concert_tr.get("result") or []
                 browse_url   = next(
                     (s["_browse_url"] for s in snippets if isinstance(s, dict) and "_browse_url" in s),
                     None,
                 )
-                extracted_events = None
 
-            elif "search_special_events" in tool_names:
+            elif has_se and has_other:
+                # Special events + City Deep-Dive / Practical / Discovery
+                extracted_events, data_block = self._extract_mixed_special_events_data(tool_results, state)
+                concert_args  = {}
+                browse_url    = None
+                custom_closer = (
+                    "Tell me which destination stands out and I can build a full "
+                    "itinerary around these events."
+                    if has_discovery else
+                    "I can build a full day-by-day itinerary that weaves these events "
+                    "into your trip."
+                )
+
+            elif has_se:
+                # Pure special events
                 extracted_events, data_block = self._extract_special_events_data(tool_results, state)
                 events_tr    = next(tr for tr in tool_results if tr["tool_name"] == "search_special_events")
                 events_args  = events_tr.get("args", {})
@@ -455,16 +492,18 @@ class AdvisorFormatterNode:
                 browse_url   = None
 
             else:
-                data_block       = format_results_for_llm(tool_results)
-                concert_args     = {}
-                browse_url       = None
-                extracted_events = None
+                # Standard: City Deep-Dive, Practical, Discovery only
+                data_block   = format_results_for_llm(tool_results)
+                concert_args = {}
+                browse_url   = None
 
             full_response = self._call_formatter_llm(
-                intent, data_block, tool_names, state, concert_args, browse_url
+                intent, data_block, tool_names, state, concert_args, browse_url,
+                custom_closer=custom_closer,
             )
 
-            if "search_special_events" in tool_names:
+            # Append the deterministic closer for pure special-events responses only.
+            if has_se and not has_other:
                 events_closer = _build_events_closer(
                     events_args.get("city"), events_args.get("month"),
                     has_events=bool(extracted_events),
@@ -495,6 +534,7 @@ class AdvisorFormatterNode:
         state: AgentState,
         concert_args: dict | None = None,
         browse_url: str | None = None,
+        custom_closer: str | None = None,
     ) -> str:
         has_origin = bool(state.get("current_city"))
         closer     = closer_guidance_for(tool_names, has_origin)
@@ -503,6 +543,9 @@ class AdvisorFormatterNode:
         # so suggestions are always precise. Tell the LLM to omit it — we append ourselves.
         if concert_args:
             concert_closer = _build_concert_closer(concert_args, browse_url)
+            closer = "Do NOT add a closing sentence — one will be appended automatically."
+        elif custom_closer:
+            concert_closer = custom_closer
             closer = "Do NOT add a closing sentence — one will be appended automatically."
         elif "search_special_events" in tool_names:
             concert_closer = None
@@ -536,8 +579,23 @@ class AdvisorFormatterNode:
     # ------------------------------------------------------------------
 
     def _extract_concert_data(self, tool_results: list[dict]) -> str:
-        """Extract structured concert events from raw web snippets, return as a clean data block."""
+        """Extract structured concert events from the first search_concerts result."""
         concert_tr = next(tr for tr in tool_results if tr["tool_name"] == "search_concerts")
+        return self._extract_single_concert_result(concert_tr)
+
+    def _extract_mixed_concert_data(self, tool_results: list[dict]) -> str:
+        """Combined data block: non-concert tools (any intent) + per-city concert blocks."""
+        non_concert = [tr for tr in tool_results if tr["tool_name"] != "search_concerts"]
+        other_block = format_results_for_llm(non_concert)
+        concert_blocks = [
+            self._extract_single_concert_result(tr)
+            for tr in tool_results
+            if tr["tool_name"] == "search_concerts"
+        ]
+        return "\n\n".join([other_block] + concert_blocks)
+
+    def _extract_single_concert_result(self, concert_tr: dict) -> str:
+        """Extract structured concert events from one search_concerts result entry."""
         snippets   = concert_tr.get("result") or []
         args       = concert_tr.get("args", {})
 
@@ -669,27 +727,56 @@ class AdvisorFormatterNode:
     # Special Events path: raw snippets → structured extraction → data block
     # ------------------------------------------------------------------
 
-    def _extract_special_events_data(
-        self, tool_results: list[dict], state: AgentState
-    ) -> tuple[list[dict], str]:
-        """Extract structured special events from Tavily snippets.
-
-        Returns (events_for_state, data_block_for_llm).
-        - events_for_state: list of SpecialEvent-compatible dicts (written to state["special_events_data"])
-        - data_block_for_llm: clean text block WITHOUT price (passed to formatter LLM)
-        """
-        events_tr = next(tr for tr in tool_results if tr["tool_name"] == "search_special_events")
-        snippets  = events_tr.get("result") or []
-        args      = events_tr.get("args", {})
-
-        city  = args.get("city", "")
-        month = args.get("month", "")
-
-        # Derive travel year from month arg or trip_start state
+    @staticmethod
+    def _get_year(month: str, state: AgentState) -> str:
+        """Extract the 4-digit travel year from a 'Month YYYY' string or state."""
         year = month.split()[-1] if month and month.split()[-1].isdigit() else ""
         if not year:
             trip_start = state.get("trip_start", "")
             year = trip_start[:4] if trip_start else str(datetime.date.today().year)
+        return year
+
+    def _extract_special_events_data(
+        self, tool_results: list[dict], state: AgentState
+    ) -> tuple[list[dict], str]:
+        """Extract structured special events from a single search_special_events result."""
+        events_tr = next(tr for tr in tool_results if tr["tool_name"] == "search_special_events")
+        year      = self._get_year(events_tr.get("args", {}).get("month", ""), state)
+        return self._extract_single_special_events_result(events_tr, year)
+
+    def _extract_mixed_special_events_data(
+        self, tool_results: list[dict], state: AgentState
+    ) -> tuple[list[dict], str]:
+        """Combined data block: non-event tools + per-city special-event blocks.
+
+        Returns (merged_events_for_state, combined_data_block).
+        """
+        non_event   = [tr for tr in tool_results
+                       if tr["tool_name"] not in {"search_concerts", "search_special_events"}]
+        other_block = format_results_for_llm(non_event)
+
+        all_events: list[dict] = []
+        event_blocks: list[str] = []
+        for tr in tool_results:
+            if tr["tool_name"] == "search_special_events":
+                year = self._get_year(tr.get("args", {}).get("month", ""), state)
+                evs, block = self._extract_single_special_events_result(tr, year)
+                all_events.extend(evs)
+                event_blocks.append(block)
+
+        data_block = "\n\n".join([other_block] + event_blocks)
+        return all_events, data_block
+
+    def _extract_single_special_events_result(
+        self, events_tr: dict, year: str
+    ) -> tuple[list[dict], str]:
+        """Extract structured special events from one search_special_events result entry."""
+        import calendar as _cal  # noqa: PLC0415
+
+        snippets = events_tr.get("result") or []
+        args     = events_tr.get("args", {})
+        city     = args.get("city", "")
+        month    = args.get("month", "")
 
         label = "Special Events" + (
             " — " + ", ".join(filter(None, [city, month])) if any([city, month]) else ""
@@ -754,26 +841,21 @@ class AdvisorFormatterNode:
         if not extraction.events:
             return [], f"[{label}]\nstatus: No special events found for this search."
 
-        # Fallback: fill empty applicable_dates with every day of the search month so the
-        # itinerary pipeline can inject the event even when the LLM omitted specific dates.
-        import calendar as _cal  # noqa: PLC0415
+        # Fallback: fill empty applicable_dates with every day of the search month.
         month_dates: list[str] = []
         month_name_str = month.split()[0] if month else ""
         try:
             month_num   = list(_cal.month_name).index(month_name_str)  # 1–12
             year_int    = int(year)
             _, last_day = _cal.monthrange(year_int, month_num)
-            month_dates = [
-                f"{year_int}-{month_num:02d}-{d:02d}"
-                for d in range(1, last_day + 1)
-            ]
+            month_dates = [f"{year_int}-{month_num:02d}-{d:02d}" for d in range(1, last_day + 1)]
         except (ValueError, IndexError):
             pass
         for ev in extraction.events:
             if not ev.applicable_dates and month_dates:
                 ev.applicable_dates = month_dates
 
-        # Build data block for formatter LLM (NO price — advisor shows what to do, not cost)
+        # Build data block (NO price — advisor shows what to do, not cost).
         lines = []
         for ev in extraction.events:
             parts = [f"name: {ev.name}"]
@@ -785,20 +867,19 @@ class AdvisorFormatterNode:
 
         data_block = f"[{label}]\n" + "\n".join(lines)
 
-        # Build state-compatible dicts for itinerary pipeline reuse
         events_for_state = [
             {
-                "name":                 ev.name,
-                "description":          ev.description,
-                "applicable_dates":     ev.applicable_dates,
-                "time_start":           ev.time_start,
-                "time_end":             ev.time_end,
-                "cost_usd":             ev.cost_usd,
+                "name":                  ev.name,
+                "description":           ev.description,
+                "applicable_dates":      ev.applicable_dates,
+                "time_start":            ev.time_start,
+                "time_end":              ev.time_end,
+                "cost_usd":              ev.cost_usd,
                 "suggested_visit_hours": ev.suggested_visit_hours,
-                "is_evening_only":      ev.is_evening_only,
-                "location_hint":        ev.location_hint or ev.location,
-                "lat":                  None,
-                "lng":                  None,
+                "is_evening_only":       ev.is_evening_only,
+                "location_hint":         ev.location_hint or ev.location,
+                "lat":                   None,
+                "lng":                   None,
             }
             for ev in extraction.events
         ]
