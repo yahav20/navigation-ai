@@ -406,21 +406,8 @@ class DayScheduleBuilder:
 
         pending_day_events.sort(key=lambda x: x[0])
 
-        # ── Cursor & location init ───────────────────────────────────────────
-        cursor   = _pt(self._date, cfg.day_start_time)
-        location = GeoPoint(cfg.hotel_lat, cfg.hotel_lng, "Hotel")
-
-        if cfg.is_first_day and cfg.arrival_time:
-            cursor, location = self._arrival_sequence(cfg, blocked)
-        else:
-            breakfast_name = (
-                day_plan.get("breakfast_place")
-                or day_plan.get("coffee_place")
-            )
-            cursor = self._insert_breakfast(cfg, cursor, breakfast_name=breakfast_name)
-            self._last_food_time = cursor
-
         # ── Split candidates into sightseeing vs meal venues ─────────────────
+        # Done before cursor init so breakfast insertion can search the meal pool.
         pinned_lunch   = day_plan.get("lunch_restaurant")
         pinned_coffee  = day_plan.get("coffee_place")
         pinned_dinner  = day_plan.get("dinner_restaurant")
@@ -434,6 +421,49 @@ class DayScheduleBuilder:
         if is_rainy:
             sights = [c for c in sights if not c.is_outdoor]
 
+        # ── Cursor & location init ───────────────────────────────────────────
+        cursor   = _pt(self._date, cfg.day_start_time)
+        location = GeoPoint(cfg.hotel_lat, cfg.hotel_lng, "Hotel")
+
+        if cfg.is_first_day and cfg.arrival_time:
+            cursor, location = self._arrival_sequence(cfg, blocked)
+        else:
+            breakfast_name = (
+                day_plan.get("breakfast_place")
+                or day_plan.get("coffee_place")
+            )
+            # Fallback: if the LLM didn't assign a breakfast venue, find a real
+            # venue from the meal pool. First pass: prefer café/bakery. Second
+            # pass: accept any non-pinned meal venue that opens by 09:00.
+            if not breakfast_name or str(breakfast_name).lower().strip() in ("null", "none"):
+                _pinned = {n for n in [pinned_lunch, pinned_coffee, pinned_dinner] if n}
+                _BK_KW  = {"cafe", "bakery", "coffee", "tea", "patisserie"}
+                for _c in meal_cands:
+                    if any(kw in _c.categories.lower() for kw in _BK_KW):
+                        try:
+                            if int(_c.opening_time.split(":")[0]) <= 9:
+                                breakfast_name = _c.name
+                                break
+                        except (ValueError, IndexError):
+                            pass
+                # Second pass: any open-early venue not already pinned for another slot
+                if not breakfast_name or str(breakfast_name).lower().strip() in ("null", "none"):
+                    for _c in meal_cands:
+                        if _c.name in _pinned:
+                            continue
+                        try:
+                            if int(_c.opening_time.split(":")[0]) <= 9:
+                                breakfast_name = _c.name
+                                break
+                        except (ValueError, IndexError):
+                            pass
+            cursor = self._insert_breakfast(cfg, cursor, breakfast_name=breakfast_name)
+            # Remove the breakfast venue from the pool so it isn't reused as lunch/dinner.
+            if breakfast_name and breakfast_name in meal_idx:
+                meal_cands = [c for c in meal_cands if c.name != breakfast_name]
+                meal_idx.pop(breakfast_name, None)
+            self._last_food_time = cursor
+
         # ── Main sightseeing loop ────────────────────────────────────────────
         for act in sights:
             if cursor >= departure_anchor:
@@ -442,10 +472,8 @@ class DayScheduleBuilder:
             # — Flush rest blocks that are now due —
             cursor = self._flush_rests(cursor, pending_rests, departure_anchor)
 
-            # — Flush daytime special events whose window has been reached —
-            cursor, location = self._flush_day_events(
-                cursor, pending_day_events, departure_anchor, location
-            )
+            # ── Meal checks run BEFORE event flush so daytime events cannot
+            #    silently consume the lunch window.  ──────────────────────────
 
             # — Pinned coffee (10:00–11:00 window) —
             if not self._had_coffee and pinned_coffee and 10 <= cursor.hour < 11:
@@ -456,10 +484,17 @@ class DayScheduleBuilder:
 
             # — Pinned lunch (12:00–14:30 window) —
             if not self._had_lunch and pinned_lunch and 12 <= cursor.hour < 15:
+                _pre = cursor
                 cursor, location = self._insert_pinned_meal(
                     pinned_lunch, "lunch", meal_idx,
                     cursor, departure_anchor, location, blocked)
                 meal_cands = [c for c in meal_cands if c.name != pinned_lunch]
+                # Pinned venue deduped away (used on a prior day): fall back to
+                # generic injection so the window isn't silently wasted.
+                if cursor == _pre and not self._had_lunch:
+                    cursor, location = self._inject_meal(
+                        cursor, departure_anchor, location, meal_cands,
+                        None, pinned_dinner, meal_idx)
 
             # — Generic hunger check —
             if self._is_hungry(cursor):
@@ -468,6 +503,11 @@ class DayScheduleBuilder:
                     pinned_lunch, pinned_dinner, meal_idx)
                 if cursor >= departure_anchor:
                     break
+
+            # — Flush daytime special events whose window has been reached —
+            cursor, location = self._flush_day_events(
+                cursor, pending_day_events, departure_anchor, location
+            )
 
             # — Legacy rest: once per day around 14-16 if no LLM rest given —
             if not self._had_rest and not pending_rests and 14 <= cursor.hour <= 16:
@@ -579,6 +619,19 @@ class DayScheduleBuilder:
 
         # ── End-of-day sequence ──────────────────────────────────────────────
 
+        # Post-sightseeing lunch rescue: if the loop ran out of activities before
+        # any lunch could fire (e.g. only 2 sights on a day), inject one now.
+        if not self._had_lunch and cursor.hour < 16:
+            if pinned_lunch and meal_idx.get(pinned_lunch):
+                cursor, location = self._insert_pinned_meal(
+                    pinned_lunch, "lunch", meal_idx,
+                    cursor, departure_anchor, location, blocked)
+                meal_cands = [c for c in meal_cands if c.name != pinned_lunch]
+            if not self._had_lunch:
+                cursor, location = self._inject_meal(
+                    cursor, departure_anchor, location, meal_cands,
+                    None, pinned_dinner, meal_idx)
+
         # Flush any remaining rest blocks
         cursor = self._flush_rests(cursor, pending_rests, departure_anchor)
 
@@ -598,17 +651,21 @@ class DayScheduleBuilder:
                 cursor, departure_anchor, location, blocked)
             meal_cands = [c for c in meal_cands if c.name != pinned_dinner]
 
-        # "Free time" gap before 18:00 if ending early
+        # "Free time" gap before 18:00 if ending early.
+        # Only shown when the gap is at least 15 minutes — shorter gaps are noise.
+        _MIN_FREE_TIME = 15
         if not self._had_dinner and cursor < departure_anchor:
             dinner_earliest = _pt(self._date, "18:00")
             if cursor < dinner_earliest < departure_anchor:
-                self._push(TimeSlot(
-                    start=cursor, end=dinner_earliest,
-                    slot_type="rest",
-                    name="Free time — explore at your own pace",
-                    description="Browse local shops, relax at a café, or head back to the hotel",
-                    estimated_cost=0.0,
-                ))
+                gap_minutes = (dinner_earliest - cursor).total_seconds() / 60
+                if gap_minutes >= _MIN_FREE_TIME:
+                    self._push(TimeSlot(
+                        start=cursor, end=dinner_earliest,
+                        slot_type="rest",
+                        name="Free time — explore at your own pace",
+                        description="Browse local shops, relax at a café, or head back to the hotel",
+                        estimated_cost=0.0,
+                    ))
                 cursor = dinner_earliest
 
             if cursor < departure_anchor and cursor.hour >= 17:
@@ -772,7 +829,7 @@ class DayScheduleBuilder:
         """
         is_dinner = cursor.hour >= 17 or self._had_lunch
 
-        # Don't inject generic meal if pinned one is coming soon
+        # Don't inject generic meal if the pinned one is still coming.
         if not is_dinner and pinned_lunch and pinned_lunch in meal_idx:
             return cursor, location
         if is_dinner and pinned_dinner and pinned_dinner in meal_idx:
@@ -782,6 +839,8 @@ class DayScheduleBuilder:
             oh = int(meal.opening_time.split(":")[0])
             if not is_dinner and oh >= 17:
                 continue
+            if not is_dinner and pinned_dinner and meal.name == pinned_dinner:
+                continue  # reserve the pinned dinner venue for dinner
             if is_dinner and meal.closing_time < "18:00":
                 continue
 
