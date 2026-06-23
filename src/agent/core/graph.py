@@ -98,7 +98,7 @@ def _assemble_builder(provider: str = "google") -> StateGraph:
     formatter = FormatterNode()
     travel_confirmation_node = TravelConfirmationNode()
     alternative_destination_node = AlternativeDestinationNode(extraction_model)
-    formatter_alternative = FormatterAlternativeNode(extraction_model)
+    formatter_alternative = FormatterAlternativeNode()
     flight_flexibility_gate_node = FlightFlexibilityGateNode()
     router_node = RouterNode(extraction_model)
     # save_plan_prompt HITL disabled for now — not wired into the graph below.

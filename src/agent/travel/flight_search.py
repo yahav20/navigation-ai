@@ -44,11 +44,16 @@ def _flight_date(item: dict) -> date | None:
 def _align_by_trip_length(
     outbound: list[dict], inbound: list[dict], trip_days: int,
 ) -> list[dict]:
-    """Keep only return offers within `_RETURN_DATE_TOLERANCE_DAYS` of outbound + trip_days.
+    """Prefer return offers within `_RETURN_DATE_TOLERANCE_DAYS` of outbound + trip_days.
 
     Without this, the outbound and return legs are independently "best value"
     picks from two separate month-wide searches and can end up dates apart that
     don't match the requested trip length at all.
+
+    When nothing falls within tolerance, fall back to the closest available
+    dates instead of returning empty — the flight feed is sparse enough that a
+    real, slightly-off-date flight is far more useful than a false "no flights"
+    (the actual date is still shown downstream, so nothing is misrepresented).
     """
     if not outbound or not inbound:
         return inbound

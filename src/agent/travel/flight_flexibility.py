@@ -1,8 +1,9 @@
 """HITL gate offering budget/city flexibility when no flights or alternatives exist."""
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.types import interrupt
 
 from agent.core.state import AgentState
+from security import sanitize_resume
 
 MAX_FLEXIBILITY_ATTEMPTS = 2
 
@@ -24,25 +25,55 @@ class FlightFlexibilityGateNode:
         origin = state.get("current_city") or "your origin"
         destination = state.get("destination_city") or "your destination"
         budget = state.get("total_budget")
-        budget_line = (
-            f" within your **${budget:.0f}** budget"
-            if isinstance(budget, (int, float)) and budget
-            else ""
-        )
+        no_route = state.get("alternative_destinations_no_route", True)
+        unfiltered = state.get("alternative_destinations_unfiltered") or []
+
+        if no_route:
+            # No reachable alternative cities from origin exist at all — this is not
+            # a budget problem, so don't frame it as one.
+            problem_line = (
+                f"No flights from **{origin}** to **{destination}**, and no other "
+                f"destinations reachable from **{origin}** were found in our database."
+            )
+        else:
+            # Candidate cities existed but none had flights/hotels within budget.
+            budget_line = (
+                f" within your **${budget:.0f}** budget"
+                if isinstance(budget, (int, float)) and budget
+                else ""
+            )
+            problem_line = (
+                f"No flights from **{origin}** to **{destination}**, and no reachable "
+                f"alternative destinations{budget_line} were found."
+            )
+
+        options = [
+            ("flexible", "Yes, let me adjust something"),
+            ("give_up", "No, stop here"),
+        ]
+        # Only offer this when real, bookable alternatives exist but got cut by the
+        # budget filter — there's nothing to "show anyway" when no_route is True.
+        if not no_route and unfiltered:
+            options.insert(1, ("show_anyway", "Show me the alternatives anyway (may exceed budget)"))
 
         choice: str = interrupt({
             "question": (
-                f"No flights from **{origin}** to **{destination}**, and no reachable "
-                f"alternative destinations{budget_line} were found.\n\n"
+                f"{problem_line}\n\n"
                 "Would you be open to adjusting your budget or your origin/destination?"
             ),
-            "options": [
-                ("flexible", "Yes, let me adjust something"),
-                ("give_up", "No, stop here"),
-            ],
+            "options": options,
         })
 
-        if (choice or "").strip().lower() != "flexible":
+        choice_norm = (choice or "").strip().lower()
+
+        if choice_norm == "show_anyway":
+            return {
+                "flexibility_action": "show_anyway",
+                "alternative_destinations": unfiltered,
+                "alternative_destinations_over_budget": True,
+            }
+
+        if choice_norm != "flexible":
             return {"flexibility_action": "give_up"}
 
         adjustment_text: str = interrupt({
@@ -52,6 +83,16 @@ class FlightFlexibilityGateNode:
             ),
             "options": [],
         })
+
+        # This resume bypasses security_gate entirely (LangGraph resumes this node
+        # directly, never re-entering from START) — validate/sanitize here instead.
+        try:
+            adjustment_text = sanitize_resume(adjustment_text)
+        except ValueError as e:
+            return {
+                "flexibility_action": "give_up",
+                "messages": [AIMessage(content=str(e))],
+            }
 
         return {
             "flexibility_action": "flexible",
