@@ -71,50 +71,49 @@ import { inputCls, labelCls } from "../agent-selector/shared";
 function OceanBackground() {
   return (
     <div className="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
+      {/* Large top-left orb */}
       <motion.div
-        className="absolute -top-40 -left-40 h-[600px] w-[600px] rounded-full"
+        className="absolute -top-60 -left-60 h-[800px] w-[800px] rounded-full"
         style={{
           background:
-            "radial-gradient(ellipse, oklch(0.55 0.22 240 / 0.18) 0%, transparent 70%)",
-          filter: "blur(60px)",
+            "radial-gradient(ellipse, oklch(0.52 0.2 245 / 0.14) 0%, oklch(0.45 0.15 260 / 0.05) 50%, transparent 75%)",
+          filter: "blur(80px)",
         }}
-        animate={{ x: [0, 40, 0], y: [0, 30, 0], scale: [1, 1.08, 1] }}
-        transition={{ duration: 18, repeat: Infinity, ease: "easeInOut" }}
+        animate={{ x: [0, 50, 0], y: [0, 35, 0], scale: [1, 1.1, 1] }}
+        transition={{ duration: 20, repeat: Infinity, ease: "easeInOut" }}
       />
+      {/* Bottom-right teal orb */}
       <motion.div
-        className="absolute -bottom-32 -right-32 h-[500px] w-[500px] rounded-full"
+        className="absolute -bottom-48 -right-48 h-[700px] w-[700px] rounded-full"
         style={{
           background:
-            "radial-gradient(ellipse, oklch(0.65 0.2 195 / 0.14) 0%, transparent 70%)",
-          filter: "blur(50px)",
+            "radial-gradient(ellipse, oklch(0.62 0.18 195 / 0.11) 0%, oklch(0.55 0.14 210 / 0.04) 55%, transparent 78%)",
+          filter: "blur(70px)",
         }}
-        animate={{ x: [0, -30, 0], y: [0, -20, 0], scale: [1, 1.12, 1] }}
-        transition={{ duration: 22, repeat: Infinity, ease: "easeInOut", delay: 3 }}
+        animate={{ x: [0, -40, 0], y: [0, -28, 0], scale: [1, 1.14, 1] }}
+        transition={{ duration: 24, repeat: Infinity, ease: "easeInOut", delay: 4 }}
       />
+      {/* Centre-right accent orb */}
       <motion.div
-        className="absolute top-20 right-1/3 h-[260px] w-[260px] rounded-full"
+        className="absolute top-1/3 right-1/4 h-[380px] w-[380px] rounded-full"
         style={{
           background:
-            "radial-gradient(ellipse, oklch(0.7 0.18 210 / 0.1) 0%, transparent 70%)",
-          filter: "blur(40px)",
+            "radial-gradient(ellipse, oklch(0.68 0.16 215 / 0.07) 0%, transparent 70%)",
+          filter: "blur(55px)",
         }}
-        animate={{ x: [0, 20, -10, 0], y: [0, -25, 10, 0] }}
-        transition={{ duration: 14, repeat: Infinity, ease: "easeInOut", delay: 6 }}
+        animate={{ x: [0, 28, -14, 0], y: [0, -32, 12, 0] }}
+        transition={{ duration: 16, repeat: Infinity, ease: "easeInOut", delay: 8 }}
+      />
+      {/* Subtle centre glow — anchored, no motion */}
+      <div
+        className="absolute left-1/2 top-1/2 h-[500px] w-[900px] -translate-x-1/2 -translate-y-1/2 rounded-full"
+        style={{
+          background:
+            "radial-gradient(ellipse, oklch(0.58 0.12 235 / 0.06) 0%, transparent 70%)",
+          filter: "blur(90px)",
+        }}
       />
     </div>
-  );
-}
-
-function GridOverlay() {
-  return (
-    <div
-      className="pointer-events-none fixed inset-0 -z-10 opacity-[0.025] dark:opacity-[0.04]"
-      style={{
-        backgroundImage:
-          "linear-gradient(oklch(0.4 0.1 240) 1px, transparent 1px), linear-gradient(90deg, oklch(0.4 0.1 240) 1px, transparent 1px)",
-        backgroundSize: "48px 48px",
-      }}
-    />
   );
 }
 
@@ -739,7 +738,6 @@ export function Thread() {
   return (
     <div className="relative flex h-screen w-full overflow-hidden bg-[--background]">
       <OceanBackground />
-      <GridOverlay />
 
       {/* ── Sidebar ── */}
       <div className="relative hidden lg:flex">

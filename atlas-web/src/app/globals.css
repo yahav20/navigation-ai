@@ -15,7 +15,7 @@
 
 :root {
   /* Base */
-  --background: oklch(0.975 0.008 240);           /* near-white with cool blue tint */
+  --background: oklch(0.975 0.004 240);           /* near-white with very subtle blue tint */
   --foreground: oklch(0.12 0.045 255);            /* deep navy ink */
 
   /* Cards & Surfaces */
@@ -75,7 +75,7 @@
   --glow-accent: oklch(0.72 0.22 200 / 0.4);
   --gradient-ocean: linear-gradient(135deg, oklch(0.28 0.14 265), oklch(0.45 0.2 220), oklch(0.6 0.2 195));
   --gradient-ice: linear-gradient(180deg, oklch(0.99 0.01 220), oklch(0.92 0.04 230));
-  --gradient-glow: radial-gradient(ellipse at 60% 0%, oklch(0.72 0.18 210 / 0.18) 0%, transparent 70%);
+  --gradient-glow: radial-gradient(ellipse at 60% 0%, oklch(0.72 0.18 210 / 0.09) 0%, transparent 70%);
 }
 
 .dark {
