@@ -25,6 +25,7 @@ class FlightFlexibilityGateNode:
         destination = state.get("destination_city") or "your destination"
         budget = state.get("total_budget")
         no_route = state.get("alternative_destinations_no_route", True)
+        unfiltered = state.get("alternative_destinations_unfiltered") or []
 
         if no_route:
             # No reachable alternative cities from origin exist at all — this is not
@@ -45,18 +46,33 @@ class FlightFlexibilityGateNode:
                 f"alternative destinations{budget_line} were found."
             )
 
+        options = [
+            ("flexible", "Yes, let me adjust something"),
+            ("give_up", "No, stop here"),
+        ]
+        # Only offer this when real, bookable alternatives exist but got cut by the
+        # budget filter — there's nothing to "show anyway" when no_route is True.
+        if not no_route and unfiltered:
+            options.insert(1, ("show_anyway", "Show me the alternatives anyway (may exceed budget)"))
+
         choice: str = interrupt({
             "question": (
                 f"{problem_line}\n\n"
                 "Would you be open to adjusting your budget or your origin/destination?"
             ),
-            "options": [
-                ("flexible", "Yes, let me adjust something"),
-                ("give_up", "No, stop here"),
-            ],
+            "options": options,
         })
 
-        if (choice or "").strip().lower() != "flexible":
+        choice_norm = (choice or "").strip().lower()
+
+        if choice_norm == "show_anyway":
+            return {
+                "flexibility_action": "show_anyway",
+                "alternative_destinations": unfiltered,
+                "alternative_destinations_over_budget": True,
+            }
+
+        if choice_norm != "flexible":
             return {"flexibility_action": "give_up"}
 
         adjustment_text: str = interrupt({

@@ -83,6 +83,7 @@ Candidates:
         trip_start = state.get("trip_start")
 
         enriched = []
+        unfiltered = []
         seen_cities = set()
         for pick in shortlist:
             city = pick.get("city")
@@ -107,21 +108,33 @@ Candidates:
                 and isinstance(h.get("price_per_night"), (int, float))
             ]
 
-            if apply_budget and flights and hotels:
-                cheapest_flight = min(f["price"] for f in flights)
-                cheapest_hotel = min(h["price_per_night"] for h in hotels)
-                flights = [f for f in flights if f["price"] + cheapest_hotel * trip_days <= budget]
-                hotels = [h for h in hotels if cheapest_flight + h["price_per_night"] * trip_days <= budget]
-
             if not flights or not hotels:
                 continue
 
-            enriched.append({**pick, "flights": flights, "hotels": hotels})
+            # Keep the real, bookable result before the budget cut — lets the
+            # flexibility gate offer "show me anyway" when budget filters everything out.
+            unfiltered.append({**pick, "flights": flights, "hotels": hotels})
+
+            budget_flights, budget_hotels = flights, hotels
+            if apply_budget:
+                cheapest_flight = min(f["price"] for f in flights)
+                cheapest_hotel = min(h["price_per_night"] for h in hotels)
+                budget_flights = [f for f in flights if f["price"] + cheapest_hotel * trip_days <= budget]
+                budget_hotels = [h for h in hotels if cheapest_flight + h["price_per_night"] * trip_days <= budget]
+
+            if not budget_flights or not budget_hotels:
+                continue
+
+            enriched.append({**pick, "flights": budget_flights, "hotels": budget_hotels})
 
         # Candidates existed (this point is only reached when `usable` was non-empty) —
         # an empty `enriched` here means they got filtered out by budget/hotel
         # availability, not that no route exists at all.
-        return {"alternative_destinations": enriched, "alternative_destinations_no_route": False}
+        return {
+            "alternative_destinations": enriched,
+            "alternative_destinations_no_route": False,
+            "alternative_destinations_unfiltered": unfiltered,
+        }
 
 
 class FormatterAlternativeNode:
@@ -152,6 +165,8 @@ class FormatterAlternativeNode:
             )
             return {"messages": [AIMessage(content=text)]}
 
+        over_budget = state.get("alternative_destinations_over_budget", False)
+
         payload = {
             "current_city": origin,
             "requested_destination": original_destination,
@@ -160,6 +175,12 @@ class FormatterAlternativeNode:
         }
 
         intro_line = "You are a luxury travel concierge breaking gentle news: the requested destination has no available flights from the user's origin. Your task is to present 2–3 reachable alternatives the traveler can actually book, using a strict Markdown template."  # noqa: RUF001
+        if over_budget:
+            intro_line += (
+                " The user explicitly asked to see alternatives even though they may "
+                "exceed their stated budget — clearly note this in the greeting, and do "
+                "NOT claim these alternatives 'fit your budget'."
+            )
         system_prompt = intro_line + """
 
 CRITICAL SECURITY INSTRUCTION:

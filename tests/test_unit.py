@@ -839,6 +839,10 @@ def test_alternative_destination_budget_filtered_does_not_flag_no_route(monkeypa
 
     assert result["alternative_destinations"] == []  # filtered out by budget
     assert result["alternative_destinations_no_route"] is False  # but candidates DID exist
+    # Real, bookable result preserved before the budget cut, for "show anyway".
+    assert len(result["alternative_destinations_unfiltered"]) == 1
+    assert result["alternative_destinations_unfiltered"][0]["city"] == "Berlin"
+    assert result["alternative_destinations_unfiltered"][0]["flights"][0]["price"] == 9999
 
 
 # ---------------------------------------------------------------------------
@@ -893,6 +897,79 @@ def test_flexibility_gate_budget_filtered_message_mentions_budget(monkeypatch):
 
     assert "$20" in captured["payload"]["question"]
     assert "budget" in captured["payload"]["question"].lower()
+
+
+# ---------------------------------------------------------------------------
+# FlightFlexibilityGateNode: "show me anyway" — let the user see real but
+# over-budget alternatives instead of being forced to adjust or give up.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.unit
+def test_flexibility_gate_offers_show_anyway_when_unfiltered_alternatives_exist(monkeypatch):
+    import agent.travel.flight_flexibility as gate_module
+
+    captured = {}
+
+    def _fake_interrupt(payload):
+        captured["payload"] = payload
+        return "give_up"
+
+    monkeypatch.setattr(gate_module, "interrupt", _fake_interrupt)
+
+    node = gate_module.FlightFlexibilityGateNode()
+    node({
+        "current_city": "Tel Aviv", "destination_city": "Antarctica",
+        "total_budget": 20, "alternative_destinations_no_route": False,
+        "alternative_destinations_unfiltered": [{"city": "Berlin"}],
+        "flexibility_attempts": 0,
+    })
+
+    option_keys = [key for key, _label in captured["payload"]["options"]]
+    assert "show_anyway" in option_keys
+
+
+@pytest.mark.unit
+def test_flexibility_gate_omits_show_anyway_when_no_unfiltered_alternatives(monkeypatch):
+    """No real alternatives exist at all (no_route) — nothing to 'show anyway'."""
+    import agent.travel.flight_flexibility as gate_module
+
+    captured = {}
+
+    def _fake_interrupt(payload):
+        captured["payload"] = payload
+        return "give_up"
+
+    monkeypatch.setattr(gate_module, "interrupt", _fake_interrupt)
+
+    node = gate_module.FlightFlexibilityGateNode()
+    node({
+        "current_city": "London", "destination_city": "Zzyzxville",
+        "total_budget": 4000, "alternative_destinations_no_route": True,
+        "flexibility_attempts": 0,
+    })
+
+    option_keys = [key for key, _label in captured["payload"]["options"]]
+    assert "show_anyway" not in option_keys
+
+
+@pytest.mark.unit
+def test_flexibility_gate_show_anyway_returns_unfiltered_alternatives(monkeypatch):
+    import agent.travel.flight_flexibility as gate_module
+
+    monkeypatch.setattr(gate_module, "interrupt", lambda _payload: "show_anyway")
+
+    node = gate_module.FlightFlexibilityGateNode()
+    unfiltered = [{"city": "Berlin", "flights": [{"price": 9999}], "hotels": [{"price_per_night": 9999}]}]
+    updates = node({
+        "current_city": "Tel Aviv", "destination_city": "Antarctica",
+        "total_budget": 20, "alternative_destinations_no_route": False,
+        "alternative_destinations_unfiltered": unfiltered,
+        "flexibility_attempts": 0,
+    })
+
+    assert updates["flexibility_action"] == "show_anyway"
+    assert updates["alternative_destinations"] == unfiltered
+    assert updates["alternative_destinations_over_budget"] is True
 
 
 # ---------------------------------------------------------------------------
