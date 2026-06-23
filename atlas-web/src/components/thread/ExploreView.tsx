@@ -5,15 +5,23 @@ import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 
 // Matches the shape in agent-selector/forms/ExploreForm.tsx
+export interface HotelSummary {
+  name: string;
+  stars?: number;
+  price?: number;
+}
+
 export interface ExploreCard {
   country: string;
   city: string;
   season: string;
   weather: string;
   events: string[];
+  first_concert?: string;
   flight_cost: string;
   top_attractions: string[];
   top_restaurants: string[];
+  top_hotels?: HotelSummary[];
 }
 
 interface ExploreViewProps {
@@ -183,8 +191,18 @@ function DestinationCard({
           <p className="text-xs text-[--muted-foreground]">✈️ {card.flight_cost}</p>
         </InfoSection>
 
+        {/* First concert */}
+        {card.first_concert && (
+          <InfoSection delay={entranceDelay + 0.30} className="flex flex-col gap-1">
+            <p className="text-[11px] font-semibold text-[--foreground]">🎵 Featured Concert</p>
+            <p className="text-xs text-[--muted-foreground] leading-snug line-clamp-2">
+              {card.first_concert}
+            </p>
+          </InfoSection>
+        )}
+
         {/* Events */}
-        {card.events.length > 0 && (
+        {/* {card.events.length > 0 && (
           <InfoSection delay={entranceDelay + 0.32} className="flex flex-col gap-1">
             <p className="text-[11px] font-semibold text-[--foreground]">🎟 Events</p>
             {card.events.slice(0, 2).map((ev, i) => (
@@ -199,7 +217,7 @@ function DestinationCard({
               </p>
             ))}
           </InfoSection>
-        )}
+        )} */}
 
         {/* Attractions */}
         {card.top_attractions.length > 0 && (
@@ -237,6 +255,35 @@ function DestinationCard({
                     style={{ background: "oklch(0.55 0.18 230 / 0.5)" }}
                   />
                   {name}
+                </li>
+              ))}
+            </ul>
+          </InfoSection>
+        )}
+
+        {/* Hotels */}
+        {(card.top_hotels ?? []).length > 0 && (
+          <InfoSection delay={entranceDelay + 0.53} className="flex flex-col gap-1">
+            <p className="text-[11px] font-semibold text-[--foreground] flex items-center gap-1.5">
+              <svg width="11" height="11" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <rect x="2" y="4" width="12" height="11" rx="1" fill="currentColor" fillOpacity="0.15" stroke="currentColor" strokeWidth="1.35"/>
+                <rect x="4.5" y="6.5"  width="2.2" height="2" rx="0.4" fill="currentColor"/>
+                <rect x="9.3" y="6.5"  width="2.2" height="2" rx="0.4" fill="currentColor"/>
+                <rect x="4.5" y="10"   width="2.2" height="2" rx="0.4" fill="currentColor"/>
+                <rect x="9.3" y="10"   width="2.2" height="2" rx="0.4" fill="currentColor"/>
+                <path d="M6.2 15v-3h3.6v3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+              Hotels
+            </p>
+            <ul className="flex flex-col gap-1">
+              {(card.top_hotels ?? []).map((hotel, i) => (
+                <li key={i} className="flex flex-col text-xs text-[--muted-foreground]">
+                  <span className="font-medium text-[--foreground] leading-snug">{hotel.name}</span>
+                  <span className="text-[10px] opacity-70">
+                    {hotel.stars ? "★".repeat(hotel.stars) : ""}
+                    {hotel.stars && hotel.price ? " · " : ""}
+                    {hotel.price ? `$${hotel.price}/night` : ""}
+                  </span>
                 </li>
               ))}
             </ul>

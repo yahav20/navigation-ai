@@ -43,7 +43,6 @@ import ThreadHistory from "./history";
 import { toast } from "sonner";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { Label } from "../ui/label";
-import { Switch } from "../ui/switch";
 import { GitHubSVG } from "../icons/github";
 import {
   Tooltip,
@@ -63,6 +62,7 @@ import { AgentSelector } from "./agent-selector";
 import { createClient } from "@/providers/client";
 import { getApiKey } from "@/lib/api-key";
 import ExploreView, { type ExploreCard } from "./ExploreView";
+import ExploreLoadingScreen from "./ExploreLoadingScreen";
 import { inputCls, labelCls } from "../agent-selector/shared";
 
 /* ─────────────────────────────────────────
@@ -562,15 +562,10 @@ export function Thread() {
     "chatHistoryOpen",
     parseAsBoolean.withDefault(false),
   );
-  const [hideToolCalls, setHideToolCalls] = useQueryState(
-    "hideToolCalls",
-    parseAsBoolean.withDefault(false),
-  );
   const [input, setInput] = useState("");
   const {
     contentBlocks,
     setContentBlocks,
-    handleFileUpload,
     dropRef,
     removeBlock,
     resetBlocks: _resetBlocks,
@@ -591,6 +586,7 @@ export function Thread() {
   const stream = useStreamContext();
   const messages = stream.messages;
   const isLoading = stream.isLoading;
+  const isHITLActive = !!stream.interrupt;
 
   const lastError = useRef<string | undefined>(undefined);
   // Captures the stick-to-bottom context so submit handlers (which live outside
@@ -668,7 +664,7 @@ export function Thread() {
   /* ── Submit from text input ── */
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
-    if ((input.trim().length === 0 && contentBlocks.length === 0) || isLoading) return;
+    if (isHITLActive || (input.trim().length === 0 && contentBlocks.length === 0) || isLoading) return;
     submitMessage(input);
   };
 
@@ -1003,11 +999,13 @@ export function Thread() {
                       "relative z-10 mx-auto mb-4 w-full max-w-3xl rounded-2xl",
                       "border bg-[--card]/80 backdrop-blur-md",
                       "transition-all duration-300",
-                      dragOver
-                        ? "scale-[1.01] border-[--ring] shadow-[0_0_0_2px_var(--ring),0_4px_32px_var(--glow-accent)]"
-                        : inputFocused
-                          ? "border-[--ring] shadow-[0_0_0_2px_var(--ring),0_8px_40px_var(--glow-accent)]"
-                          : "border-[--border] shadow-[0_4px_24px_oklch(0.3_0.1_255_/_0.1)] hover:border-[--ring]/50 hover:shadow-[0_4px_32px_oklch(0.3_0.12_250_/_0.12)]",
+                      isHITLActive
+                        ? "cursor-not-allowed border-[--border] opacity-60"
+                        : dragOver
+                          ? "scale-[1.01] border-[--ring] shadow-[0_0_0_2px_var(--ring),0_4px_32px_var(--glow-accent)]"
+                          : inputFocused
+                            ? "border-[--ring] shadow-[0_0_0_2px_var(--ring),0_8px_40px_var(--glow-accent)]"
+                            : "border-[--border] shadow-[0_4px_24px_oklch(0.3_0.1_255_/_0.1)] hover:border-[--ring]/50 hover:shadow-[0_4px_32px_oklch(0.3_0.12_250_/_0.12)]",
                     )}
                   >
                     <div
@@ -1027,7 +1025,9 @@ export function Thread() {
                         value={input}
                         onChange={(e) => setInput(e.target.value)}
                         onPaste={handlePaste}
+                        disabled={isHITLActive}
                         onKeyDown={(e) => {
+                          if (isHITLActive) { e.preventDefault(); return; }
                           if (
                             e.key === "Enter" &&
                             !e.shiftKey &&
@@ -1040,47 +1040,18 @@ export function Thread() {
                             form?.requestSubmit();
                           }
                         }}
-                        placeholder="Type a question..."
+                        placeholder={isHITLActive ? "Please respond using the options above" : "Type a question..."}
                         dir="auto"
                         className={cn(
                           "field-sizing-content resize-none border-none bg-transparent",
                           "p-4 pb-0 text-[--foreground] shadow-none ring-0 outline-none",
                           "placeholder:text-[--muted-foreground]/60",
                           "focus:ring-0 focus:outline-none",
+                          isHITLActive && "cursor-not-allowed opacity-50",
                         )}
                       />
 
                       <div className="flex items-center gap-4 p-3 pt-2">
-                        <div className="flex items-center space-x-2">
-                          <Switch
-                            id="render-tool-calls"
-                            checked={hideToolCalls ?? false}
-                            onCheckedChange={setHideToolCalls}
-                          />
-                          <Label
-                            htmlFor="render-tool-calls"
-                            className="cursor-pointer select-none text-xs text-[--muted-foreground]"
-                          >
-                            Hide Tool Calls
-                          </Label>
-                        </div>
-
-                        <Label
-                          htmlFor="file-input"
-                          className="flex cursor-pointer items-center gap-1.5 text-xs text-[--muted-foreground] transition-colors hover:text-[--foreground]"
-                        >
-                          <Plus className="size-4" />
-                          <span>Attach</span>
-                        </Label>
-                        <input
-                          id="file-input"
-                          type="file"
-                          onChange={handleFileUpload}
-                          multiple
-                          accept="image/jpeg,image/png,image/gif,image/webp,application/pdf"
-                          className="hidden"
-                        />
-
                         {stream.isLoading ? (
                           <motion.div className="ml-auto" whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.96 }}>
                             <Button
@@ -1110,6 +1081,7 @@ export function Thread() {
                                 "transition-all duration-300",
                               )}
                               disabled={
+                                isHITLActive ||
                                 isLoading ||
                                 (!input.trim() && contentBlocks.length === 0)
                               }
@@ -1192,16 +1164,7 @@ export function Thread() {
               </div>
 
               {/* Loading */}
-              {fetchStatus === "loading" && (
-                <div className="flex flex-col items-center gap-3 py-24">
-                  <motion.div
-                    className="size-10 rounded-full border-2 border-[--primary]/30 border-t-[--primary]"
-                    animate={{ rotate: 360 }}
-                    transition={{ duration: 0.9, repeat: Infinity, ease: "linear" }}
-                  />
-                  <p className="text-sm text-[--muted-foreground]">Fetching 5 destinations in parallel…</p>
-                </div>
-              )}
+              {fetchStatus === "loading" && <ExploreLoadingScreen />}
 
               {/* Error */}
               {fetchStatus === "error" && (
