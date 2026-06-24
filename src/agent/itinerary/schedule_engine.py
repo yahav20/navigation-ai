@@ -60,6 +60,9 @@ WALK_SPEED_KMH         = 4.0
 TAXI_SPEED_KMH         = 25.0
 TAXI_BASE_COST         = 8.0          # USD fixed base fare
 TAXI_COST_PER_KM       = 1.5
+TAXI_MAX_COST          = 200.0        # TEMP: cap any single transit fare. A bad venue
+                                      # coordinate can yield a ~10,000 km "taxi" worth
+                                      # thousands; clamp until coordinates are validated.
 TAXI_MIN_MINUTES       = 10           # min taxi trip (wait + board)
 AIRPORT_HOTEL_MINUTES  = 45           # always taxi, at least 45 min
 
@@ -242,7 +245,7 @@ def transit_plan(
         mins = max(5, (dist / WALK_SPEED_KMH) * 60)
         return "walk", round(mins), 0.0
     mins = max(TAXI_MIN_MINUTES, (dist / TAXI_SPEED_KMH) * 60)
-    cost = TAXI_BASE_COST + dist * TAXI_COST_PER_KM
+    cost = min(TAXI_BASE_COST + dist * TAXI_COST_PER_KM, TAXI_MAX_COST)
     return "taxi", round(mins), round(cost, 2)
 
 
