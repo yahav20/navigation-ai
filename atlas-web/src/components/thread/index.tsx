@@ -71,50 +71,216 @@ import { inputCls, labelCls } from "../agent-selector/shared";
 function OceanBackground() {
   return (
     <div className="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
+      {/* Large top-left orb */}
       <motion.div
-        className="absolute -top-40 -left-40 h-[600px] w-[600px] rounded-full"
+        className="absolute -top-60 -left-60 h-[800px] w-[800px] rounded-full"
         style={{
           background:
-            "radial-gradient(ellipse, oklch(0.55 0.22 240 / 0.18) 0%, transparent 70%)",
-          filter: "blur(60px)",
+            "radial-gradient(ellipse, oklch(0.52 0.2 245 / 0.14) 0%, oklch(0.45 0.15 260 / 0.05) 50%, transparent 75%)",
+          filter: "blur(80px)",
         }}
-        animate={{ x: [0, 40, 0], y: [0, 30, 0], scale: [1, 1.08, 1] }}
-        transition={{ duration: 18, repeat: Infinity, ease: "easeInOut" }}
+        animate={{ x: [0, 50, 0], y: [0, 35, 0], scale: [1, 1.1, 1] }}
+        transition={{ duration: 20, repeat: Infinity, ease: "easeInOut" }}
       />
+      {/* Bottom-right teal orb */}
       <motion.div
-        className="absolute -bottom-32 -right-32 h-[500px] w-[500px] rounded-full"
+        className="absolute -bottom-48 -right-48 h-[700px] w-[700px] rounded-full"
         style={{
           background:
-            "radial-gradient(ellipse, oklch(0.65 0.2 195 / 0.14) 0%, transparent 70%)",
-          filter: "blur(50px)",
+            "radial-gradient(ellipse, oklch(0.62 0.18 195 / 0.11) 0%, oklch(0.55 0.14 210 / 0.04) 55%, transparent 78%)",
+          filter: "blur(70px)",
         }}
-        animate={{ x: [0, -30, 0], y: [0, -20, 0], scale: [1, 1.12, 1] }}
-        transition={{ duration: 22, repeat: Infinity, ease: "easeInOut", delay: 3 }}
+        animate={{ x: [0, -40, 0], y: [0, -28, 0], scale: [1, 1.14, 1] }}
+        transition={{ duration: 24, repeat: Infinity, ease: "easeInOut", delay: 4 }}
       />
+      {/* Centre-right accent orb */}
       <motion.div
-        className="absolute top-20 right-1/3 h-[260px] w-[260px] rounded-full"
+        className="absolute top-1/3 right-1/4 h-[380px] w-[380px] rounded-full"
         style={{
           background:
-            "radial-gradient(ellipse, oklch(0.7 0.18 210 / 0.1) 0%, transparent 70%)",
-          filter: "blur(40px)",
+            "radial-gradient(ellipse, oklch(0.68 0.16 215 / 0.07) 0%, transparent 70%)",
+          filter: "blur(55px)",
         }}
-        animate={{ x: [0, 20, -10, 0], y: [0, -25, 10, 0] }}
-        transition={{ duration: 14, repeat: Infinity, ease: "easeInOut", delay: 6 }}
+        animate={{ x: [0, 28, -14, 0], y: [0, -32, 12, 0] }}
+        transition={{ duration: 16, repeat: Infinity, ease: "easeInOut", delay: 8 }}
+      />
+      {/* Subtle centre glow — anchored, no motion */}
+      <div
+        className="absolute left-1/2 top-1/2 h-[500px] w-[900px] -translate-x-1/2 -translate-y-1/2 rounded-full"
+        style={{
+          background:
+            "radial-gradient(ellipse, oklch(0.58 0.12 235 / 0.06) 0%, transparent 70%)",
+          filter: "blur(90px)",
+        }}
       />
     </div>
   );
 }
 
-function GridOverlay() {
+// ─── Plane Hero ───────────────────────────────────────────────────────────────
+
+function PlaneHero() {
+  const [phase, setPhase] = useState<"flying" | "logo">(() =>
+    typeof window !== "undefined" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches
+      ? "logo"
+      : "flying",
+  );
+  const containerRef = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const rafRef = useRef<number>(0);
+
+  useEffect(() => {
+    if (phase === "logo") return;
+
+    const canvas = canvasRef.current;
+    const container = containerRef.current;
+    if (!canvas || !container) return;
+
+    const W = window.innerWidth;
+    const H = window.innerHeight;
+    canvas.width = W;
+    canvas.height = H;
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const isDark = document.documentElement.classList.contains("dark");
+    const planeColor = isDark ? "#eef0ff" : "#0d0d18";
+    const trailRGB = isDark ? "215,220,255" : "13,13,24";
+
+    // Landing target: center of container
+    const rect = container.getBoundingClientRect();
+    const endX = rect.left + rect.width / 2;
+    const endY = rect.top + rect.height / 2 - 20;
+
+    // Cubic bezier: off-screen bottom-left → arc top-right → center
+    const P0 = { x: -50, y: H * 1.08 };
+    const P1 = { x: W * 0.17, y: H * 0.1 };
+    const P2 = { x: W * 0.74, y: H * 0.07 };
+    const P3 = { x: endX, y: endY };
+
+    const bez = (t: number) => ({
+      x: (1-t)**3*P0.x + 3*(1-t)**2*t*P1.x + 3*(1-t)*t**2*P2.x + t**3*P3.x,
+      y: (1-t)**3*P0.y + 3*(1-t)**2*t*P1.y + 3*(1-t)*t**2*P2.y + t**3*P3.y,
+    });
+    const bezD = (t: number) => ({
+      x: 3*(1-t)**2*(P1.x-P0.x) + 6*(1-t)*t*(P2.x-P1.x) + 3*t**2*(P3.x-P2.x),
+      y: 3*(1-t)**2*(P1.y-P0.y) + 6*(1-t)*t*(P2.y-P1.y) + 3*t**2*(P3.y-P2.y),
+    });
+
+    const N = 500;
+    const pts = Array.from({ length: N + 1 }, (_, i) => bez(i / N));
+    const FLIGHT_MS = 2200;
+    const TRAIL_WIN = 0.2;
+    let t0: number | null = null;
+
+    const drawPlane = (x: number, y: number, angle: number, alpha: number, scale: number) => {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(angle);
+      ctx.scale(scale, scale);
+      ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
+      ctx.fillStyle = planeColor;
+      // Fuselage
+      ctx.beginPath(); ctx.moveTo(17,0); ctx.lineTo(-13,-3); ctx.lineTo(-13,3); ctx.closePath(); ctx.fill();
+      // Upper wing
+      ctx.beginPath(); ctx.moveTo(4,-1.5); ctx.lineTo(-2,-14); ctx.lineTo(-8,-14); ctx.lineTo(-6,-1.5); ctx.closePath(); ctx.fill();
+      // Lower wing
+      ctx.beginPath(); ctx.moveTo(4,1.5); ctx.lineTo(-2,14); ctx.lineTo(-8,14); ctx.lineTo(-6,1.5); ctx.closePath(); ctx.fill();
+      // Tail fin
+      ctx.beginPath(); ctx.moveTo(-9,-1.5); ctx.lineTo(-13,-7); ctx.lineTo(-13,-3); ctx.closePath(); ctx.fill();
+      ctx.restore();
+    };
+
+    const tick = (ts: number) => {
+      if (!t0) t0 = ts;
+      const t = Math.min((ts - t0) / FLIGHT_MS, 1);
+      const si = Math.min(Math.floor(t * N), N - 1);
+      ctx.clearRect(0, 0, W, H);
+
+      // Dashed fading trail
+      const trailT0 = Math.max(0, t - TRAIL_WIN);
+      const trailI0 = Math.floor(trailT0 * N);
+      for (let i = trailI0; i < si; i++) {
+        if (Math.floor((i - trailI0) / 5) % 2 === 1) continue;
+        const ratio = (i / N - trailT0) / Math.max(t - trailT0, 1e-6);
+        ctx.beginPath();
+        ctx.strokeStyle = `rgba(${trailRGB},${Math.max(0, ratio) * 0.45})`;
+        ctx.lineWidth = 1.5;
+        ctx.lineCap = "round";
+        ctx.moveTo(pts[i].x, pts[i].y);
+        ctx.lineTo(pts[Math.min(i+1, N)].x, pts[Math.min(i+1, N)].y);
+        ctx.stroke();
+      }
+
+      if (t < 1) {
+        const pos = bez(t);
+        const d = bezD(t);
+        drawPlane(pos.x, pos.y, Math.atan2(d.y, d.x), 1, 2);
+        rafRef.current = requestAnimationFrame(tick);
+      } else {
+        // Landing: shrink + dissolve
+        const fa = Math.atan2(bezD(0.999).y, bezD(0.999).x);
+        let lp = 0;
+        const land = () => {
+          lp = Math.min(lp + 0.055, 1);
+          ctx.clearRect(0, 0, W, H);
+          drawPlane(P3.x, P3.y, fa, 1 - lp * 2, 2 - lp * 1.7);
+          if (lp < 1) { rafRef.current = requestAnimationFrame(land); }
+          else { setPhase("logo"); }
+        };
+        rafRef.current = requestAnimationFrame(land);
+      }
+    };
+
+    rafRef.current = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [phase]);
+
   return (
-    <div
-      className="pointer-events-none fixed inset-0 -z-10 opacity-[0.025] dark:opacity-[0.04]"
-      style={{
-        backgroundImage:
-          "linear-gradient(oklch(0.4 0.1 240) 1px, transparent 1px), linear-gradient(90deg, oklch(0.4 0.1 240) 1px, transparent 1px)",
-        backgroundSize: "48px 48px",
-      }}
-    />
+    <div ref={containerRef} className="relative flex flex-col items-center gap-4 text-center">
+      {/* Full-viewport canvas — renders the plane flight */}
+      {phase === "flying" && (
+        <canvas
+          ref={canvasRef}
+          className="pointer-events-none"
+          style={{ position: "fixed", inset: 0, zIndex: 9999 }}
+        />
+      )}
+
+      {/* Logo + text — invisible while flying, fades in on landing */}
+      <motion.div
+        className="relative flex flex-col items-center gap-4"
+        initial={{ opacity: 0, scale: 0.92 }}
+        animate={{ opacity: phase === "logo" ? 1 : 0, scale: phase === "logo" ? 1 : 0.92 }}
+        transition={{ duration: 0.7, ease: [0.23, 1, 0.32, 1] }}
+      >
+        {/* Soft glow — dark mode only, appears after landing */}
+        <div
+          className="pointer-events-none absolute left-1/2 top-0 -translate-x-1/2 -translate-y-1/2 rounded-full opacity-0 dark:opacity-100"
+          style={{
+            width: 300, height: 300,
+            background: "radial-gradient(ellipse, oklch(0.45 0.18 278 / 0.24) 0%, transparent 68%)",
+            filter: "blur(40px)",
+          }}
+        />
+
+        {/* Bare SVG logo — no container, no border, no shadow */}
+        <LangGraphLogoSVG width={160} height={160} className="relative z-10 flex-shrink-0" />
+
+        <h1
+          className="text-[2.75rem] text-foreground dark:text-white"
+          style={{ fontFamily: "var(--font-marcellus), sans-serif", letterSpacing: "0.01em", lineHeight: 1.1 }}
+        >
+          Navigation AI
+        </h1>
+
+        <p className="text-sm text-[--muted-foreground]" style={{ fontFamily: "var(--font-marcellus), sans-serif" }}>
+          Choose an agent or type a freeform question below
+        </p>
+      </motion.div>
+    </div>
   );
 }
 
@@ -739,7 +905,6 @@ export function Thread() {
   return (
     <div className="relative flex h-screen w-full overflow-hidden bg-[--background]">
       <OceanBackground />
-      <GridOverlay />
 
       {/* ── Sidebar ── */}
       <div className="relative hidden lg:flex">
@@ -941,28 +1106,7 @@ export function Thread() {
                 >
 
                   {/* ── Welcome hero ── */}
-                  {!chatStarted && (
-                    <motion.div
-                      className="flex flex-col items-center gap-2 text-center"
-                      initial={{ opacity: 0, scale: 0.95 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      transition={{ duration: 0.5, ease: "easeOut" }}
-                    >
-                      <div className="relative mb-1">
-                        <div
-                          className="absolute inset-0 scale-150 rounded-full blur-2xl"
-                          style={{ background: "var(--glow-accent)" }}
-                        />
-                        <LangGraphLogoSVG width={140} height={140} className="relative z-10 flex-shrink-0" />
-                      </div>
-                      <h1 className="text-3xl font-semibold tracking-tight" style={{ letterSpacing: "-0.03em" }}>
-                        Navigation AI
-                      </h1>
-                      <p className="text-sm text-[--muted-foreground]">
-                        Choose an agent or type a freeform question below
-                      </p>
-                    </motion.div>
-                  )}
+                  {!chatStarted && <PlaneHero />}
 
                   {/* ── Agent Selector (pre-chat only) ── */}
                   <AnimatePresence>

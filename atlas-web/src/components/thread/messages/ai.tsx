@@ -321,7 +321,7 @@ export function AssistantMessage({
         ) : (
           <>
             {contentString.length > 0 && !hasItineraryViewer && (
-              <div className="py-1">
+              <div className="rounded-2xl bg-muted/50 px-4 py-3">
                 <MarkdownText>{contentString}</MarkdownText>
               </div>
             )}
@@ -394,18 +394,18 @@ export function AssistantMessageLoading() {
   }
 
   const NODE_LABELS: Record<string, string> = {
-    itinerary_executor:   "🗓️ Building itinerary",
-    itinerary_planner:    "🧠 Planning",
-    itinerary_replanner:  "🔄 Replanning",
-    itinerary_critic:     "🔍 Reviewing budget",
-    itinerary_formatter:  "✍️ Writing summary",
-    advisor_executor:     "🔎 Searching",
-    advisor_planner:      "🧠 Planning search",
-    advisor_formatter:    "✍️ Preparing answer",
-    travel_agent:         "✈️ Fetching travel data",
-    summary_node:         "📝 Summarising",
-    enrichment_node:      "💬 Gathering details",
-    intent_classifier:    "🤔 Understanding request",
+    itinerary_executor:   "Building itinerary",
+    itinerary_planner:    "Planning",
+    itinerary_replanner:  "Replanning",
+    itinerary_critic:     "Reviewing budget",
+    itinerary_formatter:  "Writing summary",
+    advisor_executor:     "Searching",
+    advisor_planner:      "Planning search",
+    advisor_formatter:    "Preparing answer",
+    travel_agent:         "Fetching travel data",
+    summary_node:         "Summarising",
+    enrichment_node:      "Gathering details",
+    intent_classifier:    "Understanding request",
   };
 
   const STEP_LABELS: Record<string, string> = {

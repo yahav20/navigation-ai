@@ -92,7 +92,7 @@ const PIN_COLOR: Record<string, string> = {
 // Special events get a distinct soft-cream treatment across the schedule + map.
 const SPECIAL_COLOR = "#EAE0CF";              // fill / border / dot / pin
 const SPECIAL_INK   = "#8A6A00";              // dark companion for foreground marks (pin label, text)
-const SPECIAL_CFG = { dot: SPECIAL_COLOR, bg: "#F4EFE3", text: SPECIAL_INK, label: "🎪 Special event" };
+const SPECIAL_CFG = { dot: SPECIAL_COLOR, bg: "#F4EFE3", text: SPECIAL_INK, label: "Special event" };
 
 // ─── Leaflet helpers ──────────────────────────────────────────────────────────
 
@@ -276,7 +276,11 @@ const SlotRow: FC<{ slot: TimeSlot; isLast: boolean; index: number }> = ({ slot,
       style={{
         ...S.slotRow,
         ...(isLast ? { borderBottom: "none" } : {}),
-        ...(slot.is_special ? S.slotRowSpecial : {}),
+        borderLeft: `3px solid ${cfg.dot}`,
+        borderRadius: 8,
+        paddingLeft: 10,
+        paddingTop: 6,
+        marginLeft: -2,
         animationName: animName,
         animationDuration: "0.4s",
         animationTimingFunction: "ease",
@@ -695,14 +699,6 @@ const S: Record<string, any> = {
     borderBottom: "0.5px solid var(--color-border-tertiary, rgba(0,0,0,0.07))",
     marginBottom: 4,
   },
-  slotRowSpecial: {
-    borderLeft: "3px solid #EAE0CF",
-    background: "rgba(234,224,207,0.45)",
-    borderRadius: 8,
-    paddingLeft: 10,
-    paddingTop: 6,
-    marginLeft: -2,
-  },
   slotTime: {
     fontSize: 11,
     fontFamily: "'JetBrains Mono', 'Fira Code', 'Courier New', monospace",
@@ -868,7 +864,7 @@ if (typeof document !== "undefined") {
     ".dark .itv-root [data-slot=checkin]   { background: rgba(107,143,212,0.12) !important; color: #9BB8F0 !important; }",
     // Dark mode special event (after data-slot rules so it wins over [data-slot=activity])
     ".dark .itv-root [data-special='1'] { background: rgba(234,224,207,0.16) !important; color: #EAE0CF !important; }",
-    ".dark .itv-root .itv-slot-special  { background: rgba(234,224,207,0.08) !important; }",
+    ".dark .itv-root .itv-slot-special  { background: transparent !important; }",
     // Dark mode map inner glow
     ".dark .itv-root .itv-map-container { box-shadow: inset 0 0 0 1px rgba(255,255,255,0.06); }",
     // Dark mode legend dot ring (match dark bg)

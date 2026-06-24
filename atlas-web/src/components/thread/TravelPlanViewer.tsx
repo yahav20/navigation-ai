@@ -9,8 +9,6 @@
  */
 
 import { useState, type FC, type CSSProperties, type ReactNode } from "react";
-import { v4 as uuidv4 } from "uuid";
-import { useStreamContext } from "@/providers/Stream";
 
 // ─── Types (unchanged) ────────────────────────────────────────────────────────
 
@@ -497,26 +495,6 @@ export default function TravelPlanViewer({
   best_time = {},
   special_events = [],
 }: TravelPlanViewerProps) {
-  const stream = useStreamContext();
-
-  const handleSchedule = () => {
-    stream.submit(
-      {
-        messages: [{
-          id:      uuidv4(),
-          type:    "human",
-          content: [{ type: "text", text: "Build my daily schedule" }],
-        }],
-      },
-      {
-        config:          { recursion_limit: 100 },
-        streamMode:      ["values"],
-        streamSubgraphs: true,
-        streamResumable: true,
-      },
-    );
-  };
-
   const cheapestIdx = flight_pairings.length > 0
     ? flight_pairings.reduce(
         (minI, p, i, arr) => (p.total_price < arr[minI].total_price ? i : minI),
@@ -604,28 +582,23 @@ export default function TravelPlanViewer({
       {/* ── 6. Insights ── */}
       <InsightsSection weather={weather} best_time={best_time} />
 
-      {/* ── 6. CTA ── */}
-      <div style={S.ctaSection}>
-        <button className="tpv-cta" style={S.ctaBtn} onClick={handleSchedule}>
-          Build my daily schedule →
-        </button>
-        {(total_budget != null || lowest_group_estimate != null) && (
-          <div style={S.ctaBudget}>
-            <div style={S.ctaBudgetText}>
-              {lowest_group_estimate != null && total_budget != null
-                ? `Estimated group cost: $${lowest_group_estimate.toLocaleString()} of $${total_budget.toLocaleString()} budget`
-                : total_budget != null
-                  ? `Budget: $${total_budget.toLocaleString()}`
-                  : `Estimated cost: $${lowest_group_estimate?.toLocaleString()}`}
-            </div>
-            {budgetPct !== null && (
-              <div style={S.progressTrack}>
-                <div style={{ ...S.progressFill, width: `${budgetPct}%` }} />
-              </div>
-            )}
+      {/* ── 7. Budget ── */}
+      {(total_budget != null || lowest_group_estimate != null) && (
+        <div style={S.ctaBudget}>
+          <div style={S.ctaBudgetText}>
+            {lowest_group_estimate != null && total_budget != null
+              ? `Estimated group cost: $${lowest_group_estimate.toLocaleString()} of $${total_budget.toLocaleString()} budget`
+              : total_budget != null
+                ? `Budget: $${total_budget.toLocaleString()}`
+                : `Estimated cost: $${lowest_group_estimate?.toLocaleString()}`}
           </div>
-        )}
-      </div>
+          {budgetPct !== null && (
+            <div style={S.progressTrack}>
+              <div style={{ ...S.progressFill, width: `${budgetPct}%` }} />
+            </div>
+          )}
+        </div>
+      )}
 
     </div>
   );

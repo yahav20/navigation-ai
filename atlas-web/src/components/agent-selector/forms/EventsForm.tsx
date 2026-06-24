@@ -8,7 +8,11 @@ import {
   MapPin,
   Calendar,
   ChevronDown,
-  Music,
+  Mic,
+  Sparkles,
+  Snowflake,
+  Wine,
+  Flower2,
 } from "lucide-react";
 import { inputCls, labelCls, FormSubmitButton } from "../shared";
 
@@ -80,11 +84,11 @@ export function EventsForm({ onSubmit }: { onSubmit: (text: string) => void }) {
       <div className="flex gap-1 rounded-xl bg-[--accent]/60 p-1">
         <button type="button" className={toggleCls(mode === "concerts")}
           onClick={() => { setMode("concerts"); setErrors({}); }}>
-          🎤 Concerts &amp; Shows
+          <Mic className="mb-0.5 mr-1 inline size-3" /> Concerts &amp; Shows
         </button>
         <button type="button" className={toggleCls(mode === "special")}
           onClick={() => { setMode("special"); setErrors({}); }}>
-          🎪 Special Events
+          <Sparkles className="mb-0.5 mr-1 inline size-3" /> Special Events
         </button>
       </div>
 
@@ -135,15 +139,16 @@ export function EventsForm({ onSubmit }: { onSubmit: (text: string) => void }) {
               <button type="button"
                 onClick={() => { setArtist("Lady Gaga"); setConcertCity("London"); setErrors({}); }}
                 className="rounded-lg bg-[--accent] px-2.5 py-1 text-xs font-medium text-[--foreground] transition-colors duration-150 hover:bg-[--accent]/80">
-                🎤 Artist in city
+                <Mic className="mb-0.5 mr-1 inline size-3" /> Artist in city
               </button>
               <button type="button"
                 onClick={() => setConcertMonth(currentMonth)}
                 className="rounded-lg bg-[--accent] px-2.5 py-1 text-xs font-medium text-[--foreground] transition-colors duration-150 hover:bg-[--accent]/80">
-                📅 This month
+                <Calendar className="mb-0.5 mr-1 inline size-3" /> This month
               </button>
             </div>
-          </motion.div>
+          </motion.div> 
+          
         ) : (
           <motion.div key="special" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.18 }}
@@ -182,17 +187,17 @@ export function EventsForm({ onSubmit }: { onSubmit: (text: string) => void }) {
               <button type="button"
                 onClick={() => { setEventCity("Berlin"); setEventMonth("December"); setErrors({}); }}
                 className="rounded-lg bg-[--accent] px-2.5 py-1 text-xs font-medium text-[--foreground] transition-colors duration-150 hover:bg-[--accent]/80">
-                🎄 Christmas Markets
+                <Snowflake className="mb-0.5 mr-1 inline size-3" /> Christmas Markets
               </button>
               <button type="button"
                 onClick={() => { setEventCity("Munich"); setEventMonth("October"); setErrors({}); }}
                 className="rounded-lg bg-[--accent] px-2.5 py-1 text-xs font-medium text-[--foreground] transition-colors duration-150 hover:bg-[--accent]/80">
-                🍺 Oktoberfest
+                <Wine className="mb-0.5 mr-1 inline size-3" /> Oktoberfest
               </button>
               <button type="button"
                 onClick={() => { setEventCity("Amsterdam"); setEventMonth("April"); setErrors({}); }}
                 className="rounded-lg bg-[--accent] px-2.5 py-1 text-xs font-medium text-[--foreground] transition-colors duration-150 hover:bg-[--accent]/80">
-                🌷 King's Day
+                <Flower2 className="mb-0.5 mr-1 inline size-3" /> King's Day
               </button>
             </div>
           </motion.div>
