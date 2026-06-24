@@ -412,7 +412,7 @@ class ItineraryPlannerNode:
         # LLM is only used on the first entry into update mode (one structured call).
         # All other planning paths are fully deterministic.
         self._update_llm = (
-            llm.with_structured_output(DayUpdateInstruction, method="function_calling")
+            silent(llm.with_structured_output(DayUpdateInstruction, method="function_calling"))
             if llm else None
         )
 

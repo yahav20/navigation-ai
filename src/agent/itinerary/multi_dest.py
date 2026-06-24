@@ -40,6 +40,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langgraph.types import interrupt
 from pydantic import BaseModel, ConfigDict, Field
 
+from agent.core.llm import silent
 from agent.core.state import AgentState
 from agent.itinerary.formatter import (
     ItineraryFormatterNode,
@@ -122,7 +123,7 @@ class SegmentPlannerNode:
 
     def __init__(self, llm: Optional[BaseChatModel] = None) -> None:
         self._llm = (
-            llm.with_structured_output(_MultiCityRoutes, method="function_calling")
+            silent(llm.with_structured_output(_MultiCityRoutes, method="function_calling"))
             if llm else None
         )
 
@@ -455,6 +456,27 @@ class LegCollectNode:
             "feasible":       state.get("itinerary_feasible", True),
         }
 
+        # Itinerary update: the planner re-ran for ONE already-built city without
+        # going through segment_planner/leg_dispatch, so seg_index and itineraries
+        # still hold the prior build's values. Replace that city's leg in place
+        # (matched by destination) instead of appending — appending would duplicate
+        # the city and make a single-destination trip render as a bogus multi-city
+        # trip. Leave seg_index untouched so after_leg_collect heads to the formatter.
+        if state.get("itinerary_mode") == "update":
+            existing = list(state.get("itineraries") or [])
+            dest = (state.get("destination_city") or "").lower()
+            for i, prev_leg in enumerate(existing):
+                if prev_leg.get("destination", "").lower() == dest:
+                    existing[i] = {
+                        **leg,
+                        "order":           prev_leg.get("order", i),
+                        "drive_from_prev": prev_leg.get("drive_from_prev"),
+                    }
+                    break
+            else:
+                existing.append(leg)
+            return {"itineraries": existing}
+
         # Sequential loop → a plain list write accumulates safely. The first leg
         # (idx 0, or an update with no segments) resets any list from a prior turn.
         existing = [] if idx == 0 else list(state.get("itineraries") or [])
@@ -476,7 +498,11 @@ class TripFormatterNode:
 
     def __call__(self, state: AgentState) -> dict:
         legs = [l for l in (state.get("itineraries") or [])]
-        if len(legs) <= 1:
+        # A single-destination trip always renders through the single-city formatter,
+        # even after an update. is_multi_destination is the authoritative flag (set by
+        # segment_planner/route_select); the len check is just a belt-and-suspenders
+        # fallback for the case where the multi flag was never written.
+        if not state.get("is_multi_destination") or len(legs) <= 1:
             # Single destination (or an itinerary update) — identical to before.
             return self._formatter(state)
         return self._render_multi(state, sorted(legs, key=lambda l: l["order"]))
