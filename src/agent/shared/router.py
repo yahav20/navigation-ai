@@ -181,6 +181,21 @@ class RouterNode:
             if any(kw in content_lower for kw in concert_keywords):
                 final_intent = "advisor"
 
+        # Guardrail 5c: currency-conversion questions ("how much in shekels?",
+        # "what's that in euros?", "convert the total to ILS") must route to advisor —
+        # even with an active trip — so the advisor can convert the planned trip's USD
+        # total. The travel agent would just re-render the same USD plan.
+        if final_intent != "advisor":
+            content_lower = last_msg.content.lower()
+            currency_cues = [
+                "in shekel", "in shekels", "in ils", "in nis", "to shekel", "to ils",
+                "in euro", "in euros", "to euro", "in pound", "in pounds", "to pound",
+                "in yen", "in local currency", "in my currency", "exchange rate",
+                "בשקל", "בשקלים", "ביורו", "בלירות",
+            ]
+            if any(cue in content_lower for cue in currency_cues):
+                final_intent = "advisor"
+
         # Guardrail 6: update_itinerary requires a built itinerary; otherwise build a fresh one
         if final_intent == "update_itinerary":
             has_itinerary = bool(

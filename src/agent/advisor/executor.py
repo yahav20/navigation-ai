@@ -1,5 +1,7 @@
 """Executor node — runs ONE planned tool call and accumulates results for the current turn."""
+import calendar
 import json
+from datetime import date
 from typing import Any
 
 from agent.core.state import AgentState
@@ -9,6 +11,32 @@ from tools.flights import fetch_flights
 from ui import render_node, render_node_status
 
 _tool_map = {t.name: t for t in advisor_tools} | {"fetch_flights": fetch_flights}
+
+_MONTH_NUMS = {name.lower(): i for i, name in enumerate(calendar.month_name) if name}
+
+
+def _month_to_iso(month: str | None) -> str | None:
+    """Convert a 'Month YYYY' (or bare 'Month') concert/event filter into 'YYYY-MM'.
+
+    With an explicit year, that year is used. With a bare month name, it resolves
+    to the next future occurrence (this year if still ahead, otherwise next year) —
+    matching the metadata extractor's FUTURE-MONTH rule. Returns None if unparseable.
+    """
+    if not month:
+        return None
+    parts = month.strip().split()
+    if not parts:
+        return None
+    num = _MONTH_NUMS.get(parts[0].lower())
+    if not num:
+        return None
+
+    if len(parts) >= 2 and parts[1].isdigit() and len(parts[1]) == 4:
+        return f"{int(parts[1]):04d}-{num:02d}"
+
+    today = date.today()
+    year = today.year if num >= today.month else today.year + 1
+    return f"{year:04d}-{num:02d}"
 
 
 def extract_trip_total_usd(state: AgentState) -> float | None:
@@ -149,4 +177,14 @@ class AdvisorExecutorNode:
             update["advisor_last_concert_search"] = {
                 k: args[k] for k in ("city", "month", "genre") if k in args
             }
+        # Carry the searched month forward as the trip_start so that when the user
+        # transitions from "concerts/events in August" to actually planning the trip,
+        # the planning flow already knows the month and doesn't re-ask for a date.
+        if tool_name in ("search_concerts", "search_special_events"):
+            iso_month = _month_to_iso(args.get("month"))
+            if iso_month:
+                current = state.get("trip_start")
+                # Don't clobber a more specific same-month date already in state.
+                if not current or current[:7] != iso_month:
+                    update["trip_start"] = iso_month
         return update
