@@ -645,13 +645,36 @@ def _cheapest(flights) -> Optional[dict]:
 
 
 def _leg_cost(plan: dict) -> float:
-    """Hotel + activity cost for one leg, read from its verify_budget result."""
+    """Hotel + activities + meals cost for one leg, read from its verify_budget
+    result.
+
+    Flights are deliberately EXCLUDED: standalone legs price a phantom average
+    round-trip flight inside ``group_grand_total`` even though the leg itself
+    carries no flight, and the overview accounts for the real round-trip flight
+    separately. Summing the explicit hotel/activities/meals sub-totals keeps the
+    "Cities (hotels + activities)" line honest and stops flights being counted
+    once per leg on top of the real flight.
+    """
     results = (plan or {}).get("step_results", {})
     key = next((k for k in results if k.startswith("verify_budget")), None)
     if not key:
         return 0.0
-    data = _unwrap_result(results[key])
-    return float(data.get("group_grand_total") or data.get("grand_total", 0) or 0)
+    data = _unwrap_result(results[key]) or {}
+
+    hotel      = data.get("group_hotel_total",      data.get("hotel_total"))
+    activities = data.get("group_activities_total", data.get("activities_total"))
+    meals      = data.get("group_meals_total",      data.get("meals_total"))
+    if hotel is not None or activities is not None or meals is not None:
+        return float(hotel or 0) + float(activities or 0) + float(meals or 0)
+
+    # Fallback for older results that only carried the grand total: subtract
+    # whatever flight component is present so the leg cost stays flight-free.
+    grand = float(data.get("group_grand_total") or data.get("grand_total", 0) or 0)
+    flights = (
+        float(data.get("group_outbound_flight") or data.get("outbound_flight", 0) or 0)
+        + float(data.get("group_return_flight") or data.get("return_flight", 0) or 0)
+    )
+    return max(grand - flights, 0.0)
 
 
 def _demote_heading(md: str) -> str:

@@ -553,6 +553,26 @@ class ItineraryReplannerNode:
         else:
             markdown = _generate_fallback_markdown(results_with_budget, trip_days, budget, mode, state=state)
 
+        # ── Per-leg completion message ────────────────────────────────────
+        # In a multi-destination trip the replanner runs once per city, so a
+        # flat "Itinerary complete" would repeat verbatim for every leg. Emit a
+        # city-scoped progress line instead so the build reads as a sequence
+        # (mirroring the final route: ✈️ for the entry city, 🚗 for drive legs).
+        segments = state.get("trip_segments") or []
+        city     = state.get("destination_city", "")
+        if (
+            bool(state.get("is_multi_destination"))
+            and len(segments) > 1
+            and city
+            and state.get("itinerary_mode") != "update"
+        ):
+            idx   = int(state.get("seg_index") or 0)
+            total = len(segments)
+            icon  = "✈️" if idx == 0 else "🚗"
+            done_msg = f"{icon} **{city}** planned — {idx + 1} of {total}"
+        else:
+            done_msg = "✅ **Itinerary complete.**"
+
         return {
             "itinerary_plan": {
                 **plan_state,
@@ -561,7 +581,7 @@ class ItineraryReplannerNode:
             },
             "itinerary_feasible": True,
             "replanner_action":   "done",
-            "messages": [AIMessage(content="✅ **Itinerary complete.**", name="replanner_log")],
+            "messages": [AIMessage(content=done_msg, name="replanner_log")],
         }
 
     # ── Per-step critic ────────────────────────────────────────────────────
