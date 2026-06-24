@@ -133,6 +133,7 @@ ToolName = Literal[
     "get_best_time_to_visit",
     "get_average_weather",
     "get_currency_exchange",
+    "convert_trip_cost",
     "get_visa_requirements",
     "get_travel_safety_info",
     "get_packing_list",
@@ -519,6 +520,16 @@ PRACTICAL TRAVEL TOOLS (informational — each needs exactly ONE call, no combin
     -> Trigger: any exchange rate or currency conversion question
     -> Examples: "how much is $500 in euros?", "what's the euro to shekel rate?", "convert 100 USD to JPY"
     -> Always one tool call; never combine with other tools
+    -> Use for GENERIC amounts/rates only — NOT for "how much did MY TRIP cost in X" (see convert_trip_cost)
+
+- convert_trip_cost
+    Set: to_currency = <currency code or name the user wants the total in>
+    -> Trigger: the user asks what their ALREADY-PLANNED trip costs in a specific currency
+    -> Examples: "how much did the trip cost in shekels?", "what's the total in euros?",
+       "convert my trip cost to ILS"
+    -> Do NOT set amount — the planned trip's USD total is injected automatically from state
+    -> Do NOT use get_currency_exchange for these; that tool is for generic amounts only
+    -> Always one tool call; never combine with other tools
 
 - get_visa_requirements
     Set: city = <destination country or city>, passport_nationality = <user's nationality>
@@ -716,6 +727,7 @@ MULTI-FILTER RULE — User specifies TWO or more distinct destination preference
 
     Quick trigger reference:
       "how much is X in Y / convert X to Y / exchange rate"  → get_currency_exchange
+      "how much did my trip cost in X / total in X"          → convert_trip_cost
       "do I need a visa / visa requirements for X"           → get_visa_requirements
       "is X safe / travel warning / safety in X"            → get_travel_safety_info
       "what should I pack / packing list for X"             → get_packing_list

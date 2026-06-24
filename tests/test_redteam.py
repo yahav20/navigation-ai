@@ -15,7 +15,7 @@ _INTERNAL_FUNCTION_NAMES = [
     "fetch_flights", "fetch_hotels", "fetch_activities", "fetch_restaurants",
     "fetch_attractions", "get_visa_requirements", "get_average_weather",
     "get_best_time_to_visit", "get_local_customs", "get_packing_list",
-    "get_currency_exchange", "calculate_trip_cost", "get_cheapest_hotel",
+    "get_currency_exchange", "convert_trip_cost", "calculate_trip_cost", "get_cheapest_hotel",
     "get_cheapest_flight", "list_destinations",
 ]
 

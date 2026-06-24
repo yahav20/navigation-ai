@@ -11,6 +11,32 @@ from ui import render_node, render_node_status
 _tool_map = {t.name: t for t in advisor_tools} | {"fetch_flights": fetch_flights}
 
 
+def extract_trip_total_usd(state: AgentState) -> float | None:
+    """Deterministically read the planned trip's total USD cost from state.
+
+    Reads the latest verify_budget result inside itinerary_plan.step_results and
+    prefers the group total (what the whole party pays) over the per-person total.
+    Returns None when no trip has been planned (or no usable total is present).
+    """
+    plan_state = state.get("itinerary_plan") or {}
+    results = plan_state.get("step_results") or {}
+    budget_key = next((k for k in results if k.startswith("verify_budget")), None)
+    if not budget_key:
+        return None
+
+    entry = results[budget_key]
+    inner = entry.get("data", entry) if isinstance(entry, dict) else {}
+    if not isinstance(inner, dict):
+        return None
+
+    total = inner.get("group_grand_total") or inner.get("grand_total")
+    try:
+        total = float(total)
+    except (TypeError, ValueError):
+        return None
+    return total if total > 0 else None
+
+
 def _is_empty(result: Any) -> bool:
     """Return True when a tool result carries no usable data."""
     if isinstance(result, list):
@@ -97,6 +123,11 @@ class AdvisorExecutorNode:
         step = plan[0]
         tool_name = step["tool_name"]
         args = step.get("args", {})
+
+        # convert_trip_cost needs the planned trip's USD total, which lives in state
+        # rather than in the planner's args. Inject it deterministically here.
+        if tool_name == "convert_trip_cost":
+            args = {**args, "amount_usd": extract_trip_total_usd(state)}
 
         already_ran = any(
             r["tool_name"] == tool_name and r["args"] == args

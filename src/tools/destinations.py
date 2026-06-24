@@ -55,16 +55,8 @@ def _normalize_currency(raw: str) -> str:
     return _CURRENCY_ALIASES.get(key, raw.strip().upper())
 
 
-@tool
-def get_currency_exchange(from_currency: str, to_currency: str, amount: float = 1.0) -> dict:
-    """Get the live currency exchange rate between two currencies and convert an amount.
-
-    Accepts currency codes (USD, EUR, ILS) or common names (dollar, euro, shekel, pound).
-    Use this when the user asks things like:
-    - 'How much is $500 in euros?'
-    - 'What is the exchange rate between dollars and shekels?'
-    - 'Convert 1000 baht to USD'
-    """
+def _convert_currency(from_currency: str, to_currency: str, amount: float = 1.0) -> dict:
+    """Fetch a live rate and convert an amount. Returns an {"error": ...} dict on failure."""
     base = _normalize_currency(from_currency)
     target = _normalize_currency(to_currency)
 
@@ -83,14 +75,63 @@ def get_currency_exchange(from_currency: str, to_currency: str, amount: float = 
         return {"error": f"Unsupported target currency: {target}"}
 
     rate = rates[target]
-    converted = round(amount * rate, 2)
     return {
         "from": base,
         "to": target,
         "rate": round(rate, 4),
         "amount": amount,
-        "converted": converted,
+        "converted": round(amount * rate, 2),
         "updated": data.get("time_last_update_utc", "unknown"),
+    }
+
+
+@tool
+def get_currency_exchange(from_currency: str, to_currency: str, amount: float = 1.0) -> dict:
+    """Get the live currency exchange rate between two currencies and convert an amount.
+
+    Accepts currency codes (USD, EUR, ILS) or common names (dollar, euro, shekel, pound).
+    Use this when the user asks things like:
+    - 'How much is $500 in euros?'
+    - 'What is the exchange rate between dollars and shekels?'
+    - 'Convert 1000 baht to USD'
+    """
+    return _convert_currency(from_currency, to_currency, amount)
+
+
+@tool
+def convert_trip_cost(to_currency: str, amount_usd: float | None = None) -> dict:
+    """Convert the total cost of an ALREADY-PLANNED trip from USD into another currency.
+
+    Use this ONLY when the user asks what their planned trip costs in their own currency
+    (e.g. 'how much did the trip cost in shekels?', 'what's that in euros?'). The trip's
+    total USD cost is supplied automatically from the planned itinerary — never ask the
+    user for it. If no trip has been planned yet, this returns the current exchange rate
+    with no_trip=True so the assistant can show the rate and offer to convert later.
+
+    Do NOT use for generic currency questions ('convert $500 to euros', 'USD to ILS rate')
+    — those go to get_currency_exchange.
+    """
+    info = _convert_currency("USD", to_currency, amount_usd or 1.0)
+    if "error" in info:
+        return info
+
+    if not amount_usd or amount_usd <= 0:
+        # No trip planned yet — return the rate only so the assistant can still help.
+        return {
+            "no_trip": True,
+            "from": "USD",
+            "to": info["to"],
+            "rate": info["rate"],
+            "updated": info["updated"],
+        }
+
+    return {
+        "from": "USD",
+        "to": info["to"],
+        "rate": info["rate"],
+        "amount_usd": round(amount_usd, 2),
+        "converted": info["converted"],
+        "updated": info["updated"],
     }
 
 
@@ -727,6 +768,7 @@ advisor_tools = [
     get_best_time_to_visit,
     get_average_weather,
     get_currency_exchange,
+    convert_trip_cost,
     get_visa_requirements,
     get_travel_safety_info,
     get_packing_list,

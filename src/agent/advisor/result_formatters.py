@@ -62,6 +62,7 @@ def _header(tool_name: str, args: dict) -> str:
 
     mapping = {
         "get_currency_exchange":           "Currency Exchange Rate",
+        "convert_trip_cost":               "Trip Cost in Local Currency",
         "get_travel_safety_info":          f"Travel Safety{' — ' + city if city else ''}",
         "get_visa_requirements":           f"Visa Requirements{' — ' + city if city else ''}",
         "get_packing_list":                f"Packing List{' — ' + city if city else ''}{', ' + season if season else ''}",
@@ -106,6 +107,31 @@ def _fmt_currency(result: dict, _args: dict) -> str:
         lines.append(f"converted: {result.get('converted', '?')} (for {amount:g} {result.get('from', '?')})")
     lines.append(f"updated: {result.get('updated', 'unknown')}")
     return "\n".join(lines)
+
+
+def _fmt_trip_cost(result: dict, _args: dict) -> str:
+    if "error" in result:
+        return f"error: {result['error']}"
+    target = result.get("to", "?")
+    rate   = result.get("rate", "?")
+    if result.get("no_trip"):
+        return "\n".join([
+            "status: No trip has been planned yet, so there is no total trip cost to convert.",
+            "from: USD",
+            f"to: {target}",
+            f"rate: {rate}",
+            f"updated: {result.get('updated', 'unknown')}",
+            f"note: Tell the user the current USD->{target} rate and that once a trip is "
+            "planned you can convert its full cost into their currency.",
+        ])
+    return "\n".join([
+        "from: USD",
+        f"to: {target}",
+        f"rate: {rate}",
+        f"trip_total_usd: {result.get('amount_usd', '?')}",
+        f"trip_total_converted: {result.get('converted', '?')} {target}",
+        f"updated: {result.get('updated', 'unknown')}",
+    ])
 
 
 def _fmt_safety(result: dict, _args: dict) -> str:
@@ -301,6 +327,7 @@ def _fmt_destinations(items: list, _args: dict) -> str:
 
 _FORMATTERS: dict[str, Any] = {
     "get_currency_exchange":            _fmt_currency,
+    "convert_trip_cost":                _fmt_trip_cost,
     "get_travel_safety_info":           _fmt_safety,
     "get_visa_requirements":            _fmt_visa,
     "get_packing_list":                 _fmt_packing,
