@@ -243,6 +243,50 @@ def test_after_leg_collect_update_path_no_segments():
     assert after_leg_collect({"seg_index": 1, "trip_segments": []}) == "trip_formatter"
 
 
+def test_leg_collect_update_replaces_in_place_not_appends():
+    # After a single-city build, the update path re-runs the planner WITHOUT
+    # segment_planner/leg_dispatch, so seg_index (1) and itineraries are stale.
+    # leg_collect must REPLACE the existing leg, not append a duplicate — otherwise
+    # the single-city update renders as a bogus two-city multi trip.
+    segs = [{"destination": "Paris", "days": 3, "order": 0, "drive_from_prev": None}]
+    s = {
+        "trip_segments": segs, "seg_index": 1, "destination_city": "Paris",
+        "trip_days": 3, "itinerary_mode": "update",
+        "itinerary_plan": {"final_markdown": "PARIS-UPDATED"},
+        "itineraries": [{"order": 0, "destination": "Paris", "days": 3,
+                         "drive_from_prev": None,
+                         "itinerary_plan": {"final_markdown": "PARIS-OLD"}}],
+    }
+    out = LegCollectNode()(s)
+    assert len(out["itineraries"]) == 1                       # no duplicate leg
+    assert out["itineraries"][0]["itinerary_plan"]["final_markdown"] == "PARIS-UPDATED"
+    assert out["itineraries"][0]["order"] == 0                # original order preserved
+    assert "seg_index" not in out                             # loop counter untouched
+    # one leg left → renders through the single-city formatter, not the multi stitcher
+    assert after_leg_collect({**s, **out}) == "trip_formatter"
+
+
+def test_leg_collect_update_replaces_correct_city_in_multi():
+    # Multi-city trip: an update to one city replaces only that city's leg.
+    s = {
+        "trip_segments": [{"destination": "Rome", "days": 2, "order": 0, "drive_from_prev": None},
+                          {"destination": "Florence", "days": 2, "order": 1, "drive_from_prev": "Rome"}],
+        "seg_index": 2, "destination_city": "Florence", "trip_days": 2,
+        "itinerary_mode": "update",
+        "itinerary_plan": {"final_markdown": "FLO-UPDATED"},
+        "itineraries": [
+            {"order": 0, "destination": "Rome", "days": 2, "drive_from_prev": None,
+             "itinerary_plan": {"final_markdown": "ROME"}},
+            {"order": 1, "destination": "Florence", "days": 2, "drive_from_prev": "Rome",
+             "itinerary_plan": {"final_markdown": "FLO-OLD"}},
+        ],
+    }
+    out = LegCollectNode()(s)
+    plans = [l["itinerary_plan"]["final_markdown"] for l in out["itineraries"]]
+    assert plans == ["ROME", "FLO-UPDATED"]                   # Rome untouched, Florence updated
+    assert out["itineraries"][1]["drive_from_prev"] == "Rome"  # transition preserved
+
+
 # ── TripFormatterNode: single delegates to the real formatter ────────────────
 
 def test_trip_formatter_single_delegates():
@@ -257,6 +301,13 @@ def test_trip_formatter_single_delegates():
     # 0 legs (infeasible single / update) and 1 leg both delegate.
     assert node({"itineraries": []}) is sentinel
     assert node({"itineraries": [{"order": 0, "destination": "Rome"}]}) is sentinel
+    # A non-multi trip ALWAYS delegates to the single formatter, even if stray legs
+    # accumulated (e.g. a single-city update) — it must never render as multi-city.
+    assert node({
+        "is_multi_destination": False,
+        "itineraries": [{"order": 0, "destination": "Paris"},
+                        {"order": 1, "destination": "Paris"}],
+    }) is sentinel
 
 
 def test_trip_formatter_multi_stitches():
@@ -271,7 +322,7 @@ def test_trip_formatter_multi_stitches():
     ]
     out = node({
         "itineraries": legs, "current_city": "Tel Aviv", "total_trip_days": 7,
-        "trip_total_budget": 2000,
+        "trip_total_budget": 2000, "is_multi_destination": True,
         "flight_options": [{"price": 300, "flight_number": "AB1"}],
         "return_flight_options": [{"price": 250, "flight_number": "AB2"}],
     })
@@ -307,7 +358,7 @@ def test_trip_formatter_multi_prefers_booked_flights():
     ]
     out = node({
         "itineraries": legs, "current_city": "Tel Aviv", "total_trip_days": 20,
-        "trip_total_budget": 10000,
+        "trip_total_budget": 10000, "is_multi_destination": True,
         # cheapest-in-list is 100, but the user booked the 582 flight
         "flight_options": [{"price": 100, "flight_number": "CHEAP"},
                            {"price": 582, "flight_number": "4312"}],

@@ -167,7 +167,8 @@ def extract_special_events(
 
     try:
         from langchain_core.messages import HumanMessage, SystemMessage  # noqa: PLC0415
-        structured_llm = llm.with_structured_output(_SpecialEventsList)
+        from agent.core.llm import silent  # noqa: PLC0415
+        structured_llm = silent(llm.with_structured_output(_SpecialEventsList))
         extraction = structured_llm.invoke([
             SystemMessage(content=system_prompt),
             HumanMessage(content=user_message),
