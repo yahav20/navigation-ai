@@ -1,5 +1,8 @@
 # Security / API Keys
 .env
+# atlas-web/.env holds no secrets (just the local server URL) — keep it tracked
+# so the web UI works out of the box on a fresh clone.
+!atlas-web/.env
 
 # Virtual Environments
 taenv/

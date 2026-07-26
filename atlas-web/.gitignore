@@ -25,6 +25,9 @@ dist-ssr
 
 # LangGraph API
 .langgraph_api
-.env
+.env*
+# this app's .env holds no secrets (just the local server URL) — keep it tracked
+!.env
+!.env.example
 .next/
 next-env.d.ts

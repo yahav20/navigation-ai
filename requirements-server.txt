@@ -1,18 +1,17 @@
-# LangGraph dev-server dependencies (backend for langchain-ai/agent-chat-ui).
+# Full dependency set: core app (requirements.txt) + the LangGraph dev server
+# (backend for the atlas-web chat UI). One virtualenv with this file installed
+# runs everything — the CLI, the dev server, and the tests.
 #
-# Install into a SEPARATE virtualenv from the main app. `langgraph-cli[inmem]`
-# pulls langgraph-api, which requires protobuf>=6.32 — and that conflicts with
-# the Gemini SDK (langchain-google-genai -> google-ai-generativelanguage,
-# protobuf<6) used by the main CLI env. Keeping the server isolated lets the
-# main env (tavenv) stay on protobuf 5.x so the Gemini provider is unaffected.
+# Setup (see README for details):
+#   python3.12 -m venv .venv
+#   .venv/bin/pip install -r requirements-server.txt
+#   .venv/bin/langgraph dev --allow-blocking     # serves http://127.0.0.1:2024
 #
-# Setup (plain venv + pip; pip may print a harmless protobuf conflict warning):
-#   python3.12 -m venv .lgenv
-#   .lgenv/bin/pip install -r requirements-server.txt
-#   .lgenv/bin/langgraph dev --allow-blocking    # serves http://127.0.0.1:2024
-#
-# --allow-blocking is required: graph nodes do synchronous file reads
-# (e.g. data/travel_db.json), which the dev server otherwise rejects.
+# pip may print a protobuf dependency-conflict warning while resolving
+# (langgraph-api prefers protobuf>=6, the Gemini SDK pins <6); it is harmless —
+# the resolver settles on protobuf 5.x and both the server and every provider
+# work. --allow-blocking is required because graph nodes do synchronous file
+# reads (e.g. the SQLite database).
 #
 # (requirements.txt pins langgraph==1.1.10 so the resolver can't downgrade it.)
 

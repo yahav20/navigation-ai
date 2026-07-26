@@ -1,166 +1,164 @@
-# Agentic Travel Planner - Atlas AI
+# Atlas AI — Agentic Travel Planner
 
-A smart autonomous travel planning agent built with **Gemini 2.5 Flash** and **LangChain/LangGraph**, developed as part of the Software Engineering Project Workshop (83538-01) at Bar-Ilan University.
+An autonomous multi-agent travel planner built with **LangChain / LangGraph**, developed for the Software Engineering Project Workshop (83538-01) at Bar-Ilan University.
 
-## Overview
-
-This project moves beyond basic Prompt Engineering into full **Agentic AI architecture** — an autonomous system capable of:
-
-- Planning and executing complex travel tasks
-- Searching and retrieving data from external tools
-- Performing self-reflection and self-correction
-- Coordinating multiple specialized sub-agents
+The agent plans complete trips end-to-end: it routes each request to specialized sub-agents (flight search, day-by-day itinerary planning, travel advisor, destination exploration), calls external tools (flights, hotels, attractions, restaurants, live events), and self-corrects with critic/replanner loops.
 
 ## Tech Stack
 
 | Component | Technology |
 |---|---|
-| Language Model | Gemini 2.5 Flash (Google AI Studio) |
-| Orchestration & State | LangChain & LangGraph |
-| Search & Retrieval | Tavily API, SQLite |
-| Language | Python |
+| Language model | OpenAI `gpt-4o-mini` / `gpt-5.4-mini` (default) — Groq, Gemini and Ollama also supported |
+| Orchestration & state | LangChain & LangGraph (multi-node graph with checkpointing) |
+| Data & retrieval | SQLite (`data/travel_agency.db`), Travelpayouts, Google Maps, Xotelo, Wikipedia, Tavily |
+| Web UI | LangGraph dev server + `atlas-web` (Next.js chat UI, vendored from [agent-chat-ui](https://github.com/langchain-ai/agent-chat-ui)) |
+| Language | Python 3.12, TypeScript |
 
-## Setup
+## Quick Start
 
-### 1. Get a Gemini API Key
+### Prerequisites
 
-1. Go to [aistudio.google.com](https://aistudio.google.com)
-2. Sign in with a Gmail account
-3. Click **Get API key** → **Create API key in a new project**
-4. Make sure the quota tier is **Free tier**
+- **Python 3.12**
+- **Node.js 18+** (for the web UI)
+- A `.env` file in the project root (see below)
 
-Free tier limits:
-- **RPM**: 10 requests/minute (sufficient for development)
-- **RPD**: 250 requests/day
-- **Context Window**: up to 250,000 tokens
+### 1. Configure environment variables
 
-### 2. Create a Virtual Environment
+Copy `.env.example` to `.env` in the project root and fill in the keys
+(if you were given a ready `.env` file, just place it in the project root):
 
 ```bash
-
-py -3.12 -m venv .venv
-
+cp .env.example .env
 ```
 
-### 3. Install Dependencies
+| Variable | Required? | Purpose |
+|---|---|---|
+| `MODEL_PROVIDER` | yes | Which LLM to use: `openai` (default), `groq`, `google`, or `ollama` |
+| `OPENAI_API_KEY` | yes (with `openai`) | API key for the chosen provider |
+| `GOOGLE_MAPS_API_KEY` | yes | Attractions, restaurants, geocoding |
+| `TAVILY_API_KEY` | yes | Concert / live-event search |
+| `TRAVELPAYOUTS_API_KEY` | no | Live flight prices — without it, flight search falls back to the bundled SQLite database |
+
+### 2. Install Python dependencies
+
+macOS / Linux:
 
 ```bash
-.venv\Scripts\pip install -r requirements-server.txt
+python3.12 -m venv .venv
+.venv/bin/pip install -r requirements-server.txt
+```
 
+Windows:
+
+```bat
+py -3.12 -m venv .venv
+.venv\Scripts\pip install -r requirements-server.txt
+```
+
+> pip may print a `protobuf` dependency-conflict warning during install — it is
+> harmless (the Gemini SDK pins `protobuf<6`, the LangGraph dev server wants
+> `>=6`; the default OpenAI provider is unaffected).
+
+### 3. Start the backend (LangGraph dev server)
+
+macOS / Linux:
+
+```bash
+.venv/bin/langgraph dev --allow-blocking
+```
+
+Windows:
+
+```bat
 .venv\Scripts\langgraph dev --allow-blocking
 ```
 
-### 4. Configure Environment Variables
+This serves the graph at `http://127.0.0.1:2024`. `--allow-blocking` is required
+because graph nodes read local files (e.g. the SQLite database) synchronously.
 
-Create a `.env` file in the project root (do **not** commit this file):
+### 4. Start the web UI
 
-```
-GOOGLE_API_KEY=""
-GROQ_API_KEY=""
-OPENAI_API_KEY=""
-MODEL_PROVIDER=""
-TRAVELPAYOUTS_API_KEY=""
-GOOGLE_MAPS_API_KEY=""
-TAVILY_API_KEY=""
-```
-
-### 5. Test the Connection
-
-Run `test_connection.py` to verify everything works:
-
-```python
-import os
-from dotenv import load_dotenv
-from langchain_google_genai import ChatGoogleGenerativeAI
-
-load_dotenv()
-
-llm = ChatGoogleGenerativeAI(
-    model="gemini-2.5-flash",
-    temperature=0,
-    max_tokens=None,
-    timeout=None,
-    max_retries=2,
-)
-
-try:
-    print("--- Testing Connection ---")
-    response = llm.invoke("Say 'System Online' if you can hear me.")
-    print(f"Success! Response: {response.content}")
-except Exception as e:
-    print(f"--- Connection Failed ---\nError details: {e}")
-```
-
-## Web UI — `atlas-web`
-
-The graph is exposed as a LangGraph server via `langgraph.json` (graph id `agent`,
-factory `src/agent/core/graph.py:make_graph`). The web frontend lives in **`atlas-web/`** — a
-vendored copy of [agent-chat-ui](https://github.com/langchain-ai/agent-chat-ui) checked
-into this repo and pre-configured (via `atlas-web/.env`) to talk to the local server.
-
-### 1. Start the LangGraph dev server
-
-The dev server needs `langgraph-cli`, whose backend (`langgraph-api`) is best kept in
-**its own virtualenv** — installing it alongside the main app would otherwise force
-`protobuf>=6` and clash with the Gemini SDK (`protobuf<6`).
-
-python -m venv .lgenv
-.lgenv\Scripts\pip install -r requirements-server.txt
-.lgenv\Scripts\langgraph dev --allow-blocking
-
-> pip may print a `protobuf` dependency-conflict warning while resolving — it's harmless
-> here, since this server env is separate from the Gemini CLI env (`tavenv`).
-
-`--allow-blocking` is required because graph nodes read local files (e.g. `data/travel_db.json`)
-synchronously.
-
-### 2. Start the `atlas-web` UI
-
-In a second terminal:
+In a **second terminal**:
 
 ```bash
 cd atlas-web
 npm install
-npm run dev                                        # http://localhost:3000
+npm run dev
 ```
 
-`atlas-web/.env` already points the UI at the server (`NEXT_PUBLIC_API_URL=http://localhost:2024`,
-`NEXT_PUBLIC_ASSISTANT_ID=agent`), so it connects on load — open http://localhost:3000.
+Open **http://localhost:3000** — `atlas-web/.env` (committed, no secrets) already
+points the UI at the local server (`NEXT_PUBLIC_API_URL=http://localhost:2024`,
+assistant id `agent`), so it connects on load. Type a request like
+*"Plan a 4-day trip from Tel Aviv to Rome in October for 2 adults"*.
 
-The CLI (`python src/main.py`) is unchanged and keeps using its own `SqliteSaver`.
+### Alternative: run the CLI (no web UI needed)
 
-> **Security note:** input validation (`validate_input`) runs *inside* the graph via
-> `security_gate`, so it protects the UI path too. But `scan_output` (output secret-scanning)
-> and the per-session turn cap (`MAX_TURNS_PER_SESSION`) live only in the CLI loop
-> (`src/main.py`) and are **not** enforced over the web UI. Move them into the graph (e.g. a
-> post-`summary` scan node) if the UI is exposed beyond local dev.
+macOS / Linux:
+
+```bash
+.venv/bin/python src/main.py
+```
+
+Windows:
+
+```bat
+.venv\Scripts\python src\main.py
+```
+
+An interactive terminal chat with the same agent graph. Sessions are checkpointed
+to `data/checkpoints.db` and can be resumed with `--session <name>`.
+
+## Running Tests
+
+```bash
+.venv/bin/pip install pytest
+.venv/bin/pytest -m unit        # fast: pure Python, no LLM or network calls
+.venv/bin/pytest -m integration # requires a valid LLM API key in .env
+```
 
 ## Project Structure
 
 ```
 navigation-ai/
-├── .env                  # API keys (not committed)
-├── tools.py              # Agent tools (flights, hotels, cost calculation)
-├── travel_db.json        # Local travel database
-├── test_connection.py    # Connection test script
-└── README.md
+├── .env.example          # Template for required API keys (copy to .env)
+├── langgraph.json        # LangGraph server config (graph id: "agent")
+├── requirements.txt      # Core app dependencies
+├── requirements-server.txt  # Core deps + LangGraph dev server
+├── data/
+│   ├── travel_agency.db  # SQLite: cities, flights, hotels, activities + API caches
+│   └── init_db.py        # Script that builds/seeds the database
+├── src/
+│   ├── main.py           # CLI entry point
+│   ├── security.py       # Input validation, output scanning, audit log
+│   ├── config/           # Provider selection (MODEL_PROVIDER) & session naming
+│   ├── agent/
+│   │   ├── core/         # Main graph: security gate → router → sub-agents
+│   │   ├── itinerary/    # Day-by-day planner/executor/critic/replanner loop
+│   │   ├── advisor/      # Travel-advisor sub-agent (plan → execute → replan)
+│   │   ├── explore/      # Destination-exploration graph
+│   │   ├── travel/       # Trip curation agent
+│   │   └── shared/       # Shared nodes and utilities
+│   ├── providers/        # Data access: SQLite DAL + Travelpayouts / Google Maps /
+│   │                     #   Xotelo / Wikipedia APIs with SQLite caching & fallback
+│   └── tools/            # LangChain @tool wrappers (flights, hotels, activities,
+│                         #   concerts, maps, cost calculator, ...)
+├── tests/                # pytest suite (unit + integration markers)
+└── atlas-web/            # Next.js chat UI, pre-configured for the local server
 ```
 
-## Tools (The Toolbox)
+## How It Works
 
-The agent uses three core tools defined in `tools.py` with the `@tool` decorator. Each tool must have a clear English docstring so the LLM knows when and how to use it.
+1. **Security gate** — every message passes `validate_input` (prompt-injection guard) before reaching the graph.
+2. **Router** — an LLM router classifies the request (trip planning, itinerary, advice, exploration, out-of-scope) and dispatches to the matching sub-graph.
+3. **Sub-agents** — e.g. the itinerary pipeline runs *plan → execute → critic → replan* until the schedule passes its checks; multi-destination trips are split into legs and recombined.
+4. **Tools & data** — providers try live APIs first (Travelpayouts, Google Maps, Xotelo), cache results into SQLite, and fall back to the bundled database when an API or key is unavailable.
+5. **Checkpointing** — conversations are checkpointed (SQLite for the CLI, in-memory for the dev server) so multi-turn refinements keep full context.
 
-| Tool | Input | Output |
-|---|---|---|
-| `fetch_flights` | origin city, destination city | List of flights with prices and times (JSON) |
-| `fetch_hotels` | destination city | List of hotels with availability and ratings |
-| `calculate_trip_cost` | flight price, hotel price/night, number of nights | Total cost + 10% service fee |
-
-### Tool Guidelines
-- **Data**: Tools read from `travel_db.json` — make sure the file is properly structured.
-- **Empty results**: Return a clear plain-text message (e.g., `"No available hotels found in Paris for the given criteria"`) rather than an empty list, so the agent can reason about it.
-- **Docstrings**: Must be in English and accurately describe the tool's behavior.
+> **Security note:** input validation runs *inside* the graph (`security_gate`), so it
+> protects the web UI path too. Output secret-scanning and the per-session turn cap live
+> only in the CLI loop (`src/main.py`) and are not enforced over the web UI.
 
 ## Resources
+
 - [LangChain Documentation](https://docs.langchain.com/)
-- Antonio Gullí, *Agentic Design Pattern - A Hands-On Guide to Building Intelligent Systems*, Springer 2025
+- Antonio Gullí, *Agentic Design Patterns — A Hands-On Guide to Building Intelligent Systems*, Springer 2025
