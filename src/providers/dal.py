@@ -11,6 +11,7 @@ import sqlite3
 from typing import Any
 
 from providers.city_metadata import CITY_METADATA
+from providers.google_maps.geocoding_api import geocode_city_country
 from providers.google_maps.places_api import get_place_details, search_nearby_places
 from providers.sqlite.provider import SQLiteDataProvider
 from providers.tripadvisor_lookup import scrape_ta_location_key
@@ -257,6 +258,20 @@ class HybridDAL:
     # ------------------------------------------------------------------
     # Internal city lookup
     # ------------------------------------------------------------------
+
+    def get_city_country(self, city: str) -> str | None:
+        """Return the country for a city, preferring the Geocoding API.
+
+        The local cities table holds many same-named cities (10 are named
+        "Paris") and its name lookup returns whichever has the lowest rowid
+        (Paris → Canada). Google's ranking resolves the name the way a
+        traveller means it, so it wins; the DB is only a fallback for when
+        the API key is missing or the request fails.
+        """
+        country = geocode_city_country(city)
+        if country:
+            return country
+        return self.sqlite.get_city_country(city)
 
     def _get_city_id(self, city_name: str) -> int | None:
         """Resolve city name to DB id, preferring cities that have seeded travel data."""

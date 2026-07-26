@@ -11,6 +11,7 @@ _BASE = "https://maps.googleapis.com/maps/api"
 _TIMEOUT = 15
 
 _geocode_cache: dict[str, tuple[float, float]] = {}
+_country_cache: dict[str, str] = {}
 
 
 def _api_key() -> str | None:
@@ -55,5 +56,47 @@ def geocode_city(city: str) -> tuple[float, float] | None:
     if coords[0] and coords[1]:
         _geocode_cache[key] = coords
         return coords
+
+    return None
+
+
+def geocode_city_country(city: str) -> str | None:
+    """Resolve a city name to its country using the Geocoding API.
+
+    Google's ranking disambiguates duplicate city names (bare "Paris" resolves
+    to Paris, France), unlike the local cities table where rowid order wins.
+    Returns the country's long name (e.g. "France") or None. Results are cached.
+    """
+    if not city:
+        return None
+
+    key = city.strip().lower()
+    if key in _country_cache:
+        return _country_cache[key]
+
+    api_key = _api_key()
+    if not api_key:
+        return None
+
+    try:
+        r = _http_get(
+            f"{_BASE}/geocode/json",
+            params={"address": city, "key": api_key},
+            timeout=_TIMEOUT,
+        )
+        r.raise_for_status()
+        data = r.json() or {}
+    except (requests.RequestException, ValueError):
+        return None
+
+    if not data.get("results"):
+        return None
+
+    for component in data["results"][0].get("address_components", []):
+        if "country" in component.get("types", []):
+            country = component.get("long_name")
+            if country:
+                _country_cache[key] = country
+                return country
 
     return None
