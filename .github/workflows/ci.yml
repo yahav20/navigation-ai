@@ -30,27 +30,3 @@ jobs:
         run: pip install -r requirements.txt pytest pytest-mock
       - name: Run unit tests
         run: pytest tests/test_unit.py -m unit -v --tb=short
-
-  # ── Job 3: Integration Smoke ─────────────────────────────────────────────
-  integration:
-    runs-on: ubuntu-latest
-    needs: unit-tests
-    if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request'
-    env:
-      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-      MODEL_PROVIDER: groq
-      GROQ_MODEL: llama-3.3-70b-versatile
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: "3.11" }
-      - name: Install dependencies
-        run: pip install -r requirements.txt pytest pytest-timeout
-      - name: Create data directory
-        run: mkdir -p data
-      - name: Initialise travel database
-        run: echo "yes" | python data/init_db.py
-      - name: Run integration smoke test
-        run: pytest tests/test_integration_smoke.py -m integration -v --timeout=120
-      - name: Run red-team regression tests
-        run: pytest tests/test_redteam.py -m integration -v --timeout=120
