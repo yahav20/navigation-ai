@@ -2,6 +2,7 @@ import { v4 as uuidv4 } from "uuid";
 import { ReactNode, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
+import { DEFAULT_API_URL } from "@/lib/deployment";
 import { useStreamContext } from "@/providers/Stream";
 import { useState, FormEvent } from "react";
 import { Button } from "../ui/button";
@@ -746,7 +747,7 @@ export function Thread() {
   const [surpriseMeOpen, setSurpriseMeOpen] = useState(false);
   const [cards, setCards] = useState<ExploreCard[]>([]);
   const [fetchStatus, setFetchStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
-  const [apiUrl] = useQueryState("apiUrl", { defaultValue: process.env.NEXT_PUBLIC_API_URL ?? "" });
+  const [apiUrl] = useQueryState("apiUrl", { defaultValue: DEFAULT_API_URL });
   const [authScheme] = useQueryState("authScheme", { defaultValue: process.env.NEXT_PUBLIC_AUTH_SCHEME ?? "" });
 
   const stream = useStreamContext();

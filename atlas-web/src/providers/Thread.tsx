@@ -1,5 +1,6 @@
 import { validate } from "uuid";
 import { getApiKey } from "@/lib/api-key";
+import { DEFAULT_API_URL, DEFAULT_ASSISTANT_ID } from "@/lib/deployment";
 import { Thread } from "@langchain/langgraph-sdk";
 import { useQueryState } from "nuqs";
 import {
@@ -34,9 +35,8 @@ function getThreadSearchMetadata(
 }
 
 export function ThreadProvider({ children }: { children: ReactNode }) {
-  const envApiUrl: string | undefined = process.env.NEXT_PUBLIC_API_URL;
-  const envAssistantId: string | undefined =
-    process.env.NEXT_PUBLIC_ASSISTANT_ID;
+  const envApiUrl: string | undefined = DEFAULT_API_URL;
+  const envAssistantId: string | undefined = DEFAULT_ASSISTANT_ID;
   const envAuthScheme: string | undefined = process.env.NEXT_PUBLIC_AUTH_SCHEME;
 
   const [apiUrl] = useQueryState("apiUrl", {

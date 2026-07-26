@@ -23,6 +23,7 @@ import { Switch } from "@/components/ui/switch";
 import { ArrowRight } from "lucide-react";
 import { PasswordInput } from "@/components/ui/password-input";
 import { getApiKey } from "@/lib/api-key";
+import { DEFAULT_API_URL, DEFAULT_ASSISTANT_ID } from "@/lib/deployment";
 import { useThreads } from "./Thread";
 import { toast } from "sonner";
 
@@ -222,18 +223,14 @@ const StreamSession = ({
   );
 };
 
-// Default values for the form
-const DEFAULT_API_URL = "http://localhost:2024";
-const DEFAULT_ASSISTANT_ID = "agent";
 const AGENT_BUILDER_AUTH_SCHEME = "langsmith-api-key";
 
 export const StreamProvider: React.FC<{ children: ReactNode }> = ({
   children,
 }) => {
-  // Get environment variables
-  const envApiUrl: string | undefined = process.env.NEXT_PUBLIC_API_URL;
-  const envAssistantId: string | undefined =
-    process.env.NEXT_PUBLIC_ASSISTANT_ID;
+  // Env vars with local-dev fallbacks, so the app connects without any .env
+  const envApiUrl: string | undefined = DEFAULT_API_URL;
+  const envAssistantId: string | undefined = DEFAULT_ASSISTANT_ID;
   const envAuthScheme: string | undefined = process.env.NEXT_PUBLIC_AUTH_SCHEME;
 
   // Use URL params with env var fallbacks
