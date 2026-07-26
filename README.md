@@ -16,6 +16,10 @@ The agent plans complete trips end-to-end: it routes each request to specialized
 
 ## Quick Start
 
+> **Fastest path:** [QUICK_INSTALL.md](QUICK_INSTALL.md) — a single script
+> (`quick_install.sh` / `quick_install.ps1`) that installs everything and starts
+> both the backend and the web UI. The steps below are the manual equivalent.
+
 ### Prerequisites
 
 - **Python 3.12**
