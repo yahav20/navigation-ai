@@ -606,7 +606,12 @@ def handle_build_day(
     )
 
     # Retrieve and geocode special events for this calendar day
-    day_events = _enrich_event_coords(_get_day_events(state, day_num, results), destination)
+    day_events = _enrich_event_coords(
+        _get_day_events(state, day_num, results),
+        destination,
+        anchor_lat=cfg.hotel_lat,
+        anchor_lng=cfg.hotel_lng,
+    )
 
     try:
         slots = DayScheduleBuilder(cfg).build(
@@ -1700,27 +1705,42 @@ def _get_day_events(state: dict, day_num: int, results: dict | None = None) -> l
     return matched
 
 
-def _enrich_event_coords(events: list[dict], destination: str) -> list[dict]:
+def _enrich_event_coords(
+    events: list[dict], destination: str, anchor_lat: float = 0, anchor_lng: float = 0
+) -> list[dict]:
     """Attempt to geocode events that have a location_hint but no lat/lng.
 
     Uses the existing _search_activity helper (Google Maps) so the schedule engine
-    can compute realistic transit times. Mutates each event dict in-place and
-    returns the list unchanged (for chaining).
+    can compute realistic transit times. Mutates each event dict in-place.
+    Filters out events that are too far (> 100km) from the anchor point.
     """
+    valid_events = []
     for ev in events:
-        if ev.get("lat") and ev.get("lng"):
-            continue
-        hint = str(ev.get("location_hint") or "").strip()
-        if not hint:
-            continue
-        try:
-            query  = f"{hint} {destination}" if destination.lower() not in hint.lower() else hint
-            result = _search_activity(hint, destination)
-            lat = float(result.get("lat") or result.get("latitude") or 0)
-            lng = float(result.get("lng") or result.get("longitude") or 0)
-            if lat or lng:
-                ev["lat"] = lat
-                ev["lng"] = lng
-        except Exception:  # noqa: BLE001
-            pass
-    return events
+        lat = ev.get("lat")
+        lng = ev.get("lng")
+        if not (lat and lng):
+            hint = str(ev.get("location_hint") or "").strip()
+            if hint:
+                try:
+                    result = _search_activity(hint, destination)
+                    r_lat = float(result.get("lat") or result.get("latitude") or 0)
+                    r_lng = float(result.get("lng") or result.get("longitude") or 0)
+                    if r_lat or r_lng:
+                        ev["lat"] = r_lat
+                        ev["lng"] = r_lng
+                        lat = r_lat
+                        lng = r_lng
+                except Exception:  # noqa: BLE001
+                    pass
+
+        if lat and lng and anchor_lat and anchor_lng:
+            dist = haversine_km(
+                GeoPoint(lat=float(anchor_lat), lng=float(anchor_lng)),
+                GeoPoint(lat=float(lat), lng=float(lng))
+            )
+            if dist > 100:
+                continue  # drop this event as it is geocoded too far away
+
+        valid_events.append(ev)
+
+    return valid_events
