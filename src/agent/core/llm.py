@@ -45,7 +45,10 @@ def get_models(provider: str = "google", mode: str = "travel") -> tuple[Runnable
         raise ValueError(msg)
 
     if provider == "groq":
-        base = ChatGroq(model=os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"), temperature=0)
+        # max_retries=6: the free Groq tier caps tokens-per-minute at 12k, so bursts
+        # of graph nodes hit 429s with a retry-after of a few seconds. The SDK's
+        # default 2 retries gets exhausted before the minute window frees up.
+        base = ChatGroq(model=os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"), temperature=0, max_retries=6)
     elif provider == "ollama":
         base = ChatOllama(model="gpt-oss:120b-cloud", temperature=0)
     elif provider == "openai":

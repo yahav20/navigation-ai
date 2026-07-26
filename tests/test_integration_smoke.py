@@ -131,7 +131,7 @@ def test_router_multiturn_advisor_then_commit_transitions_to_new_travel_plan():
     )
 
     result2 = graph.invoke(
-        {"messages": [HumanMessage(content="Let's go to Tokyo — I'm ready to plan this trip")]},
+        {"messages": [HumanMessage(content="Let's go to Tokyo - I'm ready to plan this trip")]},
         config=config,
     )
     assert result2.get("intent") == "new_travel_plan", (
