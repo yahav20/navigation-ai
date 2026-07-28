@@ -8,7 +8,7 @@
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 
-# ── Prerequisites ────────────────────────────────────────────────────────────
+# -- Prerequisites ------------------------------------------------------------
 if (-not (Test-Path ".env")) {
     Write-Host "ERROR: no .env file found in the project root." -ForegroundColor Red
     Write-Host "Copy .env.example to .env and fill in the API keys, then re-run."
@@ -34,7 +34,7 @@ if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
     exit 1
 }
 
-# ── Install (skipped when already done) ──────────────────────────────────────
+# -- Install (skipped when already done) --------------------------------------
 if (-not (Test-Path ".venv\Scripts\langgraph.exe")) {
     Write-Host ">> Creating virtualenv and installing Python dependencies (takes a few minutes)..."
     & $pyExe @pyArgs -m venv .venv
@@ -50,7 +50,7 @@ if (-not (Test-Path "atlas-web\node_modules")) {
     Pop-Location
 }
 
-# ── Run ──────────────────────────────────────────────────────────────────────
+# -- Run -----------------------------------------------------------------------
 Write-Host ">> Starting backend (LangGraph dev server) on http://127.0.0.1:2024 ..."
 $backend = Start-Process -FilePath "$PSScriptRoot\.venv\Scripts\langgraph.exe" `
     -ArgumentList "dev", "--allow-blocking", "--no-browser" `
@@ -66,7 +66,7 @@ for ($i = 0; $i -lt 60; $i++) {
     }
     catch {
         if ($backend.HasExited) {
-            Write-Host "ERROR: backend exited during startup — see the log output above." -ForegroundColor Red
+            Write-Host "ERROR: backend exited during startup - see the log output above." -ForegroundColor Red
             exit 1
         }
         Start-Sleep -Seconds 2
