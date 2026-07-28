@@ -8,11 +8,9 @@
 #   .venv/bin/langgraph dev --allow-blocking     # serves http://127.0.0.1:2024
 #
 # protobuf is force-pinned to 6.x below: langgraph-api ships gencode built with
-# protobuf 6.31+, which refuses to load on a 5.x runtime. The old Gemini SDK
-# (google-ai-generativelanguage) declares protobuf<6, so pip prints a
-# dependency-conflict warning — it is harmless; a newer runtime accepts older
-# gencode, and every provider works on protobuf 6. --allow-blocking is required
-# because graph nodes do synchronous file reads (e.g. the SQLite database).
+# protobuf 6.31+, which refuses to load on a 5.x runtime. --allow-blocking is
+# required because graph nodes do synchronous file reads (e.g. the SQLite
+# database).
 #
 # (requirements.txt pins langgraph==1.1.10 so the resolver can't downgrade it.)
 
